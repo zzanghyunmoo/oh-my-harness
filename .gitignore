@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+auth.json
+sessions/
+.mcp-auth/
+.env
+.env.*
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

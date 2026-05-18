@@ -1,0 +1,7 @@
+{
+  "packages": [
+    "npm:pi-web-access",
+    "npm:@leing2021/super-pi",
+    "git:github.com/zzanghyunmoo/oh-my-pi"
+  ]
+}
