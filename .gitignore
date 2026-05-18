@@ -12,3 +12,5 @@ sessions/
 Thumbs.db
 .vscode/
 .idea/
+
+.context
