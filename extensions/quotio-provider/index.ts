@@ -8,7 +8,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REQUIRED_ENV_VARS = ["QUOTIO_BASE_URL", "QUOTIO_API_KEY"] as const;
 
 function loadEnvFile(): void {
-  // Look for .env in the package root (two levels up from extensions/quotio-provider/)
   const envPath = resolve(__dirname, "../../.env");
   try {
     const content = readFileSync(envPath, "utf-8");
@@ -36,60 +35,91 @@ function getMissingEnvVars(): string[] {
   );
 }
 
+interface QuotioModel {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+}
+
+async function fetchModels(baseUrl: string, apiKey: string): Promise<QuotioModel[]> {
+  const url = baseUrl.replace(/\/+$/, "") + "/models";
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as { data: QuotioModel[] };
+  return data.data ?? [];
+}
+
+function toProviderModels(models: QuotioModel[]) {
+  return models.map((m) => {
+    const isImage = m.id.includes("claude") || m.id.includes("gpt-4");
+    const isLargeContext = m.id.includes("claude") || m.id.includes("gpt-4");
+    return {
+      id: m.id,
+      name: m.id.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+      reasoning: m.id.includes("agentic") || m.id.includes("opus"),
+      input: isImage ? ["text", "image"] : ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: isLargeContext ? 200000 : 128000,
+      maxTokens: isLargeContext ? 64000 : 16384,
+    };
+  });
+}
+
 export default function (pi: ExtensionAPI) {
-  // --- Session Start: Validate env vars and register provider ---
   pi.on("session_start", async (_event, ctx) => {
     const missing = getMissingEnvVars();
 
     if (missing.length > 0) {
       ctx.ui.notify(
-        `Quotio provider disabled — missing environment variables: ${missing.join(", ")}. Set them and reload.`,
+        `Quotio provider disabled — missing: ${missing.join(", ")}. Set them in .env and reload.`,
         "error",
       );
       return;
     }
 
-    pi.registerProvider("quotio", {
-      name: "Quotio (Anthropic)",
-      baseUrl: "$QUOTIO_BASE_URL",
-      apiKey: "$QUOTIO_API_KEY",
-      api: "anthropic-messages",
-      models: [
-        {
-          id: "claude-sonnet-4-20250514",
-          name: "Claude Sonnet 4 (Quotio)",
-          reasoning: true,
-          input: ["text", "image"],
-          cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-          contextWindow: 200000,
-          maxTokens: 8192,
-        },
-        {
-          id: "claude-opus-4-20250514",
-          name: "Claude Opus 4 (Quotio)",
-          reasoning: true,
-          input: ["text", "image"],
-          cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-          contextWindow: 200000,
-          maxTokens: 32000,
-        },
-      ],
-    });
+    const baseUrl = process.env.QUOTIO_BASE_URL!.trim();
+    const apiKey = process.env.QUOTIO_API_KEY!.trim();
 
-    ctx.ui.notify(
-      "Quotio provider loaded. Models available via quotio proxy.",
-      "info",
-    );
+    try {
+      const models = await fetchModels(baseUrl, apiKey);
+      const providerModels = toProviderModels(models);
+
+      pi.registerProvider("quotio", {
+        name: "Quotio",
+        baseUrl: "$QUOTIO_BASE_URL",
+        apiKey: "$QUOTIO_API_KEY",
+        api: "openai-completions",
+        models: providerModels,
+      });
+
+      ctx.ui.notify(
+        `Quotio provider loaded — ${providerModels.length} models available.`,
+        "info",
+      );
+    } catch (error: any) {
+      ctx.ui.notify(
+        `Quotio provider failed to load: ${error?.message ?? String(error)}`,
+        "error",
+      );
+    }
   });
 
-  // --- /quotio-status: Health check command ---
   pi.registerCommand("quotio-status", {
-    description: "Check quotio proxy connectivity and authentication status",
+    description: "Check quotio proxy connectivity and list available models",
     handler: async (_args, ctx) => {
       const missing = getMissingEnvVars();
       if (missing.length > 0) {
         ctx.ui.notify(
-          `Cannot check status — missing environment variables: ${missing.join(", ")}`,
+          `Cannot check status — missing: ${missing.join(", ")}`,
           "error",
         );
         return;
@@ -97,50 +127,33 @@ export default function (pi: ExtensionAPI) {
 
       const baseUrl = process.env.QUOTIO_BASE_URL!.trim();
       const apiKey = process.env.QUOTIO_API_KEY!.trim();
-
       const startTime = Date.now();
 
-      // Probe the proxy root (strip /v1 suffix if present) to check connectivity
-      const probeUrl = baseUrl.replace(/\/v1\/?$/, "");
-
       try {
-        const response = await fetch(probeUrl, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-          signal: AbortSignal.timeout(10000),
-        });
-
+        const models = await fetchModels(baseUrl, apiKey);
         const elapsed = Date.now() - startTime;
 
-        if (response.status === 401 || response.status === 403) {
-          ctx.ui.notify(
-            `Quotio: Authentication failed (HTTP ${response.status}). Check QUOTIO_API_KEY.`,
-            "error",
-          );
-        } else if (response.ok) {
-          ctx.ui.notify(
-            `Quotio: Connected successfully (HTTP ${response.status}, ${elapsed}ms)`,
-            "info",
-          );
-        } else {
-          ctx.ui.notify(
-            `Quotio: Server responded with HTTP ${response.status} (${elapsed}ms). Proxy may be misconfigured.`,
-            "error",
-          );
-        }
+        const modelList = models.map((m) => `  - ${m.id}`).join("\n");
+        ctx.ui.notify(
+          `Quotio: Connected (${elapsed}ms), ${models.length} models:\n${modelList}`,
+          "info",
+        );
       } catch (error: any) {
         const elapsed = Date.now() - startTime;
 
         if (error?.name === "TimeoutError" || error?.name === "AbortError") {
           ctx.ui.notify(
-            `Quotio: Connection timed out after ${elapsed}ms. Check QUOTIO_BASE_URL and network.`,
+            `Quotio: Timed out after ${elapsed}ms. Check QUOTIO_BASE_URL.`,
+            "error",
+          );
+        } else if (error?.message?.includes("401") || error?.message?.includes("403")) {
+          ctx.ui.notify(
+            `Quotio: Auth failed. Check QUOTIO_API_KEY.`,
             "error",
           );
         } else {
           ctx.ui.notify(
-            `Quotio: Connection failed — ${error?.message ?? String(error)}. Check QUOTIO_BASE_URL.`,
+            `Quotio: Connection failed — ${error?.message ?? String(error)}`,
             "error",
           );
         }
