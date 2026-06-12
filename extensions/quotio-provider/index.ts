@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +16,11 @@ function loadEnvFile(): void {
       const eqIndex = trimmed.indexOf("=");
       if (eqIndex === -1) continue;
       const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed.slice(eqIndex + 1).trim();
+      let value = trimmed.slice(eqIndex + 1).trim();
+      // Strip surrounding quotes (single or double)
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
       if (!process.env[key]) {
         process.env[key] = value;
       }
@@ -60,13 +63,13 @@ async function fetchModels(baseUrl: string, apiKey: string): Promise<QuotioModel
 
 function toProviderModels(models: QuotioModel[]) {
   return models.map((m) => {
-    const isImage = m.id.includes("claude") || m.id.includes("gpt-4");
-    const isLargeContext = m.id.includes("claude") || m.id.includes("gpt-4");
+    const isVisionCapable = m.id.includes("claude") || m.id.includes("gpt-4o");
+    const isLargeContext = m.id.includes("claude");
     return {
       id: m.id,
       name: m.id.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
       reasoning: m.id.includes("agentic") || m.id.includes("opus"),
-      input: isImage ? ["text", "image"] : ["text"],
+      input: isVisionCapable ? ["text", "image"] : ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: isLargeContext ? 200000 : 128000,
       maxTokens: isLargeContext ? 64000 : 16384,

@@ -1,7 +1,7 @@
 {
   "name": "quotio-provider",
   "version": "1.0.0",
-  "description": "Quotio proxy provider for Pi coding agent (Anthropic Messages API)",
+  "description": "Quotio LiteLLM proxy provider for Pi coding agent (OpenAI-compatible)",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -10,9 +10,6 @@
   "author": "",
   "license": "ISC",
   "type": "module",
-  "dependencies": {
-    "typebox": "^1.1.38"
-  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.75.3",
     "@types/node": "^25.8.0",

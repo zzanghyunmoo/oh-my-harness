@@ -17,15 +17,15 @@ pi install git:git@github.com:zzanghyunmoo/oh-my-pi
 ## Contains
 
 - `extensions/workspace-connectors`: Linear/Notion MCP connector tools and login commands
-- `extensions/quotio-provider`: Quotio proxy provider (Anthropic Messages API)
+- `extensions/quotio-provider`: Quotio LiteLLM proxy provider (OpenAI-compatible, dynamic model discovery)
 
 ## Quotio Provider Setup
 
-Set the following environment variables:
+Set the following environment variables (or add to `.env` in the package root):
 
 ```bash
-export QUOTIO_BASE_URL="https://your-quotio-proxy/anthropic/v1"
-export QUOTIO_API_KEY="your-api-key"
+QUOTIO_BASE_URL=http://127.0.0.1:8317/v1
+QUOTIO_API_KEY=your-quotio-api-key
 ```
 
 Commands:
