@@ -13,7 +13,8 @@ oh-my-pi/
 ├── docs/
 │   ├── brainstorms/            # ce-brainstorm 결과물
 │   ├── plans/                  # ce-plan 결과물
-│   └── ideation/               # ce-ideate 결과물
+│   ├── ideation/               # ce-ideate 결과물
+│   └── solutions/              # 문서화된 패턴/컨벤션 (category별, YAML frontmatter로 검색 가능)
 ├── package.json                # Pi 패키지 설정
 └── README.md
 ```
