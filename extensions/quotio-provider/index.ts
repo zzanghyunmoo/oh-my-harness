@@ -100,14 +100,14 @@ export default function (pi: ExtensionAPI) {
 
       const startTime = Date.now();
 
-      const probeUrl = baseUrl.replace(/\/+$/, "") + "/models";
+      // Probe the proxy root (strip /v1 suffix if present) to check connectivity
+      const probeUrl = baseUrl.replace(/\/v1\/?$/, "");
 
       try {
         const response = await fetch(probeUrl, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
           },
           signal: AbortSignal.timeout(10000),
         });
