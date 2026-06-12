@@ -98,8 +98,8 @@ export default function (pi: ExtensionAPI) {
 
       pi.registerProvider("quotio", {
         name: "Quotio",
-        baseUrl: "$QUOTIO_BASE_URL",
-        apiKey: "$QUOTIO_API_KEY",
+        baseUrl: baseUrl,
+        apiKey: apiKey,
         api: "openai-completions",
         models: providerModels,
       });
