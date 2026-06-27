@@ -22,6 +22,9 @@ pi install git:git@github.com:zzanghyunmoo/oh-my-pi
 
 ## Setup
 
+See `docs/blueprints/secret-references.md` for the versioned, secret-free blueprint
+that separates committed intent from local-only values.
+
 에이전트가 실행되는 디렉토리(CWD)에 `.env` 파일을 생성하여 익스텐션을 설정합니다:
 
 ```bash
@@ -29,9 +32,9 @@ pi install git:git@github.com:zzanghyunmoo/oh-my-pi
 ENABLE_QUOTIO=true
 ENABLE_WORKSPACE_CONNECTORS=true
 
-# Quotio Provider 설정
-QUOTIO_BASE_URL=http://127.0.0.1:8317/v1
-QUOTIO_API_KEY=your-quotio-api-key
+# Quotio Provider 설정 (로컬 값은 커밋하지 않음)
+QUOTIO_BASE_URL=<local-quotio-openai-compatible-base-url>
+QUOTIO_API_KEY=<local-quotio-api-key>
 ```
 
 - 토글 변수가 없거나 `true`가 아니면 해당 익스텐션은 비활성화됩니다.
