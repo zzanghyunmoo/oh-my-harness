@@ -2,7 +2,7 @@
 date: 2026-06-27
 topic: provider-adapter-kit-capability-contract
 artifact_type: implementation-plan
-status: active
+status: implemented
 ---
 
 # Provider Adapter Kit + Capability Contract 구현 계획

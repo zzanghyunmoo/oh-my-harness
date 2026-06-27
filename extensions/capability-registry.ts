@@ -94,6 +94,20 @@ export const capabilityRegistry: readonly CapabilityCapsule[] = [
       "The GitHub CLI bridge refuses known mutating gh subcommands from tool execution.",
     ],
   },
+  {
+    id: "setup-doctor",
+    name: "Setup Doctor and Command Palette",
+    extensionPath: "./extensions/setup-doctor",
+    envVars: [],
+    exposes: {
+      commands: ["oh-my-pi-doctor", "oh-my-pi"],
+    },
+    safetyClass: "local-configuration",
+    diagnostics: [
+      "Summarizes CWD .env, capability toggles, connector/provider metadata, runtime safety policies, gh auth, and local-only paths.",
+      "Provides a lightweight /oh-my-pi command palette for setup and profile verification commands.",
+    ],
+  },
 ];
 
 export function getCapabilityCapsules(): readonly CapabilityCapsule[] {

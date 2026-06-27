@@ -57,8 +57,11 @@ QUOTIO_API_KEY=<local-quotio-api-key>
 
 ## Commands
 
+- `/oh-my-pi` — Show the oh-my-pi command palette and setup help
+- `/oh-my-pi-doctor` — Check local env, capability registry, connector/provider metadata, safety policies, gh auth, and local-only paths
 - `/quotio-status` — Check proxy connectivity and authentication
 - `/connector-login linear|notion` — OAuth login for workspace connectors
+- `/connector-tools linear|notion` — List connector tools after login
 
 ## Do not commit
 
