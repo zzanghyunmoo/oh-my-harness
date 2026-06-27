@@ -19,11 +19,25 @@ pi install git:git@github.com:zzanghyunmoo/oh-my-pi
 - `extensions/env-loader`: CWD `.env` 로더 (다른 익스텐션보다 먼저 환경변수 로딩)
 - `extensions/workspace-connectors`: Linear/Notion MCP connector tools and login commands
 - `extensions/quotio-provider`: Quotio LiteLLM proxy provider (OpenAI-compatible, dynamic model discovery)
+- `extensions/setup-doctor`: read-only setup doctor and command palette
+- `docs/profiles`: commit-safe profile pack and deterministic profile lock receipt
 
 ## Setup
 
 See `docs/blueprints/secret-references.md` for the versioned, secret-free blueprint
 that separates committed intent from local-only values.
+
+Profiles are described in `docs/profiles/*.profile.json`. Verify the committed
+profile lock before recreating a machine:
+
+```bash
+npm run profile:verify
+npm run profile:apply -- --profile full   # dry-run only; prints install/.env/login intent
+```
+
+`profile:apply` does not run `pi install`, write `.env`, or start OAuth by default.
+Use its output as a safe checklist for `default`, `workspace`, `proxy-provider`, or
+`full` profile setup.
 
 에이전트가 실행되는 디렉토리(CWD)에 `.env` 파일을 생성하여 익스텐션을 설정합니다:
 
