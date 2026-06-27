@@ -21,7 +21,8 @@
     "extensions": [
       "./extensions/env-loader",
       "./extensions/quotio-provider",
-      "./extensions/workspace-connectors"
+      "./extensions/workspace-connectors",
+      "./extensions/setup-doctor"
     ],
     "prompts": ["./prompts"],
     "themes": ["./themes"]
