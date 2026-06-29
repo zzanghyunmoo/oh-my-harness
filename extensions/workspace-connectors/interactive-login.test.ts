@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
-import {
+import workspaceConnectorsExtension, {
   formatInteractiveLoginResultNotification,
   runInteractiveLogin,
   type InteractiveLoginResult,
 } from "./index.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { routeWorkspaceMcpConnector } from "../connector-backend-catalog.js";
 
 class FakeChild extends EventEmitter {}
@@ -69,6 +70,17 @@ test("runInteractiveLogin restores TUI after a non-zero exit", async () => {
   assert.deepEqual(calls, ["stop", "start", "render:true"]);
 });
 
+test("runInteractiveLogin restores TUI after signal termination", async () => {
+  const { ctx, calls } = makeContext();
+  const child = new FakeChild();
+  const resultPromise = runInteractiveLogin("npx", ["-y"], ctx, () => child);
+
+  child.emit("exit", null, "SIGTERM");
+
+  assert.deepEqual(await resultPromise, { status: "completed", code: null, signal: "SIGTERM" } satisfies InteractiveLoginResult);
+  assert.deepEqual(calls, ["stop", "start", "render:true"]);
+});
+
 test("runInteractiveLogin restores TUI and returns spawn errors instead of throwing", async () => {
   const { ctx, calls } = makeContext();
   const child = new FakeChild();
@@ -109,6 +121,55 @@ test("fallback formatting is catalog-derived for Linear and Notion", () => {
   assert.match(linearNotification.message, /https:\/\/mcp\.linear\.app\/mcp/);
   assert.match(notionNotification.message, /mcp-remote-client/);
   assert.match(notionNotification.message, /https:\/\/mcp\.notion\.com\/mcp/);
+});
+
+test("signal-based login notification points to fallback guidance", () => {
+  const route = routeWorkspaceMcpConnector("linear");
+  const notification = formatInteractiveLoginResultNotification(route, { status: "completed", code: null, signal: "SIGTERM" });
+
+  assert.equal(notification.level, "error");
+  assert.match(notification.message, /signal SIGTERM/);
+  assert.match(notification.message, /External shell fallback/);
+});
+
+test("connector-login invalid service preserves usage output without invoking custom TUI handoff", async () => {
+  const previousToggle = process.env.ENABLE_WORKSPACE_CONNECTORS;
+  process.env.ENABLE_WORKSPACE_CONNECTORS = "true";
+  let customCalled = false;
+  const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> | void }>();
+  const pi = {
+    on: () => undefined,
+    registerCommand: (name: string, options: unknown) => {
+      commands.set(name, options as { handler: (args: string, ctx: unknown) => Promise<void> | void });
+    },
+    registerTool: () => undefined,
+  } as unknown as ExtensionAPI;
+  const notifications: Array<{ message: string; level: string | undefined }> = [];
+
+  try {
+    workspaceConnectorsExtension(pi);
+    const command = commands.get("connector-login");
+    assert.ok(command);
+    await command.handler("jira", {
+      hasUI: true,
+      ui: {
+        notify: (message: string, level?: string) => notifications.push({ message, level }),
+        custom: <T>() => {
+          customCalled = true;
+          return Promise.resolve(undefined as T);
+        },
+      },
+    });
+  } finally {
+    if (previousToggle === undefined) {
+      delete process.env.ENABLE_WORKSPACE_CONNECTORS;
+    } else {
+      process.env.ENABLE_WORKSPACE_CONNECTORS = previousToggle;
+    }
+  }
+
+  assert.equal(customCalled, false);
+  assert.deepEqual(notifications, [{ message: "Usage: /connector-login linear|notion", level: "error" }]);
 });
 
 test("successful login notification points to status guidance without fallback failure wording", () => {
