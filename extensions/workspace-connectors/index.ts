@@ -70,10 +70,16 @@ interface InteractiveLoginChildProcess {
   on(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
 }
 
+type InteractiveLoginSpawnOptions = {
+  readonly stdio: "inherit";
+  readonly shell: boolean;
+  readonly env: NodeJS.ProcessEnv;
+};
+
 type InteractiveLoginSpawn = (
   command: string,
   args: string[],
-  options: { stdio: "inherit"; shell: boolean },
+  options: InteractiveLoginSpawnOptions,
 ) => InteractiveLoginChildProcess;
 
 interface WorkspaceMcpListToolsParams {
@@ -92,6 +98,51 @@ interface GitHubGhCliParams {
   readonly args: string[];
 }
 
+const NODE_USE_SYSTEM_CA_OPTION = "--use-system-ca";
+const MCP_REMOTE_ENV_KEYS_TO_INHERIT = [
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "https_proxy",
+  "http_proxy",
+  "all_proxy",
+  "no_proxy",
+] as const;
+
+function appendNodeOption(existingOptions: string | undefined, option: string): string {
+  if (!existingOptions || existingOptions.trim() === "") return option;
+  if (existingOptions.split(/\s+/).includes(option)) return existingOptions;
+  return `${existingOptions} ${option}`;
+}
+
+export function buildMcpRemoteEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of MCP_REMOTE_ENV_KEYS_TO_INHERIT) {
+    const value = baseEnv[key];
+    if (value !== undefined && value !== "") {
+      env[key] = value;
+    }
+  }
+
+  if (baseEnv.NODE_OPTIONS !== undefined && baseEnv.NODE_OPTIONS !== "") {
+    env.NODE_OPTIONS = baseEnv.NODE_OPTIONS;
+  }
+
+  if (process.allowedNodeEnvironmentFlags.has(NODE_USE_SYSTEM_CA_OPTION)) {
+    env.NODE_OPTIONS = appendNodeOption(env.NODE_OPTIONS, NODE_USE_SYSTEM_CA_OPTION);
+  }
+
+  return env;
+}
+
+function buildInteractiveLoginEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, ...buildMcpRemoteEnvironment() };
+}
+
 function parseService(args: string): ServiceName | null {
   return parseWorkspaceMcpServiceArgument(args);
 }
@@ -102,6 +153,7 @@ async function withMcpClient<T>(service: ServiceName, fn: (client: Client) => Pr
   const transport = new StdioClientTransport({
     command: "npx",
     args: [...route.mcpRemoteArgs],
+    env: buildMcpRemoteEnvironment(),
     stderr: "pipe",
   });
 
@@ -202,7 +254,11 @@ export function runInteractiveLogin(
     try {
       tui.stop();
       tuiStopped = true;
-      const child = spawnImpl(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+      const child = spawnImpl(command, args, {
+        stdio: "inherit",
+        shell: process.platform === "win32",
+        env: buildInteractiveLoginEnvironment(),
+      });
       child.on("error", (error) => finish({ status: "spawn-error", error: formatError(error) }));
       child.on("exit", (code, signal) => finish({ status: "completed", code, signal: signal ?? null }));
     } catch (error: unknown) {
