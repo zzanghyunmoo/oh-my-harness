@@ -173,11 +173,26 @@ export function formatWorkspaceMcpUsage(commandName: string): string {
   return `${commandName} ${formatWorkspaceMcpServiceList()}`;
 }
 
+const SHELL_SAFE_TOKEN = /^[A-Za-z0-9_/:@%+=.,-]+$/;
+
+function shellQuote(value: string): string {
+  if (value === "") return "''";
+  if (SHELL_SAFE_TOKEN.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function formatShellCommand(command: string, args: readonly string[]): string {
+  return [command, ...args].map(shellQuote).join(" ");
+}
+
 export function routeWorkspaceMcpConnector(service: WorkspaceMcpServiceName) {
   const backend = getConnectorBackend(service);
   if (backend.backendKind !== "oauth-mcp") {
     throw new Error(`${backend.label} is not an OAuth MCP connector.`);
   }
+
+  const mcpRemoteArgs = ["-y", backend.mcp.remotePackage, backend.mcp.url, "--transport", backend.mcp.transportStrategy] as const;
+  const loginArgs = ["-y", "-p", backend.mcp.remotePackage, backend.mcp.clientCommand, backend.mcp.url] as const;
 
   return {
     service: backend.id,
@@ -187,8 +202,9 @@ export function routeWorkspaceMcpConnector(service: WorkspaceMcpServiceName) {
     statusGuidance: backend.statusGuidance,
     fallbackMessage: backend.fallbackMessage,
     mcpUrl: backend.mcp.url,
-    mcpRemoteArgs: ["-y", backend.mcp.remotePackage, backend.mcp.url, "--transport", backend.mcp.transportStrategy] as const,
-    loginArgs: ["-y", "-p", backend.mcp.remotePackage, backend.mcp.clientCommand, backend.mcp.url] as const,
+    mcpRemoteArgs,
+    loginArgs,
+    loginShellCommand: formatShellCommand("npx", loginArgs),
   };
 }
 

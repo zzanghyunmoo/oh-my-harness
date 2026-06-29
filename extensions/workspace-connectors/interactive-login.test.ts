@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { EventEmitter } from "node:events";
+import {
+  formatInteractiveLoginResultNotification,
+  runInteractiveLogin,
+  type InteractiveLoginResult,
+} from "./index.js";
+import { routeWorkspaceMcpConnector } from "../connector-backend-catalog.js";
+
+class FakeChild extends EventEmitter {}
+
+function makeContext(hasUI = true) {
+  const calls: string[] = [];
+
+  return {
+    calls,
+    ctx: {
+      hasUI,
+      ui: {
+        notify: () => undefined,
+        custom: <T>(factory: (
+          tui: { stop(): void; start(): void; requestRender(force?: boolean): void },
+          theme: unknown,
+          keybindings: unknown,
+          done: (result: T) => void,
+        ) => { render(): string[]; invalidate(): void }) => new Promise<T>((resolve) => {
+          const component = factory(
+            {
+              stop: () => calls.push("stop"),
+              start: () => calls.push("start"),
+              requestRender: (force?: boolean) => calls.push(`render:${String(force)}`),
+            },
+            {},
+            {},
+            resolve,
+          );
+          assert.deepEqual(component.render(), []);
+          component.invalidate();
+        }),
+      },
+    },
+  };
+}
+
+test("runInteractiveLogin stops TUI before spawn and restores it after successful exit", async () => {
+  const { ctx, calls } = makeContext();
+  const child = new FakeChild();
+  const resultPromise = runInteractiveLogin("npx", ["-y"], ctx, (command, args) => {
+    calls.push(`spawn:${command}:${args.join(" ")}`);
+    return child;
+  });
+
+  assert.deepEqual(calls, ["stop", "spawn:npx:-y"]);
+  child.emit("exit", 0, null);
+
+  assert.deepEqual(await resultPromise, { status: "completed", code: 0, signal: null } satisfies InteractiveLoginResult);
+  assert.deepEqual(calls, ["stop", "spawn:npx:-y", "start", "render:true"]);
+});
+
+test("runInteractiveLogin restores TUI after a non-zero exit", async () => {
+  const { ctx, calls } = makeContext();
+  const child = new FakeChild();
+  const resultPromise = runInteractiveLogin("npx", ["-y"], ctx, () => child);
+
+  child.emit("exit", 1, null);
+
+  assert.deepEqual(await resultPromise, { status: "completed", code: 1, signal: null } satisfies InteractiveLoginResult);
+  assert.deepEqual(calls, ["stop", "start", "render:true"]);
+});
+
+test("runInteractiveLogin restores TUI and returns spawn errors instead of throwing", async () => {
+  const { ctx, calls } = makeContext();
+  const child = new FakeChild();
+  const resultPromise = runInteractiveLogin("npx", ["-y"], ctx, () => child);
+  const error = Object.assign(new Error("spawn npx ENOENT"), { code: "ENOENT" });
+
+  child.emit("error", error);
+
+  assert.deepEqual(await resultPromise, {
+    status: "spawn-error",
+    error: "ENOENT: spawn npx ENOENT",
+  } satisfies InteractiveLoginResult);
+  assert.deepEqual(calls, ["stop", "start", "render:true"]);
+});
+
+test("runInteractiveLogin does not spawn without an interactive UI", async () => {
+  const { ctx } = makeContext(false);
+  let spawned = false;
+
+  const result = await runInteractiveLogin("npx", ["-y"], ctx, () => {
+    spawned = true;
+    return new FakeChild();
+  });
+
+  assert.equal(spawned, false);
+  assert.deepEqual(result, { status: "unsupported" } satisfies InteractiveLoginResult);
+});
+
+test("fallback formatting is catalog-derived for Linear and Notion", () => {
+  const linear = routeWorkspaceMcpConnector("linear");
+  const notion = routeWorkspaceMcpConnector("notion");
+
+  const linearNotification = formatInteractiveLoginResultNotification(linear, { status: "completed", code: 1, signal: null });
+  const notionNotification = formatInteractiveLoginResultNotification(notion, { status: "unsupported" });
+
+  assert.equal(linearNotification.level, "error");
+  assert.match(linearNotification.message, /mcp-remote-client/);
+  assert.match(linearNotification.message, /https:\/\/mcp\.linear\.app\/mcp/);
+  assert.match(notionNotification.message, /mcp-remote-client/);
+  assert.match(notionNotification.message, /https:\/\/mcp\.notion\.com\/mcp/);
+});
+
+test("successful login notification points to status guidance without fallback failure wording", () => {
+  const route = routeWorkspaceMcpConnector("linear");
+  const notification = formatInteractiveLoginResultNotification(route, { status: "completed", code: 0, signal: null });
+
+  assert.equal(notification.level, "info");
+  assert.match(notification.message, /Run \/connector-tools linear/);
+  assert.doesNotMatch(notification.message, /External shell fallback/);
+});

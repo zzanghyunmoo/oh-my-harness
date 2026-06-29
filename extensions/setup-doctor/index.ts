@@ -11,6 +11,7 @@ import {
 import {
   connectorBackendCatalog,
   routeProviderConnector,
+  routeWorkspaceMcpConnector,
   type ConnectorBackend,
 } from "../connector-backend-catalog.js";
 import {
@@ -25,6 +26,8 @@ import {
 const COMMAND_TIMEOUT_MS = 3000;
 const QUOTIO_TIMEOUT_MS = 5000;
 const QUOTIO_PROVIDER_ROUTE = routeProviderConnector("quotio");
+const LINEAR_CONNECTOR_ROUTE = routeWorkspaceMcpConnector("linear");
+const NOTION_CONNECTOR_ROUTE = routeWorkspaceMcpConnector("notion");
 
 type Status = "ok" | "warn" | "error" | "info";
 type NotifyLevel = "info" | "error";
@@ -275,8 +278,9 @@ function buildPaletteReport(): string {
     "- /oh-my-pi-doctor — run read-only setup diagnostics for local env, capability registry, connector catalog, provider checks, gh auth, safety policies, and local-only paths.",
     "- /oh-my-pi — show this lightweight command palette.",
     "- /quotio-status — check Quotio models when ENABLE_QUOTIO=true and Quotio env is configured.",
-    "- /connector-login linear|notion — start workspace connector OAuth when ENABLE_WORKSPACE_CONNECTORS=true.",
+    "- /connector-login linear|notion — start workspace connector OAuth when ENABLE_WORKSPACE_CONNECTORS=true; Pi temporarily hands the terminal to the OAuth CLI.",
     "- /connector-tools linear|notion — list connector tools after login.",
+    `- Connector login fallback — from a normal shell run \`${LINEAR_CONNECTOR_ROUTE.loginShellCommand}\` or \`${NOTION_CONNECTOR_ROUTE.loginShellCommand}\`, then restart Pi and run /connector-tools.`,
     "- npm run profile:verify — verify commit-safe profile pack and deterministic lock receipt.",
     "- npm run profile:apply -- --profile full — print a non-destructive profile setup plan.",
     "",

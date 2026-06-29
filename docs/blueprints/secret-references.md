@@ -40,7 +40,14 @@ Linear and Notion connector authentication is per-machine. The committed bluepri
 /connector-login notion
 ```
 
-The OAuth/session state created by those flows is local-only. Depending on the runtime and `mcp-remote` behavior, state may be stored in local auth/cache locations such as `.mcp-auth/`, `.pi/`, or home-directory auth stores. Recreate it by running the login command on each machine instead of copying state between machines.
+Those commands temporarily hand the Pi TUI terminal to the OAuth CLI. If the embedded TUI handoff is unavailable, cancelled, or leaves the terminal needing recovery, run the equivalent fallback from a normal shell and then restart/reload Pi:
+
+```bash
+npx -y -p mcp-remote@latest mcp-remote-client https://mcp.linear.app/mcp
+npx -y -p mcp-remote@latest mcp-remote-client https://mcp.notion.com/mcp
+```
+
+The OAuth/session state created by those flows is local-only. Depending on the runtime and `mcp-remote` behavior, state may be stored in local auth/cache locations such as `.mcp-auth/`, `.pi/`, or home-directory auth stores. Recreate it by running the login command or normal-shell fallback on each machine instead of copying state between machines.
 
 ## Package/profile intent
 
