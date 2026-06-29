@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 import workspaceConnectorsExtension, {
+  buildMcpRemoteEnvironment,
   formatInteractiveLoginResultNotification,
   runInteractiveLogin,
   type InteractiveLoginResult,
@@ -10,6 +11,26 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { routeWorkspaceMcpConnector } from "../connector-backend-catalog.js";
 
 class FakeChild extends EventEmitter {}
+
+test("buildMcpRemoteEnvironment appends system CA trust and preserves TLS/proxy overrides", () => {
+  const env = buildMcpRemoteEnvironment({
+    NODE_OPTIONS: "--max-old-space-size=4096",
+    NODE_EXTRA_CA_CERTS: "/tmp/custom-ca.pem",
+    HTTPS_PROXY: "http://proxy.example.test:8080",
+    NO_PROXY: "localhost,127.0.0.1",
+  });
+
+  assert.equal(env.NODE_OPTIONS, "--max-old-space-size=4096 --use-system-ca");
+  assert.equal(env.NODE_EXTRA_CA_CERTS, "/tmp/custom-ca.pem");
+  assert.equal(env.HTTPS_PROXY, "http://proxy.example.test:8080");
+  assert.equal(env.NO_PROXY, "localhost,127.0.0.1");
+});
+
+test("buildMcpRemoteEnvironment does not duplicate the system CA Node option", () => {
+  const env = buildMcpRemoteEnvironment({ NODE_OPTIONS: "--use-system-ca" });
+
+  assert.equal(env.NODE_OPTIONS, "--use-system-ca");
+});
 
 function makeContext(hasUI = true) {
   const calls: string[] = [];
@@ -57,6 +78,21 @@ test("runInteractiveLogin stops TUI before spawn and restores it after successfu
 
   assert.deepEqual(await resultPromise, { status: "completed", code: 0, signal: null } satisfies InteractiveLoginResult);
   assert.deepEqual(calls, ["stop", "spawn:npx:-y", "start", "render:true"]);
+});
+
+test("runInteractiveLogin enables system CA trust for the Node-based MCP remote login process", async () => {
+  const { ctx } = makeContext();
+  const child = new FakeChild();
+  let spawnEnv: NodeJS.ProcessEnv | undefined;
+  const resultPromise = runInteractiveLogin("npx", ["-y"], ctx, (_command, _args, options) => {
+    spawnEnv = (options as { env?: NodeJS.ProcessEnv }).env;
+    return child;
+  });
+
+  child.emit("exit", 0, null);
+
+  assert.equal((await resultPromise).status, "completed");
+  assert.match(spawnEnv?.NODE_OPTIONS ?? "", /--use-system-ca/);
 });
 
 test("runInteractiveLogin restores TUI after a non-zero exit", async () => {
