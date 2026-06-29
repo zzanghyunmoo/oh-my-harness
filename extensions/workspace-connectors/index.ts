@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -28,6 +28,53 @@ interface NotificationContext {
     notify(message: string, level: NotifyLevel): void | Promise<void>;
   };
 }
+
+interface TerminalHandoffTui {
+  stop(): void;
+  start(): void;
+  requestRender(force?: boolean): void;
+}
+
+interface TerminalHandoffComponent {
+  render(): string[];
+  invalidate(): void;
+  dispose?(): void;
+}
+
+interface TerminalHandoffContext extends NotificationContext {
+  readonly hasUI?: boolean;
+  readonly ui: NotificationContext["ui"] & {
+    custom?<T>(
+      factory: (
+        tui: TerminalHandoffTui,
+        theme: unknown,
+        keybindings: unknown,
+        done: (result: T) => void,
+      ) => TerminalHandoffComponent | Promise<TerminalHandoffComponent>,
+    ): Promise<T>;
+  };
+}
+
+type InteractiveLoginResultBase = {
+  readonly restoreError?: string;
+};
+
+export type InteractiveLoginResult = InteractiveLoginResultBase & (
+  | { readonly status: "unsupported" }
+  | { readonly status: "completed"; readonly code: number | null; readonly signal: NodeJS.Signals | null }
+  | { readonly status: "spawn-error"; readonly error: string }
+);
+
+interface InteractiveLoginChildProcess {
+  on(event: "error", listener: (error: Error) => void): this;
+  on(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+}
+
+type InteractiveLoginSpawn = (
+  command: string,
+  args: string[],
+  options: { stdio: "inherit"; shell: boolean },
+) => InteractiveLoginChildProcess;
 
 interface WorkspaceMcpListToolsParams {
   readonly service: ServiceName;
@@ -91,12 +138,124 @@ function stringifyMcpContent(result: any): string {
   return parts.join("\n\n") || JSON.stringify(result, null, 2);
 }
 
-function runInteractive(command: string, args: string[]): Promise<{ code: number | null }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32" });
-    child.on("error", reject);
-    child.on("exit", (code) => resolve({ code }));
-  });
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    const errno = error as NodeJS.ErrnoException;
+    return errno.code ? `${errno.code}: ${error.message}` : error.message;
+  }
+  return String(error);
+}
+
+function emptyHandoffComponent(): TerminalHandoffComponent {
+  return { render: () => [], invalidate: () => undefined };
+}
+
+type UsableTerminalHandoffContext = TerminalHandoffContext & {
+  readonly hasUI: true;
+  readonly ui: NotificationContext["ui"] & {
+    custom<T>(
+      factory: (
+        tui: TerminalHandoffTui,
+        theme: unknown,
+        keybindings: unknown,
+        done: (result: T) => void,
+      ) => TerminalHandoffComponent | Promise<TerminalHandoffComponent>,
+    ): Promise<T>;
+  };
+};
+
+function canUseTerminalHandoff(ctx: TerminalHandoffContext): ctx is UsableTerminalHandoffContext {
+  return ctx.hasUI === true && typeof ctx.ui.custom === "function";
+}
+
+export function runInteractiveLogin(
+  command: string,
+  args: string[],
+  ctx: TerminalHandoffContext,
+  spawnImpl: InteractiveLoginSpawn = spawn as InteractiveLoginSpawn,
+): Promise<InteractiveLoginResult> {
+  if (!canUseTerminalHandoff(ctx)) {
+    return Promise.resolve({ status: "unsupported" });
+  }
+
+  return ctx.ui.custom<InteractiveLoginResult>((tui, _theme, _keybindings, done) => {
+    let settled = false;
+    let tuiStopped = false;
+
+    const finish = (result: InteractiveLoginResult) => {
+      if (settled) return;
+      settled = true;
+
+      let restoreError: string | undefined;
+      if (tuiStopped) {
+        try {
+          tui.start();
+          tui.requestRender(true);
+        } catch (error: unknown) {
+          restoreError = formatError(error);
+        }
+      }
+
+      done(restoreError ? { ...result, restoreError } : result);
+    };
+
+    try {
+      tui.stop();
+      tuiStopped = true;
+      const child = spawnImpl(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+      child.on("error", (error) => finish({ status: "spawn-error", error: formatError(error) }));
+      child.on("exit", (code, signal) => finish({ status: "completed", code, signal: signal ?? null }));
+    } catch (error: unknown) {
+      finish({ status: "spawn-error", error: formatError(error) });
+    }
+
+    return emptyHandoffComponent();
+  }).catch((error: unknown) => ({ status: "spawn-error", error: formatError(error) }));
+}
+
+function describeExitResult(result: Extract<InteractiveLoginResult, { status: "completed" }>): string {
+  if (result.signal) return `signal ${result.signal}`;
+  if (result.code !== null) return `code ${result.code}`;
+  return "no exit code";
+}
+
+type WorkspaceMcpRoute = ReturnType<typeof routeWorkspaceMcpConnector>;
+
+export function formatLoginFallbackMessage(route: WorkspaceMcpRoute): string {
+  return `${route.fallbackMessage} External shell fallback: ${route.loginShellCommand}. After it completes, restart Pi or run ${route.statusGuidance}`;
+}
+
+export function formatInteractiveLoginResultNotification(
+  route: WorkspaceMcpRoute,
+  result: InteractiveLoginResult,
+): { level: NotifyLevel; message: string } {
+  const restoreNote = result.restoreError ? ` TUI restore reported: ${result.restoreError}.` : "";
+
+  if (result.status === "unsupported") {
+    return {
+      level: "error",
+      message: `${route.label} OAuth login requires an interactive Pi TUI terminal handoff. ${formatLoginFallbackMessage(route)}`,
+    };
+  }
+
+  if (result.status === "spawn-error") {
+    return {
+      level: "error",
+      message: `${route.label} login/check could not start: ${result.error}.${restoreNote} ${formatLoginFallbackMessage(route)}`,
+    };
+  }
+
+  if (result.code === 0) {
+    return {
+      level: "info",
+      message: `${route.label} login/check completed.${restoreNote} ${route.statusGuidance}`,
+    };
+  }
+
+  return {
+    level: "error",
+    message: `${route.label} login/check exited with ${describeExitResult(result)}.${restoreNote} ${formatLoginFallbackMessage(route)}`,
+  };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -117,7 +276,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("connector-login", {
     description: `Login to an OAuth MCP workspace connector: ${loginUsage}`,
-    handler: async (args: string, ctx: NotificationContext) => {
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       const service = parseService(args);
       if (!service) {
         ctx.ui.notify(`Usage: ${loginUsage}`, "error");
@@ -125,14 +284,15 @@ export default function (pi: ExtensionAPI) {
       }
 
       const route = routeWorkspaceMcpConnector(service);
-      ctx.ui.notify(`Starting ${route.label} OAuth flow. ${route.authGuidance}`, "info");
-      const result = await runInteractive("npx", [...route.loginArgs]);
-
-      if (result.code === 0) {
-        ctx.ui.notify(`${route.label} login/check completed. ${route.statusGuidance}`, "info");
-      } else {
-        ctx.ui.notify(`${route.label} login/check exited with code ${result.code}. ${route.fallbackMessage}`, "error");
+      if (canUseTerminalHandoff(ctx)) {
+        ctx.ui.notify(
+          `Starting ${route.label} OAuth flow. Pi will temporarily hand the terminal to the OAuth CLI. ${route.authGuidance}`,
+          "info",
+        );
       }
+      const result = await runInteractiveLogin("npx", [...route.loginArgs], ctx);
+      const notification = formatInteractiveLoginResultNotification(route, result);
+      ctx.ui.notify(notification.message, notification.level);
     },
   });
 

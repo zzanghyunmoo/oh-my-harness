@@ -63,6 +63,19 @@ QUOTIO_API_KEY=<local-quotio-api-key>
 - `/connector-login linear|notion` — OAuth login for workspace connectors
 - `/connector-tools linear|notion` — List connector tools after login
 
+`/connector-login` temporarily pauses the Pi TUI and gives the OAuth CLI direct
+terminal access. If Pi is running without a TUI, the prompt is cancelled, or the
+terminal needs recovery, run the matching fallback command in a normal shell:
+
+```bash
+npx -y -p mcp-remote@latest mcp-remote-client https://mcp.linear.app/mcp
+npx -y -p mcp-remote@latest mcp-remote-client https://mcp.notion.com/mcp
+```
+
+After the fallback finishes, restart/reload Pi and run `/connector-tools
+linear|notion` to confirm tools are available. If terminal input remains odd,
+run `reset` or `stty sane` before restarting Pi.
+
 ## Do not commit
 
 - Pi auth files: `~/.pi/agent/auth.json`
