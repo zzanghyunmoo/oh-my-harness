@@ -1,6 +1,6 @@
 ---
 name: omp
-description: Route oh-my-pi namespace requests. Use when the user writes `omp: <skill-or-command>` or asks to use oh-my-pi as a facade over installed Pi skills, extension commands, tools, providers, or setup workflows.
+description: "Route oh-my-pi namespace requests. Use when the user writes `omp: <skill-or-command>` or asks to use oh-my-pi as a facade over installed Pi skills, extension commands, tools, providers, or setup workflows."
 ---
 
 # OMP Namespace
