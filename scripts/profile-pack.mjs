@@ -10,6 +10,7 @@ const PROFILE_DIR = join(REPO_ROOT, "docs", "profiles");
 const LOCK_PATH = join(PROFILE_DIR, "oh-my-pi.profile-lock.json");
 const PROFILE_SCHEMA = "./profile-pack.schema.json";
 const LOCK_SCHEMA = "./profile-lock.schema.json";
+const CORE_PACKAGE_INSTALL_SPEC = "git:github.com/zzanghyunmoo/oh-my-pi";
 const SECRET_VALUE_FIELD_NAMES = new Set([
   "value",
   "defaultValue",
@@ -50,6 +51,45 @@ function canonicalString(value) {
 
 function sha256(value) {
   return createHash("sha256").update(canonicalString(value)).digest("hex");
+}
+
+function unique(values) {
+  return [...new Set(values)];
+}
+
+function getSelectedExtensionPaths(profile) {
+  const selected = (profile.extensionToggles ?? [])
+    .filter((toggle) => toggle.enabledByDefault)
+    .map((toggle) => toggle.extensionPath);
+  return unique(selected.length > 0 ? selected : profile.piPackage.extensions);
+}
+
+function toPackageFilterPath(path) {
+  return path.replace(/^\.\//, "");
+}
+
+function buildCorePackageSettingsEntry(profile) {
+  return {
+    source: CORE_PACKAGE_INSTALL_SPEC,
+    extensions: getSelectedExtensionPaths(profile).map(toPackageFilterPath),
+    skills: profile.piPackage.skills.map(toPackageFilterPath),
+    prompts: profile.piPackage.prompts.map(toPackageFilterPath),
+    themes: profile.piPackage.themes.map(toPackageFilterPath),
+  };
+}
+
+function buildPackageSettingsEntries(profile) {
+  return profile.packageRefs.map((ref) =>
+    ref.installSpec === CORE_PACKAGE_INSTALL_SPEC
+      ? buildCorePackageSettingsEntry(profile)
+      : ref.installSpec,
+  );
+}
+
+function printIndentedJson(value) {
+  for (const line of prettyJson(value).trimEnd().split("\n")) {
+    out(`  ${line}`);
+  }
 }
 
 function assert(condition, message) {
@@ -118,7 +158,7 @@ function validateProfile(profile, context, seenIds) {
       assert(settingsSpecs.has(ref.installSpec), `${profile.id}: ${ref.installSpec} is marked settings-example but is not in settings.example.json`);
     }
   }
-  assert(installSpecs.has("git:github.com/zzanghyunmoo/oh-my-pi"), `${profile.id}: must include oh-my-pi core package ref`);
+  assert(installSpecs.has(CORE_PACKAGE_INSTALL_SPEC), `${profile.id}: must include oh-my-pi core package ref`);
 
   for (const extensionPath of profile.piPackage?.extensions ?? []) {
     assert(packageExtensions.has(extensionPath), `${profile.id}: piPackage extension ${extensionPath} is not in package.json pi.extensions`);
@@ -268,6 +308,8 @@ function commandApply(args) {
   assert(profile, `Unknown profile ${profileId}; available profiles: ${profiles.map((entry) => entry.id).join(", ")}`);
 
   const packageCommands = profile.packageRefs.map((ref) => `pi install ${ref.installSpec}${ref.required ? "" : "  # optional intent"}`);
+  const selectedExtensions = getSelectedExtensionPaths(profile);
+  const settingsPackageEntries = buildPackageSettingsEntries(profile);
   const envLines = profile.extensionToggles
     .filter((toggle) => toggle.toggleEnvVar && toggle.requiredValue === "true")
     .map((toggle) => `${toggle.toggleEnvVar}=true`);
@@ -293,6 +335,12 @@ function commandApply(args) {
   out();
   out("Install intent:");
   for (const command of packageCommands) out(`  ${command}`);
+  out();
+  out("Selected oh-my-pi extensions for this profile:");
+  for (const extensionPath of selectedExtensions) out(`  ${extensionPath}`);
+  out();
+  out("Optional settings.json packages entry for selected resources:");
+  printIndentedJson({ packages: settingsPackageEntries });
   out();
   out("Local CWD .env entries to create manually when needed:");
   const localEnvLines = [...envLines, ...secretPlaceholders];

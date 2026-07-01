@@ -32,13 +32,17 @@ profile lock before recreating a machine:
 
 ```bash
 npm run profile:verify
-npm run profile:apply -- --profile full   # dry-run only; prints install/.env/login intent
+npm run profile:apply -- --profile proxy-provider  # Quotio provider only
+npm run profile:apply -- --profile workspace       # Linear/Notion/GitHub connectors
+npm run profile:apply -- --profile full            # connectors + Quotio provider
 ```
 
-`profile:apply` does not run `pi install`, write `.env`, or start OAuth by default.
+`profile:apply` does not run `pi install`, write `.env`, edit settings, or start OAuth by default.
 Use its output as a safe checklist for `default`, `workspace`, `proxy-provider`, or
-`full` profile setup. Connector setup intent is then selected inside Pi with
-`/connector-setup full`, `/connector-setup selective ...`, or `/connector-setup minimal`.
+`full` profile setup. The dry-run also prints a copyable `settings.json` package entry
+that filters oh-my-pi resources to the selected profile extensions. Connector setup
+intent is then selected inside Pi with `/connector-setup full`,
+`/connector-setup selective ...`, or `/connector-setup minimal`.
 
 에이전트가 실행되는 디렉토리(CWD)에 `.env` 파일을 생성하여 익스텐션을 설정합니다:
 
@@ -71,7 +75,7 @@ QUOTIO_API_KEY=<local-quotio-api-key>
 - `/connector-setup minimal` — Intentionally hide issue-tracker, wiki, and git connector affordances.
 - `/oh-my-pi` — Show the oh-my-pi command palette and setup help.
 - `/oh-my-pi-doctor` — Check local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
-- `/quotio-status` — Check proxy connectivity and authentication.
+- `/quotio-status` — Check Quotio provider connectivity and authentication (enabled by `proxy-provider` or `full` profile).
 - `/connector-login linear|notion` — Direct browser OAuth login for OAuth MCP workspace connectors.
 - `/connector-status [service]` — Show connector setup readiness plus OAuth/access-key status.
 - `/connector-logout <service|tenant:personal|tenant:company|capability:git> [--confirm]` — Preview first; clears only Pi-managed OAuth state when confirmed.

@@ -536,7 +536,9 @@ function buildPaletteReport(): string {
     `- Access-key fallback — set ${LINEAR_CONNECTOR_ROUTE.accessKeyEnvVars.join("/")} for Linear or ${NOTION_CONNECTOR_ROUTE.accessKeyEnvVars.join("/")} for Notion in the CWD .env when browser OAuth is unavailable.`,
     `- Legacy external OAuth debug only — ${LINEAR_CONNECTOR_ROUTE.legacyMcpRemoteLoginShellCommand} or ${NOTION_CONNECTOR_ROUTE.legacyMcpRemoteLoginShellCommand}.`,
     "- npm run profile:verify — verify commit-safe profile pack and deterministic lock receipt.",
-    "- npm run profile:apply -- --profile full — print a non-destructive profile setup plan.",
+    "- Profile choices: default (base), workspace (Linear/Notion/GitHub), proxy-provider (Quotio), full (workspace + Quotio).",
+    "- npm run profile:apply -- --profile proxy-provider — print the optional Quotio provider setup plan.",
+    "- npm run profile:apply -- --profile full — print a non-destructive full setup plan.",
     "",
     "Tip: CWD .env is loaded by env-loader before other oh-my-pi extensions. /connector-setup is available even before ENABLE_WORKSPACE_CONNECTORS=true.",
   ].join("\n");
