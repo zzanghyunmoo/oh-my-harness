@@ -204,7 +204,7 @@ Planning resolves the exact upstream identity, runtime baseline, verdict tiers, 
 - KTD11. **Use pure render, explicit ownership planning, and a transaction journal.** Preview is a byte-deterministic ownership plan bound to expected pre-image hashes. Apply requires approval of that plan digest, rechecks file identity immediately before each atomic managed write, and records partial outcomes. Rollback is compare-and-swap against the recorded post-image; stale or sensitive pre-images require manual recovery rather than destructive repair.
 - KTD12. **Use exact v1 runtime/platform locks.** Each passing baseline is the tuple `(runtime version, OS, architecture, executable digest, immutable acquisition identity)`. Canonical hermetic release uses 116 Linux x64 cells; this operator's Darwin arm64 tuples require a separate 116-cell personal certification using the same feature contracts and semantic oracles before doctor may report full readiness. Codex 0.144.4, OpenCode 1.18.0, Claude Code 2.1.210, and Pi 0.80.7 are the only v1 versions. Any uncovered or uncertified tuple is blocked until a separately reviewed support lane and current evidence are added.
 - KTD13. **Treat harness-controlled runtime payloads and evidence as untrusted boundaries.** A pinned digest proves reproducibility, not trust. Upstream provenance, executable identity, shell-free argv, minimal environment, fail-closed cell isolation, capture-before-persist redaction, and live target fingerprints must all pass before native agent execution or publication of evidence. The threat model covers untrusted workspace/plugin/model output inside a harness-controlled run; it excludes a compromised kernel/container runtime, substituted locked binary, or concurrent malicious process already running as the same OS user.
-- KTD14. **Use a digest-pinned Linux OCI container as the canonical hermetic backend.** Release cells run with read-only root, dropped capabilities, no-new-privileges, resource/PID limits, isolated mounts and default-deny external network; the scripted provider shares only a cell-local network namespace. macOS development invokes that backend through a characterized OCI runtime and reports blocked when unavailable; deprecated host `sandbox-exec` is not a passing backend.
+- KTD14. **Use platform-native, digest-pinned isolation backends.** Linux release cells use a digest-pinned OCI image with read-only root, dropped capabilities, no-new-privileges, resource/PID limits, isolated mounts and default-deny external network. Darwin personal cells use a pinned Tart version and macOS 15 arm64 VM image digest with disposable snapshots, isolated workspace/HOME/auth mounts, bounded processes, broker-only egress and teardown verification. U16 must prove both backend receipts; host execution or deprecated `sandbox-exec` is never a passing fallback.
 
 ### High-Level Technical Design
 
@@ -326,6 +326,7 @@ harness/
 ├── baselines/
 │   ├── <runtime>-<version>-darwin-arm64.json
 │   ├── <runtime>-<version>-linux-x64.json
+│   ├── darwin-tart.json
 │   └── linux-oci.json
 ├── contracts/
 │   ├── conformance-result.schema.json
@@ -393,7 +394,7 @@ docs/
 - Neutral core and test-only coordinator use Node ESM and built-in test primitives, following `scripts/profile-pack.mjs` rather than introducing a runtime framework before evidence requires it.
 - Contract data lives in committed, secret-free JSON and Markdown. Timestamps, tokens, auth headers, prompt bodies from private workspaces, and credential paths never enter deterministic locks.
 - Runtime-specific files may import neutral data, but neutral modules must not import Pi `ExtensionAPI`, another runtime SDK, or coordinator modules. Import-boundary and package-content tests enforce this direction.
-- Canonical hermetic cells run inside the U16-proven digest-pinned Linux OCI backend with isolated mounts, process/PID/resource limits and default-deny external network; redirected HOME, a runtime's own sandbox flag, or host `sandbox-exec` alone is insufficient.
+- Canonical Linux release cells run in the U16-proven OCI backend; Darwin personal cells run in the U16-proven Tart/macOS 15 arm64 VM backend. Both require isolated mounts, process/PID/resource bounds, broker-only egress and teardown checks; redirected HOME, runtime sandbox flags, host execution, or `sandbox-exec` alone are insufficient.
 - The coordinator never invokes a shell. It resolves an allowlisted absolute executable identity, passes structured argv, uses a minimal environment and fixed cwd, and strips inherited credential, socket, preload and startup variables.
 - Scripted providers bind to a cell-specific loopback endpoint, require a per-cell capability token, and implement only the locked provider protocols using checked-in transcripts.
 - Upstream repository owner, release provenance, complete tree, dependency lock and install lifecycle are verified before plugin load; unexpected executable or lifecycle changes block the run.
@@ -488,18 +489,18 @@ Actor trace is explicit rather than inferred: A1 maps to U5/U13/U17/U12 operator
 
 ### U16. Exact-baseline, native-gate, and OCI feasibility proof
 
-- **Goal:** Retire the two existential v1 risks—an exact runtime lacking an unavoidable native gate/evidence path, or the release host lacking the required hermetic backend—before building the broader control plane.
+- **Goal:** Retire the existential v1 risks—an exact runtime lacking an unavoidable native gate/evidence path, scripted provider routing failing, or either Linux OCI/Darwin Tart isolation backend being unavailable—before building the broader control plane.
 - **Requirements:** R3, R7–R9, R13, R18–R20; F5; AE2; KTD7, KTD12, KTD14.
 - **Dependencies:** U1–U3.
-- **Files:** Create `harness/baselines/<runtime>-<version>-linux-x64.json`, `harness/baselines/<runtime>-<version>-darwin-arm64.json` for all four runtimes, `harness/baselines/linux-oci.json`, `scripts/harness/characterize.mjs`, `tests/harness/characterize.test.mjs`, `tests/harness/fixtures/characterize/`.
-- **Approach:** Provision each exact platform tuple and immutable CE payload into ephemeral homes, install a minimal probe through the documented native extension/plugin/hook mechanism, and require a fail-closed readiness decision before the first model request. Tool/permission hooks additionally enforce every later side effect; a tool-only hook cannot pass. Only after readiness succeeds does the cell-local network expose the minimum locked OpenAI-compatible or Anthropic-compatible probe endpoint; each runtime must complete one native model request, emit an authenticated machine-readable control envelope, and show zero external egress. The Linux x64 tuple runs inside the digest-pinned OCI image; the Darwin arm64 tuple runs discovery/gate/headless-event smoke against the operator binary while still using an ephemeral home. Record tuple, acquisition and proof hashes—not speculative hook names—in baseline receipts.
+- **Files:** Create `harness/baselines/<runtime>-<version>-linux-x64.json`, `harness/baselines/<runtime>-<version>-darwin-arm64.json` for all four runtimes, `harness/baselines/linux-oci.json`, `harness/baselines/darwin-tart.json`, `scripts/harness/characterize.mjs`, `tests/harness/characterize.test.mjs`, `tests/harness/fixtures/characterize/`.
+- **Approach:** Provision each exact platform tuple and immutable CE payload into ephemeral homes, install a minimal probe through the documented native extension/plugin/hook mechanism, and require a fail-closed readiness decision before the first model request. Tool/permission hooks additionally enforce every later side effect; a tool-only hook cannot pass. Only after readiness succeeds does the cell-local network expose the minimum locked OpenAI-compatible or Anthropic-compatible probe endpoint; each runtime must complete one native model request, emit an authenticated machine-readable control envelope, and show zero external egress. The Linux x64 tuple runs inside the digest-pinned OCI image; the Darwin arm64 tuple runs inside a disposable Tart macOS 15 arm64 VM snapshot pinned by Tart version and image digest. Record tuple, acquisition and proof hashes—not speculative hook names—in baseline receipts.
 - **Test scenarios:**
   - Missing binary, mismatched version/OS/architecture/digest/acquisition identity, mutable plugin source, absent pre-model gate, tool-only late gate, provider-routing failure, unauthenticated headless envelope, external egress, or cleanup residue marks that tuple unsupported and blocks U4/U6/U14/U7–U10.
-  - The OCI proof denies host home/workspace, external DNS/IP/Unix sockets, other loopback ports, remote git and background daemon persistence while allowing one token-protected provider endpoint.
-  - macOS without a supported OCI runtime reports blocked; host `sandbox-exec` alone cannot satisfy the baseline.
+  - The OCI and Tart proofs deny host home/workspace, external DNS/IP/Unix sockets, unapproved loopback ports, remote git and background daemon persistence while allowing one token-protected broker endpoint.
+  - Missing OCI runtime, Tart version/image mismatch, unavailable Apple virtualization support, dirty VM snapshot, or failed VM teardown reports blocked; host execution and `sandbox-exec` cannot satisfy the baseline.
   - Forged event-shaped stdout/stderr/tool output, duplicate or out-of-order terminal/approval events, and payload nesting changes cannot satisfy the native control-envelope proof.
   - Characterization uses ephemeral homes only and leaves personal runtime configuration unchanged.
-- **Verification:** Eight platform-specific gate/provider/evidence receipts and one OCI backend receipt pass before any breadth unit begins; a failed receipt stops v1 rather than selecting a wrapper or weaker lane.
+- **Verification:** Eight platform-specific gate/provider/evidence receipts plus Linux OCI and Darwin Tart backend receipts pass before any breadth unit begins; a failed receipt stops the affected support lane rather than selecting a wrapper, host fallback or weaker isolation.
 
 ### U4. Project overlay generator and ownership
 
@@ -551,12 +552,12 @@ Actor trace is explicit rather than inferred: A1 maps to U5/U13/U17/U12 operator
 
 ### U14. Secure coordinator and evidence lifecycle
 
-- **Goal:** Implement the shell-free launch boundary, canonical OCI isolation, process lifecycle, resume identity, and bounded capture-before-persist evidence pipeline proven by U16.
+- **Goal:** Implement the shell-free launch boundary, Linux OCI and Darwin Tart isolation adapters, process lifecycle, resume identity, and bounded capture-before-persist evidence pipeline proven by U16.
 - **Requirements:** R13, R14, R17–R21; F2, F5; KTD6, KTD10, KTD13, KTD14.
 - **Dependencies:** U5, U6, U16.
 - **Files:** Create `scripts/harness/coordinator.mjs`, `scripts/harness/evidence.mjs`, `tests/harness/coordinator.test.mjs`, `tests/harness/security-boundary.test.mjs`, `tests/harness/fixtures/processes/`, `tests/harness/fixtures/secrets/`.
-- **Approach:** Resolve an allowlisted absolute executable and digest, spawn structured argv without a shell, use a minimal environment and fixed cwd, and launch the U16-pinned Linux OCI image under its recorded policy. Accept control events only from the U16-characterized native envelope or dedicated control channel, preserving source labels and payload nesting; model/tool stdout, stderr and artifact bytes remain untrusted payload. Capture accepted events through allowlisted fields and streaming redaction before an owner-only repository-external evidence store. Ingest only coordinator-generated opaque names under pre-opened trusted roots; accept no-follow regular files whose before/after identity remains contained, and enforce per-stream, event, artifact, file-count and total-cell byte ceilings. Retries append attempts and never erase prior failures; coordinator modules are absent from production exports and user CLI imports.
-- **Execution note:** Unsupported OCI runtime or policy mismatch is an infrastructure failure; the coordinator never falls back to an unsandboxed host process.
+- **Approach:** Resolve an allowlisted absolute executable and digest, spawn structured argv without a shell, use a minimal environment and fixed cwd, then dispatch by tuple to either the U16-pinned Linux OCI image or a disposable snapshot of the U16-pinned Tart/macOS 15 arm64 VM under its recorded policy. Accept control events only from the U16-characterized native envelope or dedicated control channel, preserving source labels and payload nesting; model/tool stdout, stderr and artifact bytes remain untrusted payload. Capture accepted events through allowlisted fields and streaming redaction before an owner-only repository-external evidence store. Ingest only coordinator-generated opaque names under pre-opened trusted roots; accept no-follow regular files whose before/after identity remains contained, and enforce per-stream, event, artifact, file-count and total-cell byte ceilings. Retries append attempts and never erase prior failures; coordinator modules are absent from production exports and user CLI imports.
+- **Execution note:** Unsupported OCI/Tart runtime, image or policy mismatch is an infrastructure failure; the coordinator never falls back to an unsandboxed host process.
 - **Test scenarios:**
   - Spaces, quotes, newline, `$()`, semicolon, leading-dash values, PATH shadowing, preload/startup variables, inherited agent/socket variables, and forged provider URLs cannot create an extra process or file.
   - Real home, parent workspace, DNS, IPv4/IPv6, metadata address, other loopback ports, Unix/Docker/SSH sockets, remote git, background/double-fork processes, and timeout orphans remain unreachable; outside-root canaries and residual PID scans stay clean.
@@ -688,7 +689,7 @@ Actor trace is explicit rather than inferred: A1 maps to U5/U13/U17/U12 operator
 - **Requirements:** R13, R14, R16–R21; F2; AE3, AE5, AE6; KTD4–KTD6, KTD9.
 - **Dependencies:** U18.
 - **Files:** Create `harness/scenarios/<feature-id>/contract.json`, feature transcript/fixture files, `tests/harness/matrix.test.mjs`, `tests/harness/fixtures/matrix/`.
-- **Approach:** Generate the source feature list but review every committed contract. Group reusable fixtures by artifact, git, review, browser/media, external service, optimization, and lifecycle while keeping feature-specific happy, expected-failure, approval/safety, handoff, and evidence requirements explicit. Linux x64 receipts form the release report; Darwin arm64 receipts form a tuple-scoped personal certification and never substitute for Linux release cells.
+- **Approach:** Generate the source feature list but review every committed contract. Group reusable fixtures by artifact, git, review, browser/media, external service, optimization, and lifecycle while keeping feature-specific happy, expected-failure, approval/safety, handoff, and evidence requirements explicit. Linux x64 receipts come from OCI and form the release report; Darwin arm64 receipts come from disposable Tart VM snapshots and form a tuple-scoped personal certification. Neither platform's evidence substitutes for the other.
 - **Test scenarios:**
   - Coverage rejects missing or duplicate cell keys, missing scenario sets, orphan files, filtered/extra cells, lock mismatch, success-valued skip, and stale evidence.
   - Browser, Xcode, GitHub, Proof, issue-tracker, and media paths use hermetic doubles and preserve human-only gates.
@@ -722,7 +723,7 @@ Actor trace is explicit rather than inferred: A1 maps to U5/U13/U17/U12 operator
 | Existing profile lock | `npm run profile:verify` | U1–U5, U10, U12–U17 | Existing profiles and lock remain deterministic and secret-free |
 | Existing Pi integrations | `npm run test:workspace-connectors` | U10, U12, U13 | `extensions/setup-doctor/setup-doctor.test.ts`, `extensions/setup-doctor/omp-namespace.test.ts`, connector and setup-state regressions pass |
 | Harness contracts and unit tests | `npm run test:harness` | U1–U18 | The U1-added Node ESM runner executes `tests/harness/**/*.test.mjs`; contract, lock, characterization, generator, apply, install, doctor, provider, coordinator, adapter, evaluator/parity and migration tests pass |
-| Existential baseline proof | `npm run harness:characterize` | U16 | Eight Linux x64/Darwin arm64 native gate/provider/evidence receipts and the digest-pinned Linux OCI backend pass from ephemeral homes with no personal mutation |
+| Existential baseline proof | `npm run harness:characterize` | U16 | Eight Linux x64/Darwin arm64 native gate/provider/evidence receipts plus digest-pinned Linux OCI and Darwin Tart/macOS VM backends pass from disposable homes/snapshots with no personal mutation |
 | Desired-state verification | `npm run harness:verify` | U1–U5, U13, U17 | Source identity, provenance, inventory, profile, overlay, user install ownership and actual managed hashes match committed receipts |
 | Generated-tree cleanliness | `git diff --exit-code -- harness/` and `git status --porcelain` | U1–U18 | Verify produces no generated drift; only explicitly expected worktree paths are present |
 | Runtime readiness | `npm run harness:doctor -- --format json` | U7–U10, U13, U14, U16, U17 | Four exact native registrations, pre-model gates, OCI backend, CE pin, companions and project overlay report ready; Darwin remains `installed-unattested` without current full certification |
@@ -736,7 +737,7 @@ Actor trace is explicit rather than inferred: A1 maps to U5/U13/U17/U12 operator
 
 ### Evidence Requirements
 
-Every hermetic cell receipt includes CE tag/commit/tree and provenance verdict, runtime version/OS/architecture/executable digest/acquisition identity, authenticated control-channel identity, adapter and overlay digests, sandbox backend/version/policy, allowed endpoint, structured argv, environment-key allowlist, scripted provider protocol/version, feature/fixture/oracle/coordinator/redactor/scanner digests, workspace identity, attempt history, exit/terminal reason, duration/cost class, artifact hashes, git diff, permission decisions, escape-probe and residual-PID results, and redacted event paths.
+Every cell receipt includes CE tag/commit/tree and provenance verdict, runtime version/OS/architecture/executable digest/acquisition identity, authenticated control-channel identity, adapter and overlay digests, OCI or Tart/macOS VM backend/version/image/policy/snapshot identity, allowed endpoint, structured argv, environment-key allowlist, scripted provider protocol/version, feature/fixture/oracle/coordinator/redactor/scanner digests, workspace identity, attempt history, exit/terminal reason, duration/cost class, artifact hashes, git diff, permission decisions, escape-probe and residual-process results, and redacted event paths.
 
 Redaction is capture-before-persist and field-allowlist based; raw provider payload, private prompt, credential value/path, inherited environment, and unredacted stdout/stderr are not stored by default. Evidence lives outside the repository with directory mode 0700 and file mode 0600, has retention/deletion rules, and fails publication/release if the final repository/evidence secret scan is not clean.
 
@@ -751,7 +752,7 @@ Hosted/live receipts add model/provider, a secret-free resolved target fingerpri
 - Product Contract R1–R21 and applicable A/F/AE IDs are traced to implementation units and passing evidence.
 - CE 3.19.0 immutable identity and 29-feature inventory are reproducible from a clean checkout.
 - Four runtime baselines expose upstream native CE skills without copied or modified skill bodies.
-- U16 proves eight exact Linux x64/Darwin arm64 native gate/provider/evidence tuples and the digest-pinned Linux OCI backend before breadth work; any failed proof stops v1.
+- U16 proves eight exact Linux x64/Darwin arm64 native gate/provider/evidence tuples plus digest-pinned Linux OCI and Darwin Tart/macOS VM backends before breadth work; any failed proof blocks the affected support lane.
 - Native hard gates are installed for ordinary interactive CLI use; the test coordinator is not required for enforcement.
 - Per-user CE/gate install and project overlay generation are deterministic, preview-first, managed-only, drift-aware, rollback-capable, and secret-free.
 - All 116 Linux hermetic release cells, all 116 Darwin personal certification cells, evaluator quality thresholds, and the four-way `Plan → Work → Review` benchmark pass.
@@ -767,7 +768,7 @@ Hosted/live receipts add model/provider, a secret-free resolved target fingerpri
 | U1 | Tag/commit/tree and 29-feature lock verifies and drift fixtures fail |
 | U2 | Neutral schemas validate cross-references, statuses and evidence identity |
 | U3 | Four exact descriptors construct 116 expected cell keys with native-gate declarations |
-| U16 | Eight platform tuples prove native gate/provider/evidence seams and the pinned OCI backend without personal mutation |
+| U16 | Eight platform tuples prove native gate/provider/evidence seams plus pinned OCI and Tart/macOS VM backends without personal mutation |
 | U4 | Pure overlay render and receipt-bound marker grammar pass hostile ownership fixtures |
 | U5 | Digest-bound apply and CAS rollback preserve user state and protected backups |
 | U6 | Both scripted provider protocols pass transcript, token, endpoint and teardown tests |
@@ -808,7 +809,7 @@ Hosted/live receipts add model/provider, a secret-free resolved target fingerpri
 | Full matrix cost and duration explode | Slow feedback and abandoned certification | Hermetic scripted provider, deterministic sharding, cache only by complete evidence key, bounded concurrency |
 | Multi-target apply partially fails or rollback is stale | Mixed runtime state, lost settings, or secret-bearing backup exposure | Plan/pre-image digest, no-follow containment, metadata-only journal, owner-only backup, partial verdict, CAS rollback, manual recovery |
 | Hostile path, changed pre-image, or argv/env injection | Write or execute outside the owned target | Execute no project code during apply; revalidate root/type/inode/mode; shell-free absolute executable, structured argv, minimal environment, hostile fixtures and canaries |
-| OCI runtime or pinned policy is unavailable | Canonical hermetic isolation cannot start | U16 proves the Linux OCI image/policy before breadth; macOS requires a characterized OCI runtime and blocks instead of falling back to host execution |
+| OCI/Tart runtime, pinned image or policy is unavailable | Linux release or Darwin personal isolation cannot start | U16 proves Linux OCI and Darwin Tart/macOS 15 arm64 image policies before breadth; the affected lane blocks instead of falling back to host execution |
 | Pinned upstream/plugin is compromised or drifts | Reproducible malicious code executes with agent privileges | Trusted owner/provenance review, tree and dependency lock, lifecycle-script deny, unexpected executable check, sandbox/tool policy precedence |
 | User instructions conflict with generated guardrails | Runtime-dependent behavior | Managed blocks, precedence scan, conflict verdict, project-scoped policy source |
 | Secret or private prompt data enters evidence | Credential or data exposure | No real hermetic credential, capture-before-persist allowlist/redaction, owner-only evidence, canary scan across every channel, retention/delete policy |
