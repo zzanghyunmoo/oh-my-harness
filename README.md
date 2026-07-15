@@ -1,18 +1,22 @@
-# oh-my-pi
+# oh-my-harness
 
-Personal Pi package for sharing my Pi extensions, prompt templates, and themes across machines.
+Cross-runtime coding-agent harness for distributing Compound Engineering and shared guardrails through native Codex, OpenCode, Claude Code, and Pi surfaces.
+
+The existing Pi extensions remain available as compatibility surfaces while the runtime-neutral harness is implemented.
 
 ## Install
 
 ```bash
-pi install git:github.com/zzanghyunmoo/oh-my-pi
+pi install git:github.com/zzanghyunmoo/oh-my-harness
 ```
 
 For SSH/private repo:
 
 ```bash
-pi install git:git@github.com:zzanghyunmoo/oh-my-pi
+pi install git:git@github.com:zzanghyunmoo/oh-my-harness
 ```
+
+Existing installations that use the former `zzanghyunmoo/oh-my-pi` source should migrate to the new install spec. The legacy `/oh-my-pi`, `/oh-my-pi-doctor`, `omp:` and `OH_MY_PI_*` compatibility surfaces remain available during v1.
 
 ## Contains
 
@@ -40,7 +44,7 @@ npm run profile:apply -- --profile full            # connectors + Quotio provide
 `profile:apply` does not run `pi install`, write `.env`, edit settings, or start OAuth by default.
 Use its output as a safe checklist for `default`, `workspace`, `proxy-provider`, or
 `full` profile setup. The dry-run also prints a copyable `settings.json` package entry
-that filters oh-my-pi resources to the selected profile extensions. Connector setup
+that filters oh-my-harness resources to the selected profile extensions. Connector setup
 intent is then selected inside Pi with `/connector-setup full`,
 `/connector-setup selective ...`, or `/connector-setup minimal`.
 
@@ -73,8 +77,8 @@ QUOTIO_API_KEY=<local-quotio-api-key>
 - `/connector-setup full` — Select the full connector surface: personal Linear/Notion/GitHub plus company Jira/Confluence/GitLab readiness.
 - `/connector-setup selective tenant:company capability:git` — Select connector intent by tenant/capability; use `service:linear service:notion` for explicit services.
 - `/connector-setup minimal` — Intentionally hide issue-tracker, wiki, and git connector affordances.
-- `/oh-my-pi` — Show the oh-my-pi command palette and setup help.
-- `/oh-my-pi-doctor` — Check local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
+- `/oh-my-pi` — Legacy-compatible command palette and setup help.
+- `/oh-my-pi-doctor` — Legacy-compatible check for local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
 - `/quotio-status` — Check Quotio provider connectivity and authentication (enabled by `proxy-provider` or `full` profile).
 - `/connector-login linear|notion` — Direct browser OAuth login for OAuth MCP workspace connectors.
 - `/connector-status [service]` — Show connector setup readiness plus OAuth/access-key status.
@@ -94,7 +98,7 @@ If browser OAuth is unavailable, set `LINEAR_API_KEY` or
 OAuth tokens and then fall back to the configured access key.
 
 GitHub uses the authenticated `gh` CLI through a fail-closed read-only allowlist.
-GitLab uses the authenticated `glab` CLI the same way; oh-my-pi never stores
+GitLab uses the authenticated `glab` CLI the same way; oh-my-harness never stores
 GitLab tokens. Jira and Confluence are setup-visible company capabilities, but
 runtime tools stay gated until a non-interactive Atlassian auth route is selected.
 

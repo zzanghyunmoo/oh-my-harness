@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zzanghyunmoo/oh-my-pi/docs/profiles/profile-lock.schema.json",
-  "title": "oh-my-pi profile lock receipt",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/docs/profiles/profile-lock.schema.json",
+  "title": "oh-my-harness profile lock receipt",
   "description": "Deterministic, secret-free receipt generated from docs/profiles/*.profile.json.",
   "type": "object",
   "additionalProperties": false,

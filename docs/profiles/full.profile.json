@@ -10,8 +10,8 @@
   ],
   "packageRefs": [
     {
-      "name": "oh-my-pi",
-      "installSpec": "git:github.com/zzanghyunmoo/oh-my-pi",
+      "name": "oh-my-harness",
+      "installSpec": "git:github.com/zzanghyunmoo/oh-my-harness",
       "source": "package-json",
       "required": true,
       "intent": "core-package"
@@ -88,28 +88,28 @@
     {
       "name": "ENABLE_WORKSPACE_CONNECTORS",
       "kind": "toggle",
-      "source": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Use this profile on a machine that should expose Linear/Notion connector commands and tools.",
       "commitPolicy": "name-and-intent-only"
     },
     {
       "name": "ENABLE_QUOTIO",
       "kind": "toggle",
-      "source": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Use this profile on a machine that should register the Quotio provider.",
       "commitPolicy": "name-and-intent-only"
     },
     {
       "name": "QUOTIO_BASE_URL",
       "kind": "endpoint",
-      "source": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Required when ENABLE_QUOTIO is true.",
       "commitPolicy": "never-commit-value"
     },
     {
       "name": "QUOTIO_API_KEY",
       "kind": "api-key",
-      "source": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Required when ENABLE_QUOTIO is true.",
       "commitPolicy": "never-commit-value"
     }
@@ -254,7 +254,7 @@
   ],
   "metadataRefs": {
     "packageJson": "package.json",
-    "secretBlueprint": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+    "secretBlueprint": "docs/blueprints/oh-my-harness.secret-blueprint.json",
     "capabilityRegistry": "extensions/capability-registry.ts",
     "connectorCatalog": "extensions/connector-backend-catalog.ts",
     "providerAdapterKit": "extensions/provider-adapter-kit/openai-compatible.ts"

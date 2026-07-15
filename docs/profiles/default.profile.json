@@ -2,12 +2,12 @@
   "$schema": "./profile-pack.schema.json",
   "schemaVersion": "0.1.0",
   "id": "default",
-  "displayName": "Default oh-my-pi",
-  "description": "Base profile for installing oh-my-pi with the env loader, setup doctor, prompts, themes, and the recent pi-clear external package signal recorded as optional intent.",
+  "displayName": "Default oh-my-harness",
+  "description": "Base profile for installing oh-my-harness with the env loader, setup doctor, prompts, themes, and the recent pi-clear external package signal recorded as optional intent.",
   "packageRefs": [
     {
-      "name": "oh-my-pi",
-      "installSpec": "git:github.com/zzanghyunmoo/oh-my-pi",
+      "name": "oh-my-harness",
+      "installSpec": "git:github.com/zzanghyunmoo/oh-my-harness",
       "source": "package-json",
       "required": true,
       "intent": "core-package",
@@ -72,7 +72,7 @@
   "providers": [],
   "metadataRefs": {
     "packageJson": "package.json",
-    "secretBlueprint": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+    "secretBlueprint": "docs/blueprints/oh-my-harness.secret-blueprint.json",
     "capabilityRegistry": "extensions/capability-registry.ts",
     "connectorCatalog": "extensions/connector-backend-catalog.ts",
     "providerAdapterKit": "extensions/provider-adapter-kit/openai-compatible.ts"
