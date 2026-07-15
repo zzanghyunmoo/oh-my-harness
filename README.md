@@ -77,8 +77,9 @@ QUOTIO_API_KEY=<local-quotio-api-key>
 - `/connector-setup full` — Select the full connector surface: personal Linear/Notion/GitHub plus company Jira/Confluence/GitLab readiness.
 - `/connector-setup selective tenant:company capability:git` — Select connector intent by tenant/capability; use `service:linear service:notion` for explicit services.
 - `/connector-setup minimal` — Intentionally hide issue-tracker, wiki, and git connector affordances.
-- `/oh-my-pi` — Legacy-compatible command palette and setup help.
-- `/oh-my-pi-doctor` — Legacy-compatible check for local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
+- `/oh-my-harness` — Show the command palette and setup help.
+- `/oh-my-harness-doctor` — Check local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
+- `/oh-my-pi`, `/oh-my-pi-doctor` — Legacy-compatible aliases for the commands above.
 - `/quotio-status` — Check Quotio provider connectivity and authentication (enabled by `proxy-provider` or `full` profile).
 - `/connector-login linear|notion` — Direct browser OAuth login for OAuth MCP workspace connectors.
 - `/connector-status [service]` — Show connector setup readiness plus OAuth/access-key status.

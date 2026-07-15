@@ -36,6 +36,8 @@ async function withTempSetupPath<T>(fn: () => Promise<T> | T): Promise<T> {
 test("setup doctor registers connector-setup bootstrap command", () => {
   const { commands } = registerExtension();
   assert.ok(commands.has("connector-setup"));
+  assert.ok(commands.has("oh-my-harness"));
+  assert.ok(commands.has("oh-my-harness-doctor"));
   assert.ok(commands.has("oh-my-pi"));
   assert.ok(commands.has("oh-my-pi-doctor"));
 });
@@ -61,9 +63,9 @@ test("connector-setup minimal records intent and reports hidden-by-mode", async 
   });
 });
 
-test("oh-my-pi palette points to connector setup modes", async () => {
+test("oh-my-harness palette points to connector setup modes", async () => {
   const { commands } = registerExtension();
-  const command = commands.get("oh-my-pi");
+  const command = commands.get("oh-my-harness");
   assert.ok(command);
   const notifications: Array<{ message: string; level: string | undefined }> = [];
 

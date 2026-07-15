@@ -12,7 +12,7 @@
     {
       "id": "default",
       "source": "docs/profiles/default.profile.json",
-      "sha256": "4578e74e60632be37476a101e90f50fe5f340ee198c63928837d81cfa93ee9b2",
+      "sha256": "902f9774373f0a1fa0e709c6badcda90b44007692e0b35608fa9e51694f6de6f",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"

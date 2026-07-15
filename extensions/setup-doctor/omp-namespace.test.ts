@@ -6,10 +6,14 @@ import {
   resolveOmpRoute,
 } from "./index.js";
 
-test("parseOmpInvocation accepts omp and oh-my-pi prefixes", () => {
+test("parseOmpInvocation accepts omp, oh-my-harness, and legacy oh-my-pi prefixes", () => {
   assert.deepEqual(parseOmpInvocation("omp: ce-plan docs/foo.md"), {
     target: "ce-plan",
     args: "docs/foo.md",
+  });
+  assert.deepEqual(parseOmpInvocation("oh-my-harness: doctor"), {
+    target: "doctor",
+    args: "",
   });
   assert.deepEqual(parseOmpInvocation("oh-my-pi: doctor"), {
     target: "doctor",

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getToggleControlledCapabilities } from "../capability-registry.js";
@@ -31,9 +31,9 @@ function loadCwdEnv(): string | null {
 export default function (pi: ExtensionAPI) {
   const loadedPath = loadCwdEnv();
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
     if (loadedPath) {
-      ctx.ui.notify(`oh-my-pi: .env 로드됨 — ${loadedPath}`, "info");
+      ctx.ui.notify(`oh-my-harness: .env 로드됨 — ${loadedPath}`, "info");
     }
 
     const disabled = getToggleControlledCapabilities()
@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
 
     if (disabled.length > 0) {
       ctx.ui.notify(
-        `oh-my-pi: 비활성화된 익스텐션: ${disabled.join(", ")}. .env에 ENABLE_*=true를 추가하세요.`,
+        `oh-my-harness: 비활성화된 익스텐션: ${disabled.join(", ")}. .env에 ENABLE_*=true를 추가하세요.`,
         "info",
       );
     }

@@ -321,9 +321,9 @@ async function formatLogoutPreview(targets: readonly SetupConnectorBackend[], co
       if (status.oauthConfigured) oauthTargets.push(backend.id as WorkspaceMcpServiceName);
       lines.push(`- ${backend.label}: ${status.oauthConfigured ? `will clear Pi-managed OAuth state at ${status.authPath}` : "no Pi-managed OAuth state found"}; env access keys and browser accounts are untouched.`);
     } else if (backend.backendKind === "cli") {
-      lines.push(`- ${backend.label}: no oh-my-pi-owned credentials to clear; ${backend.cli.command} CLI auth/session is untouched.`);
+      lines.push(`- ${backend.label}: no oh-my-harness-owned credentials to clear; ${backend.cli.command} CLI auth/session is untouched.`);
     } else {
-      lines.push(`- ${backend.label}: setup-only/runtime-gated; no oh-my-pi-owned credentials to clear.`);
+      lines.push(`- ${backend.label}: setup-only/runtime-gated; no oh-my-harness-owned credentials to clear.`);
     }
   }
   if (!confirmed) {

@@ -50,7 +50,7 @@
       "extensionId": "setup-doctor",
       "extensionPath": "./extensions/setup-doctor",
       "enabledByDefault": true,
-      "notes": "Provides /oh-my-pi and /oh-my-pi-doctor read-only setup UX."
+      "notes": "Provides /oh-my-harness and /oh-my-harness-doctor with legacy /oh-my-pi aliases."
     },
     {
       "extensionId": "quotio-provider",
