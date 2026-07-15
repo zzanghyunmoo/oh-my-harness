@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zzanghyunmoo/oh-my-pi/docs/profiles/profile-pack.schema.json",
-  "title": "oh-my-pi profile pack",
-  "description": "Commit-safe install intent for an oh-my-pi profile. Secret, OAuth, and local endpoint values must not be stored here.",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/docs/profiles/profile-pack.schema.json",
+  "title": "oh-my-harness profile pack",
+  "description": "Commit-safe install intent for an oh-my-harness profile. Secret, OAuth, and local endpoint values must not be stored here.",
   "type": "object",
   "additionalProperties": false,
   "required": [

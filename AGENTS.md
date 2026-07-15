@@ -1,11 +1,11 @@
-# AGENTS.md — oh-my-pi 프로젝트 가드레일
+# AGENTS.md — oh-my-harness 프로젝트 가드레일
 
-Pi coding agent 개인 확장 패키지.
+Codex, OpenCode, Claude Code, Pi를 위한 cross-runtime coding-agent harness. 기존 Pi 확장은 호환 surface로 유지한다.
 
 ## 프로젝트 구조
 
 ```
-oh-my-pi/
+oh-my-harness/
 ├── extensions/
 │   ├── env-loader/             # CWD .env 로더 (가장 먼저 로드)
 │   ├── workspace-connectors/   # Linear/Notion MCP 커넥터

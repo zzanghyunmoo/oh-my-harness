@@ -202,7 +202,7 @@ export const connectorBackendCatalog = [
     authStrategies: [
       {
         kind: "cli-session",
-        description: "Use the user's existing gh CLI session; oh-my-pi never stores GitHub CLI credentials.",
+        description: "Use the user's existing gh CLI session; oh-my-harness never stores GitHub CLI credentials.",
       },
     ],
     cli: {
@@ -233,7 +233,7 @@ export const connectorBackendCatalog = [
     authStrategies: [
       {
         kind: "cli-session",
-        description: "Use the user's existing glab CLI session; oh-my-pi never stores GitLab CLI credentials.",
+        description: "Use the user's existing glab CLI session; oh-my-harness never stores GitLab CLI credentials.",
       },
     ],
     cli: {
@@ -252,7 +252,7 @@ export const connectorBackendCatalog = [
     adapterKind: "atlassian-staged",
     description: "Company issue tracker capability for Atlassian Jira; setup-visible until a non-interactive runtime auth route is selected.",
     authGuidance: "Jira is setup-visible but runtime-gated. Choose and validate a non-interactive Atlassian auth route before enabling tools.",
-    statusGuidance: "Jira readiness is currently runtime-gated; no Jira runtime tool is registered by oh-my-pi yet.",
+    statusGuidance: "Jira readiness is currently runtime-gated; no Jira runtime tool is registered by oh-my-harness yet.",
     fallbackMessage: "Jira runtime access is not enabled yet. Use /connector-setup full or selective setup status for staged guidance.",
     setupModes: CONNECTOR_SETUP_MODES,
     exposureState: "runtime-gated",
@@ -279,7 +279,7 @@ export const connectorBackendCatalog = [
     adapterKind: "atlassian-staged",
     description: "Company wiki capability for Atlassian Confluence; setup-visible until a non-interactive runtime auth route is selected.",
     authGuidance: "Confluence is setup-visible but runtime-gated. Choose and validate a non-interactive Atlassian auth route before enabling tools.",
-    statusGuidance: "Confluence readiness is currently runtime-gated; no Confluence runtime tool is registered by oh-my-pi yet.",
+    statusGuidance: "Confluence readiness is currently runtime-gated; no Confluence runtime tool is registered by oh-my-harness yet.",
     fallbackMessage: "Confluence runtime access is not enabled yet. Use /connector-setup full or selective setup status for staged guidance.",
     setupModes: CONNECTOR_SETUP_MODES,
     exposureState: "runtime-gated",

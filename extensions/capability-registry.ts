@@ -128,15 +128,15 @@ export const capabilityRegistry: readonly CapabilityCapsule[] = [
     extensionPath: "./extensions/setup-doctor",
     envVars: [],
     exposes: {
-      commands: ["oh-my-pi-doctor", "oh-my-pi", "omp", "connector-setup"],
+      commands: ["oh-my-harness-doctor", "oh-my-harness", "oh-my-pi-doctor", "oh-my-pi", "omp", "connector-setup"],
       skills: ["omp"],
     },
     safetyClass: "local-configuration",
     diagnostics: [
       "Summarizes CWD .env, capability toggles, connector/provider metadata, runtime safety policies, gh auth, and local-only paths.",
-      "Provides a lightweight /oh-my-pi command palette for setup and profile verification commands.",
+      "Provides /oh-my-harness and /oh-my-harness-doctor with legacy /oh-my-pi aliases for setup and profile verification.",
       "Registers /connector-setup as the always-available connector setup bootstrap surface.",
-      "Routes omp: <skill-or-command> input through the oh-my-pi namespace facade.",
+      "Routes omp: <skill-or-command> input through the oh-my-harness namespace facade.",
     ],
   },
 ];

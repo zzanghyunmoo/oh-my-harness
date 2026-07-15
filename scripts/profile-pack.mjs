@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
 const PROFILE_DIR = join(REPO_ROOT, "docs", "profiles");
-const LOCK_PATH = join(PROFILE_DIR, "oh-my-pi.profile-lock.json");
+const LOCK_PATH = join(PROFILE_DIR, "oh-my-harness.profile-lock.json");
 const PROFILE_SCHEMA = "./profile-pack.schema.json";
 const LOCK_SCHEMA = "./profile-lock.schema.json";
-const CORE_PACKAGE_INSTALL_SPEC = "git:github.com/zzanghyunmoo/oh-my-pi";
+const CORE_PACKAGE_INSTALL_SPEC = "git:github.com/zzanghyunmoo/oh-my-harness";
 const SECRET_VALUE_FIELD_NAMES = new Set([
   "value",
   "defaultValue",
@@ -158,7 +158,7 @@ function validateProfile(profile, context, seenIds) {
       assert(settingsSpecs.has(ref.installSpec), `${profile.id}: ${ref.installSpec} is marked settings-example but is not in settings.example.json`);
     }
   }
-  assert(installSpecs.has(CORE_PACKAGE_INSTALL_SPEC), `${profile.id}: must include oh-my-pi core package ref`);
+  assert(installSpecs.has(CORE_PACKAGE_INSTALL_SPEC), `${profile.id}: must include oh-my-harness core package ref`);
 
   for (const extensionPath of profile.piPackage?.extensions ?? []) {
     assert(packageExtensions.has(extensionPath), `${profile.id}: piPackage extension ${extensionPath} is not in package.json pi.extensions`);
@@ -183,7 +183,7 @@ function validateProfile(profile, context, seenIds) {
   }
 
   for (const secretRef of profile.secretRefs ?? []) {
-    assert(blueprintNames.has(secretRef.name), `${profile.id}: secretRef ${secretRef.name} is not in docs/blueprints/oh-my-pi.secret-blueprint.json`);
+    assert(blueprintNames.has(secretRef.name), `${profile.id}: secretRef ${secretRef.name} is not in docs/blueprints/oh-my-harness.secret-blueprint.json`);
     assert(secretRef.commitPolicy !== "never-commit-oauth-state" || secretRef.kind === "oauth-state", `${profile.id}: oauth commit policy must use oauth-state kind`);
   }
 
@@ -252,7 +252,7 @@ function prettyJson(value) {
 function loadAndValidateProfiles() {
   const packageJson = readJson(join(REPO_ROOT, "package.json"));
   const settingsExample = readJson(join(REPO_ROOT, "settings.example.json"));
-  const secretBlueprint = readJson(join(REPO_ROOT, "docs", "blueprints", "oh-my-pi.secret-blueprint.json"));
+  const secretBlueprint = readJson(join(REPO_ROOT, "docs", "blueprints", "oh-my-harness.secret-blueprint.json"));
   const context = {
     packageJson,
     settingsSpecs: collectSettingsPackageSpecs(settingsExample),
@@ -329,14 +329,14 @@ function commandApply(args) {
     .map((provider) => provider.statusCommand)
     .filter(Boolean);
 
-  out(`oh-my-pi profile apply plan (dry-run): ${profile.id}`);
+  out(`oh-my-harness profile apply plan (dry-run): ${profile.id}`);
   out();
   out("This command is intentionally non-destructive: it does not run pi install, write .env, or start OAuth.");
   out();
   out("Install intent:");
   for (const command of packageCommands) out(`  ${command}`);
   out();
-  out("Selected oh-my-pi extensions for this profile:");
+  out("Selected oh-my-harness extensions for this profile:");
   for (const extensionPath of selectedExtensions) out(`  ${extensionPath}`);
   out();
   out("Optional settings.json packages entry for selected resources:");
@@ -359,7 +359,7 @@ function commandApply(args) {
 }
 
 function printHelp() {
-  out(`Usage: node scripts/profile-pack.mjs <command> [options]\n\nCommands:\n  verify                 Validate profile JSON and deterministic lock receipt.\n  lock [--write]         Print or write docs/profiles/oh-my-pi.profile-lock.json.\n  apply [--profile id]   Print a non-destructive apply plan (default profile: default).`);
+  out(`Usage: node scripts/profile-pack.mjs <command> [options]\n\nCommands:\n  verify                 Validate profile JSON and deterministic lock receipt.\n  lock [--write]         Print or write docs/profiles/oh-my-harness.profile-lock.json.\n  apply [--profile id]   Print a non-destructive apply plan (default profile: default).`);
 }
 
 try {

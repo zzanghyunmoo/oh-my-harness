@@ -12,9 +12,9 @@
     {
       "id": "default",
       "source": "docs/profiles/default.profile.json",
-      "sha256": "2fa0e8dd2f9e4d05b5faa40eed846f9d22ccd8f776a726bc1c65d7b0ea2d9796",
+      "sha256": "902f9774373f0a1fa0e709c6badcda90b44007692e0b35608fa9e51694f6de6f",
       "packages": [
-        "git:github.com/zzanghyunmoo/oh-my-pi",
+        "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"
       ],
       "extensions": [
@@ -40,9 +40,9 @@
     {
       "id": "full",
       "source": "docs/profiles/full.profile.json",
-      "sha256": "bc3afcf94073059ef28d3bd8b752c7bb5de89553cc1bdc7b0abb35c258e7f0ab",
+      "sha256": "f166dc4300652f9e42e346ac97bbe0f5b2e733ca136ba448bd458dd3dad5789d",
       "packages": [
-        "git:github.com/zzanghyunmoo/oh-my-pi",
+        "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-web-access",
         "npm:@leing2021/super-pi",
         "npm:pi-clear"
@@ -87,9 +87,9 @@
     {
       "id": "proxy-provider",
       "source": "docs/profiles/proxy-provider.profile.json",
-      "sha256": "50a4f32cc9d0bb062edbea4aecc2cad4d3df51f362dc4cc1e03b00a9a1d79806",
+      "sha256": "c1a3af9ae574442908bb63b0faa9d4445aa12f1c4a961599c2c1623c0d07c645",
       "packages": [
-        "git:github.com/zzanghyunmoo/oh-my-pi",
+        "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"
       ],
       "extensions": [
@@ -123,9 +123,9 @@
     {
       "id": "workspace",
       "source": "docs/profiles/workspace.profile.json",
-      "sha256": "f56dfe50daa2838b524310fdec357d927b20cd872f60da9e23a0e9d1da50a4f3",
+      "sha256": "96a2a5efb1c2ab69d71d1d6eed1435c4de7b5635773dca918432d9ce11997d64",
       "packages": [
-        "git:github.com/zzanghyunmoo/oh-my-pi",
+        "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-web-access",
         "npm:@leing2021/super-pi",
         "npm:pi-clear"

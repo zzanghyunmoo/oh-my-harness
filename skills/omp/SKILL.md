@@ -1,11 +1,11 @@
 ---
 name: omp
-description: "Route oh-my-pi namespace requests. Use when the user writes `omp: <skill-or-command>` or asks to use oh-my-pi as a facade over installed Pi skills, extension commands, tools, providers, or setup workflows."
+description: "Route oh-my-harness namespace requests. Use when the user writes `omp: <skill-or-command>` or asks to use oh-my-harness as a facade over installed Pi skills, extension commands, tools, providers, or setup workflows."
 ---
 
 # OMP Namespace
 
-Use this skill when the user invokes the oh-my-pi namespace:
+Use this skill when the user invokes the oh-my-harness namespace. The `oh-my-pi:` prefix remains a v1 compatibility alias:
 
 ```text
 omp: <skill-or-command> [arguments]
@@ -13,7 +13,7 @@ omp: <skill-or-command> [arguments]
 
 ## Contract
 
-- Treat `omp:` as the user-facing facade owned by `oh-my-pi`.
+- Treat `omp:` as the user-facing facade owned by `oh-my-harness`.
 - Preserve the original package/source mapping for debugging, but do not require
   the user to remember package names during normal use.
 - Prefer the matching installed Pi skill or extension command instead of
@@ -44,8 +44,8 @@ Exact skill names are also valid: `omp: ce-plan ...`,
 | OMP input | Route to |
 | --- | --- |
 | `omp: help` | OMP namespace help |
-| `omp: palette` | `/oh-my-pi` command palette |
-| `omp: doctor` | `/oh-my-pi-doctor` setup diagnostics |
+| `omp: palette` | `/oh-my-harness` command palette |
+| `omp: doctor` | `/oh-my-harness-doctor` setup diagnostics |
 | `omp: setup full` | `/connector-setup full` setup intent |
 | `omp: status` | connector readiness status |
 | `omp: quotio-status` | Quotio provider status |

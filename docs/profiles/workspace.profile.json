@@ -9,8 +9,8 @@
   ],
   "packageRefs": [
     {
-      "name": "oh-my-pi",
-      "installSpec": "git:github.com/zzanghyunmoo/oh-my-pi",
+      "name": "oh-my-harness",
+      "installSpec": "git:github.com/zzanghyunmoo/oh-my-harness",
       "source": "package-json",
       "required": true,
       "intent": "core-package"
@@ -86,7 +86,7 @@
     {
       "name": "ENABLE_WORKSPACE_CONNECTORS",
       "kind": "toggle",
-      "source": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Use this profile on a machine that should expose Linear/Notion connector commands and tools.",
       "commitPolicy": "name-and-intent-only"
     }
@@ -218,7 +218,7 @@
   "providers": [],
   "metadataRefs": {
     "packageJson": "package.json",
-    "secretBlueprint": "docs/blueprints/oh-my-pi.secret-blueprint.json",
+    "secretBlueprint": "docs/blueprints/oh-my-harness.secret-blueprint.json",
     "capabilityRegistry": "extensions/capability-registry.ts",
     "connectorCatalog": "extensions/connector-backend-catalog.ts",
     "providerAdapterKit": "extensions/provider-adapter-kit/openai-compatible.ts"

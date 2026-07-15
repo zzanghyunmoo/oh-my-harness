@@ -72,7 +72,7 @@ type OmpCommandTarget =
   | "github-auth"
   | "gitlab-auth";
 
-const OMP_PREFIX_PATTERN = /^\s*(?:omp|oh-my-pi)\s*:\s*(.*)$/i;
+const OMP_PREFIX_PATTERN = /^\s*(?:omp|oh-my-harness|oh-my-pi)\s*:\s*(.*)$/i;
 const OMP_SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const OMP_SKILL_ALIASES: Readonly<Record<string, string>> = {
   brainstorm: "ce-brainstorm",
@@ -346,7 +346,7 @@ export function buildOmpNamespaceReport(): string {
     .join(", ");
 
   return [
-    "oh-my-pi namespace",
+    "oh-my-harness namespace",
     "",
     "Use `omp: <skill-or-command> [args]` as the user-facing entry point.",
     "Skills expand to Pi skill commands, e.g. `omp: ce-plan docs/foo.md` → `/skill:ce-plan docs/foo.md`.",
@@ -386,11 +386,11 @@ async function handleOmpCommand(target: OmpCommandTarget, args: string, ctx: Ext
     return;
   }
   if (target === "profile-verify") {
-    await ctx.ui.notify("OMP profile verify: run `npm run profile:verify` from the oh-my-pi repo.", "info");
+    await ctx.ui.notify("OMP profile verify: run `npm run profile:verify` from the oh-my-harness repo.", "info");
     return;
   }
   if (target === "profile-apply") {
-    await ctx.ui.notify("OMP profile apply: run `npm run profile:apply -- --profile full` from the oh-my-pi repo. It is dry-run only by default.", "info");
+    await ctx.ui.notify("OMP profile apply: run `npm run profile:apply -- --profile full` from the oh-my-harness repo. It is dry-run only by default.", "info");
     return;
   }
   if (target === "quotio-status") {
@@ -494,7 +494,7 @@ async function buildDoctorReport(): Promise<string> {
     : line("warn", "GitLab CLI auth", "not available in connector readiness");
 
   return [
-    "oh-my-pi setup doctor",
+    "oh-my-harness setup doctor",
     "",
     line(existsSync(envPath) ? "ok" : "warn", "CWD .env", existsSync(envPath) ? `found at ${envPath}` : `not found at ${envPath}`),
     line("info", "Capability registry", formatCapabilitySummary(getCapabilityCapsules())),
@@ -515,16 +515,17 @@ async function buildDoctorReport(): Promise<string> {
 
 function buildPaletteReport(): string {
   return [
-    "oh-my-pi commands",
+    "oh-my-harness commands",
     "",
-    "- /omp — show OMP namespace help; type `omp: <skill-or-command> [args]` to route through oh-my-pi.",
+    "- /omp — show OMP namespace help; type `omp: <skill-or-command> [args]` to route through oh-my-harness.",
     "- omp: ce-plan docs/foo.md — expand to /skill:ce-plan docs/foo.md.",
-    "- omp: doctor — run setup diagnostics without remembering /oh-my-pi-doctor.",
+    "- omp: doctor — run setup diagnostics without remembering /oh-my-harness-doctor.",
     "- /connector-setup full — record full connector setup intent for personal Linear/Notion/GitHub and company Jira/Confluence/GitLab.",
     "- /connector-setup selective tenant:company capability:git — record selective setup intent by tenant/capability.",
     "- /connector-setup minimal — intentionally hide issue-tracker, wiki, and git connector affordances.",
-    "- /oh-my-pi-doctor — run read-only setup diagnostics for local env, capability registry, connector catalog, provider checks, gh/glab auth, safety policies, readiness, and local-only paths.",
-    "- /oh-my-pi — show this lightweight command palette.",
+    "- /oh-my-harness-doctor — run read-only setup diagnostics for local env, capability registry, connector catalog, provider checks, gh/glab auth, safety policies, readiness, and local-only paths.",
+    "- /oh-my-harness — show this lightweight command palette.",
+    "- /oh-my-pi-doctor and /oh-my-pi — legacy-compatible aliases for the commands above.",
     "- /quotio-status — check Quotio models when ENABLE_QUOTIO=true and Quotio env is configured.",
     "- /connector-login linear|notion — start direct browser OAuth when ENABLE_WORKSPACE_CONNECTORS=true; OAuth tokens are stored locally outside the repo.",
     "- /connector-status [service] — show connector setup readiness plus OAuth/access-key status.",
@@ -540,7 +541,7 @@ function buildPaletteReport(): string {
     "- npm run profile:apply -- --profile proxy-provider — print the optional Quotio provider setup plan.",
     "- npm run profile:apply -- --profile full — print a non-destructive full setup plan.",
     "",
-    "Tip: CWD .env is loaded by env-loader before other oh-my-pi extensions. /connector-setup is available even before ENABLE_WORKSPACE_CONNECTORS=true.",
+    "Tip: CWD .env is loaded by env-loader before other oh-my-harness extensions. /connector-setup is available even before ENABLE_WORKSPACE_CONNECTORS=true.",
   ].join("\n");
 }
 
@@ -563,8 +564,15 @@ async function buildConnectorSetupReport(args: string): Promise<{ message: strin
 export default function (pi: ExtensionAPI) {
   pi.on("input", handleOmpInput);
 
+  pi.registerCommand("oh-my-harness-doctor", {
+    description: "Run read-only oh-my-harness setup diagnostics for env toggles, provider/connectors, safety policies, gh auth, and local-only paths.",
+    handler: async (_args: string, ctx: NotificationContext) => {
+      ctx.ui.notify(await buildDoctorReport(), "info");
+    },
+  });
+
   pi.registerCommand("oh-my-pi-doctor", {
-    description: "Run read-only oh-my-pi setup diagnostics for env toggles, provider/connectors, safety policies, gh auth, and local-only paths.",
+    description: "Legacy-compatible alias for /oh-my-harness-doctor.",
     handler: async (_args: string, ctx: NotificationContext) => {
       ctx.ui.notify(await buildDoctorReport(), "info");
     },
@@ -578,15 +586,22 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("oh-my-harness", {
+    description: "Show the lightweight oh-my-harness command palette and setup help.",
+    handler: async (_args: string, ctx: NotificationContext) => {
+      ctx.ui.notify(buildPaletteReport(), "info");
+    },
+  });
+
   pi.registerCommand("oh-my-pi", {
-    description: "Show the lightweight oh-my-pi command palette and setup help.",
+    description: "Legacy-compatible alias for /oh-my-harness.",
     handler: async (_args: string, ctx: NotificationContext) => {
       ctx.ui.notify(buildPaletteReport(), "info");
     },
   });
 
   pi.registerCommand("omp", {
-    description: "Show oh-my-pi namespace help for `omp: <skill-or-command>` aliases.",
+    description: "Show oh-my-harness namespace help for `omp: <skill-or-command>` aliases.",
     handler: async (_args: string, ctx: NotificationContext) => {
       ctx.ui.notify(buildOmpNamespaceReport(), "info");
     },

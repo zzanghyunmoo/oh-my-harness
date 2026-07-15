@@ -1,11 +1,11 @@
 # Secret Blueprint + Secret References
 
-This directory contains the committed, secret-free baseline for recreating local oh-my-pi capabilities on another machine.
+This directory contains the committed, secret-free baseline for recreating local oh-my-harness capabilities on another machine.
 
 ## Committed artifacts
 
 - `secret-references.schema.json` — JSON Schema for commit-safe secret/reference metadata.
-- `oh-my-pi.secret-blueprint.json` — current oh-my-pi blueprint instance. It records names, intent, boundaries, and recreation steps only.
+- `oh-my-harness.secret-blueprint.json` — current oh-my-harness blueprint instance. It records names, intent, boundaries, and recreation steps only.
 
 These files may mention environment variable names and package install specs, but they must not include actual tokens, OAuth state, local endpoint values, or copied `.env` content.
 
@@ -53,19 +53,19 @@ The OAuth/session state created by those flows is local-only. Depending on the r
 
 The blueprint records package/profile intent without changing this PR's runtime extension list:
 
-- `git:github.com/zzanghyunmoo/oh-my-pi` — the core package represented by this repository.
+- `git:github.com/zzanghyunmoo/oh-my-harness` — the core package represented by this repository.
 - `npm:pi-clear` — recent manual package signal from `pi install npm:pi-clear`; recorded as intent only.
 
-Future profile/lockfile work can consume this intent. This PR intentionally does not add a new Pi extension in `package.json`.
+The profile lock consumes this intent without adding or reordering Pi extensions in `package.json`.
 
 ## Recreate on another machine
 
-1. Install oh-my-pi:
+1. Install oh-my-harness:
 
    ```bash
-   pi install git:github.com/zzanghyunmoo/oh-my-pi
+   pi install git:github.com/zzanghyunmoo/oh-my-harness
    # or, for a private/SSH checkout:
-   pi install git:git@github.com:zzanghyunmoo/oh-my-pi
+   pi install git:git@github.com:zzanghyunmoo/oh-my-harness
    ```
 
 2. If the local profile should include the manual package signal, install pi-clear:
