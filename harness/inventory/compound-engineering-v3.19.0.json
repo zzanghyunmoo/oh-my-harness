@@ -1,0 +1,161 @@
+{
+  "derivation": {
+    "expectedCount": 29,
+    "ordering": "lexicographic-by-id",
+    "pattern": "skills/*/SKILL.md",
+    "runtimeFilters": []
+  },
+  "schemaVersion": "1.0.0",
+  "skills": [
+    {
+      "id": "ce-brainstorm",
+      "objectId": "7f053e18fe8bc84851b85d6f00e6318ad10d8021",
+      "path": "skills/ce-brainstorm/SKILL.md"
+    },
+    {
+      "id": "ce-code-review",
+      "objectId": "636e4c35427683a8996a501afbc2f103d12b12a1",
+      "path": "skills/ce-code-review/SKILL.md"
+    },
+    {
+      "id": "ce-commit",
+      "objectId": "e5ec50217f05bc741ba50c078e82561e680923e9",
+      "path": "skills/ce-commit/SKILL.md"
+    },
+    {
+      "id": "ce-commit-push-pr",
+      "objectId": "bd7fc4f8f94aea857fc6a7fa412285f5ea2d8c0a",
+      "path": "skills/ce-commit-push-pr/SKILL.md"
+    },
+    {
+      "id": "ce-compound",
+      "objectId": "6f1ce66ddca79a20c404357ca4a5da45f29880f0",
+      "path": "skills/ce-compound/SKILL.md"
+    },
+    {
+      "id": "ce-compound-refresh",
+      "objectId": "6931b3fb4c71e1c75b3e6c4db5d4080aa29bb840",
+      "path": "skills/ce-compound-refresh/SKILL.md"
+    },
+    {
+      "id": "ce-debug",
+      "objectId": "1df63d9e5703d34688b084402e2c584e294c7cf1",
+      "path": "skills/ce-debug/SKILL.md"
+    },
+    {
+      "id": "ce-doc-review",
+      "objectId": "75def06510d924f99db8bb86aacbfc6a31ec8c92",
+      "path": "skills/ce-doc-review/SKILL.md"
+    },
+    {
+      "id": "ce-dogfood",
+      "objectId": "012979f739c095eed033b0ba8660e673cdf6ce9a",
+      "path": "skills/ce-dogfood/SKILL.md"
+    },
+    {
+      "id": "ce-explain",
+      "objectId": "382104228c3012ce3fbe4835c78af425c51b99ab",
+      "path": "skills/ce-explain/SKILL.md"
+    },
+    {
+      "id": "ce-ideate",
+      "objectId": "9dcb36b55fd76e45d334939f90b0f73c0966622c",
+      "path": "skills/ce-ideate/SKILL.md"
+    },
+    {
+      "id": "ce-optimize",
+      "objectId": "6385f04c05c3455f9f379e5835486e04f9b271d0",
+      "path": "skills/ce-optimize/SKILL.md"
+    },
+    {
+      "id": "ce-plan",
+      "objectId": "3142126fe9a41c1dc0ed19f1530ad729d027abb8",
+      "path": "skills/ce-plan/SKILL.md"
+    },
+    {
+      "id": "ce-polish",
+      "objectId": "1e77f6ec662a3a5f94969c17157faa7b8f2dcf89",
+      "path": "skills/ce-polish/SKILL.md"
+    },
+    {
+      "id": "ce-pov",
+      "objectId": "c61045d138688a143468ba7da1ce7ca229656682",
+      "path": "skills/ce-pov/SKILL.md"
+    },
+    {
+      "id": "ce-product-pulse",
+      "objectId": "ee25dec2a42c6cfdc7ced60c03d1ca10a98e3289",
+      "path": "skills/ce-product-pulse/SKILL.md"
+    },
+    {
+      "id": "ce-promote",
+      "objectId": "220cf0e681497da9bbaf5a8fd436aa68a09dc9bb",
+      "path": "skills/ce-promote/SKILL.md"
+    },
+    {
+      "id": "ce-proof",
+      "objectId": "2f9ff3d8cbe112fa722db67427fddc275f720dc9",
+      "path": "skills/ce-proof/SKILL.md"
+    },
+    {
+      "id": "ce-resolve-pr-feedback",
+      "objectId": "296089fa8a841f3321a3e58b69b06ca967bc6050",
+      "path": "skills/ce-resolve-pr-feedback/SKILL.md"
+    },
+    {
+      "id": "ce-riffrec-feedback-analysis",
+      "objectId": "bfd417196cdf2f824dc90e018577c556fc47ae69",
+      "path": "skills/ce-riffrec-feedback-analysis/SKILL.md"
+    },
+    {
+      "id": "ce-setup",
+      "objectId": "d701dce8fa85a7f69bb5abbfb244f0ef0025ce95",
+      "path": "skills/ce-setup/SKILL.md"
+    },
+    {
+      "id": "ce-simplify-code",
+      "objectId": "94fb4938d5f1e786964af0766986d375f764e871",
+      "path": "skills/ce-simplify-code/SKILL.md"
+    },
+    {
+      "id": "ce-strategy",
+      "objectId": "1636558b7ec13ebdcd95d0a33f1f1b65af46691a",
+      "path": "skills/ce-strategy/SKILL.md"
+    },
+    {
+      "id": "ce-sweep",
+      "objectId": "5a482fdac58acce4a6e62d449f52b6f7909fd3ab",
+      "path": "skills/ce-sweep/SKILL.md"
+    },
+    {
+      "id": "ce-test-browser",
+      "objectId": "42883454834106bc1d053f9f3f7de73e2f195d85",
+      "path": "skills/ce-test-browser/SKILL.md"
+    },
+    {
+      "id": "ce-test-xcode",
+      "objectId": "07f1518fbf6dd779b4a0536c53984316dc547942",
+      "path": "skills/ce-test-xcode/SKILL.md"
+    },
+    {
+      "id": "ce-work",
+      "objectId": "616d8266248e8fea6531262412ec145f18b13c51",
+      "path": "skills/ce-work/SKILL.md"
+    },
+    {
+      "id": "ce-worktree",
+      "objectId": "e25445fa9e4c790684ad0e4c4ba6f0225e4146c0",
+      "path": "skills/ce-worktree/SKILL.md"
+    },
+    {
+      "id": "lfg",
+      "objectId": "85a3a031d7f5e57cfbab984157ec67fcbb58539c",
+      "path": "skills/lfg/SKILL.md"
+    }
+  ],
+  "source": {
+    "commit": "1756c0b9f3cf94493f287ea29ae766ad668fb7cf",
+    "tag": "compound-engineering-v3.19.0",
+    "tree": "808d20cc08a2b45e0200e68f5b9f604c55cf8a06"
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "$schema": "../contracts/upstream-lock.schema.json",
+  "dependencyLock": {
+    "objectId": "90abd9f19e8303373ac762fa86a6f13f8a36f435",
+    "path": "bun.lock"
+  },
+  "executables": {
+    "canonicalSha256": "bd2aa28cbdace6ac4753c39e34012f0395492cbe9e74d6ac4794da3ab7870a36",
+    "entries": [
+      {
+        "mode": "100755",
+        "objectId": "d216f683ac7abd11233b8a3d47d0ddebb2dc79ca",
+        "path": "skills/ce-code-review/scripts/cross-model-adversarial-review.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "4e14904efe73871311784e391b95ee4105112973",
+        "path": "skills/ce-compound-refresh/scripts/validate-frontmatter.py"
+      },
+      {
+        "mode": "100755",
+        "objectId": "46f426f41b5489f4a15b34566282a0a240f7b22d",
+        "path": "skills/ce-compound/scripts/session-history/discover-sessions.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "4e14904efe73871311784e391b95ee4105112973",
+        "path": "skills/ce-compound/scripts/validate-frontmatter.py"
+      },
+      {
+        "mode": "100755",
+        "objectId": "402b1b510004571977e755f6ace763fcf9d44668",
+        "path": "skills/ce-optimize/scripts/experiment-worktree.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "bbf02c5f96de425234b781f4a33e73b960b7d59f",
+        "path": "skills/ce-optimize/scripts/measure.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "e434eb8c6e779fba985ede556b944525897bd623",
+        "path": "skills/ce-optimize/scripts/parallel-probe.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "4a57bfe16dee90262780fcc9fa645f446d192afd",
+        "path": "skills/ce-polish/scripts/detect-project-type.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "0cc34376237bc3997017cb15d5e2fda7fb2d877a",
+        "path": "skills/ce-polish/scripts/read-launch-json.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "f84537ca28e1e347290ec03f5852ba77967cf829",
+        "path": "skills/ce-polish/scripts/resolve-port.sh"
+      },
+      {
+        "mode": "100755",
+        "objectId": "f8b531777e2e3e3ff13f4d0cd5bdaf1e6791838a",
+        "path": "skills/ce-resolve-pr-feedback/scripts/get-pr-comments"
+      },
+      {
+        "mode": "100755",
+        "objectId": "dd89635f83a3a3b2e5413bf15371b74c65ce991b",
+        "path": "skills/ce-resolve-pr-feedback/scripts/get-thread-for-comment"
+      },
+      {
+        "mode": "100755",
+        "objectId": "bde485ef84a7f3df7426c3e0d3107580472a5991",
+        "path": "skills/ce-resolve-pr-feedback/scripts/reply-to-pr-thread"
+      },
+      {
+        "mode": "100755",
+        "objectId": "0e40002c63bf22f1ef0606e24cdf6ef1b43a4c33",
+        "path": "skills/ce-resolve-pr-feedback/scripts/resolve-pr-thread"
+      },
+      {
+        "mode": "100755",
+        "objectId": "b0673d820112851fa71cfbea684e835c2f395785",
+        "path": "skills/ce-riffrec-feedback-analysis/scripts/analyze_riffrec_zip.py"
+      },
+      {
+        "mode": "100755",
+        "objectId": "40624ba8c785eaad8f701aab443538525b247d77",
+        "path": "skills/ce-setup/scripts/check-health"
+      },
+      {
+        "mode": "100755",
+        "objectId": "b0673d820112851fa71cfbea684e835c2f395785",
+        "path": "skills/ce-sweep/scripts/analyze_riffrec_zip.py"
+      }
+    ]
+  },
+  "inventory": {
+    "canonicalSha256": "9332006c292d0402c75c5e8280792aec4cdbdefed9804f8a77edf086c8d3a49c",
+    "count": 29,
+    "path": "harness/inventory/compound-engineering-v3.19.0.json"
+  },
+  "manifest": {
+    "name": "compound-engineering",
+    "objectId": "13a2571aeae39921461e025b91b54ec06b9dc739",
+    "path": "package.json",
+    "version": "3.19.0"
+  },
+  "packageScripts": {
+    "canonicalSha256": "5051a7f4331b9254fc39d3d47b9124c6d3172aeee81729eb8ecd32e50b796fd3",
+    "entries": [
+      {
+        "command": "bun run src/index.ts cleanup",
+        "name": "cleanup"
+      },
+      {
+        "command": "bun run src/index.ts install",
+        "name": "cli:install"
+      },
+      {
+        "command": "bun run src/index.ts convert",
+        "name": "convert"
+      },
+      {
+        "command": "bun run src/index.ts",
+        "name": "dev"
+      },
+      {
+        "command": "bun run src/index.ts list",
+        "name": "list"
+      },
+      {
+        "command": "claude plugin validate .claude-plugin/marketplace.json && claude plugin validate .",
+        "name": "plugin:validate"
+      },
+      {
+        "command": "bun run scripts/release/preview.ts",
+        "name": "release:preview"
+      },
+      {
+        "command": "bun run scripts/release/sync-metadata.ts --write",
+        "name": "release:sync-metadata"
+      },
+      {
+        "command": "bun run scripts/release/validate.ts",
+        "name": "release:validate"
+      },
+      {
+        "command": "bun test",
+        "name": "test"
+      }
+    ],
+    "executionPolicy": "deny-all"
+  },
+  "provenance": {
+    "apiUrl": "https://api.github.com/repos/EveryInc/compound-engineering-plugin/commits/1756c0b9f3cf94493f287ea29ae766ad668fb7cf",
+    "claimBoundary": "Offline verification proves pinned content identity and expected origin configuration, not authenticated acquisition.",
+    "provider": "github",
+    "reason": "valid",
+    "signatureSha256": "3f204ed1d1b7eb347017437d683f2dfd50fe25b39b14f3f513c9a0c385cf8302",
+    "signedPayloadSha256": "1f5a7a763bb63225fe199c256ff6f783b54408a9f042c9fd8138b1a3d4be0223",
+    "verified": true,
+    "verifiedAt": "2026-07-08T07:29:49Z"
+  },
+  "schemaVersion": "1.0.0",
+  "source": {
+    "commit": "1756c0b9f3cf94493f287ea29ae766ad668fb7cf",
+    "owner": "EveryInc",
+    "repository": "compound-engineering-plugin",
+    "tag": "compound-engineering-v3.19.0",
+    "tagType": "lightweight",
+    "tree": "808d20cc08a2b45e0200e68f5b9f604c55cf8a06",
+    "url": "https://github.com/EveryInc/compound-engineering-plugin"
+  }
+}

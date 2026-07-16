@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/blob/main/harness/contracts/upstream-lock.schema.json",
+  "title": "Oh My Harness upstream lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "source", "manifest", "provenance", "dependencyLock", "executables", "packageScripts", "inventory"],
+  "properties": {
+    "$schema": { "const": "../contracts/upstream-lock.schema.json" },
+    "schemaVersion": { "const": "1.0.0" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "repository", "url", "tag", "tagType", "commit", "tree"],
+      "properties": {
+        "owner": { "const": "EveryInc" },
+        "repository": { "const": "compound-engineering-plugin" },
+        "url": { "const": "https://github.com/EveryInc/compound-engineering-plugin" },
+        "tag": { "const": "compound-engineering-v3.19.0" },
+        "tagType": { "const": "lightweight" },
+        "commit": { "const": "1756c0b9f3cf94493f287ea29ae766ad668fb7cf" },
+        "tree": { "const": "808d20cc08a2b45e0200e68f5b9f604c55cf8a06" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "objectId", "name", "version"],
+      "properties": {
+        "path": { "const": "package.json" },
+        "objectId": { "$ref": "#/$defs/objectId" },
+        "name": { "const": "compound-engineering" },
+        "version": { "const": "3.19.0" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "apiUrl", "verified", "reason", "verifiedAt", "signatureSha256", "signedPayloadSha256", "claimBoundary"],
+      "properties": {
+        "provider": { "const": "github" },
+        "apiUrl": { "type": "string", "format": "uri" },
+        "verified": { "const": true },
+        "reason": { "const": "valid" },
+        "verifiedAt": { "type": "string", "format": "date-time" },
+        "signatureSha256": { "$ref": "#/$defs/sha256" },
+        "signedPayloadSha256": { "$ref": "#/$defs/sha256" },
+        "claimBoundary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dependencyLock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "objectId"],
+      "properties": { "path": { "const": "bun.lock" }, "objectId": { "$ref": "#/$defs/objectId" } }
+    },
+    "executables": { "$ref": "#/$defs/executableSet" },
+    "packageScripts": { "$ref": "#/$defs/packageScriptSet" },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "count", "canonicalSha256"],
+      "properties": {
+        "path": { "const": "harness/inventory/compound-engineering-v3.19.0.json" },
+        "count": { "const": 29 },
+        "canonicalSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  },
+  "$defs": {
+    "objectId": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "executableSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries", "canonicalSha256"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "mode", "objectId"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "mode": { "const": "100755" },
+              "objectId": { "$ref": "#/$defs/objectId" }
+            }
+          }
+        },
+        "canonicalSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "packageScriptSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries", "canonicalSha256", "executionPolicy"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "command"],
+            "properties": { "name": { "type": "string", "minLength": 1 }, "command": { "type": "string" } }
+          }
+        },
+        "canonicalSha256": { "$ref": "#/$defs/sha256" },
+        "executionPolicy": { "const": "deny-all" }
+      }
+    }
+  }
+}
