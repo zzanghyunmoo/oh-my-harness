@@ -129,6 +129,9 @@ test("secret policy rejects credential material but permits public provenance", 
   assert.throws(() => assertSecretFree({ nested: { ACCESS_KEY: "secret" } }), /secret-bearing field/);
   assert.throws(() => assertSecretFree({ note: "Bearer abcdefghijklmnopqrstuvwxyz" }), /credential-like value/);
   assert.throws(() => assertSecretFree({ note: "Basic YTpi" }), /credential-like value/);
+  assert.throws(() => assertSecretFree({ note: "github_pat_abcdefghijklmnopqrstuvwxyz" }), /credential-like value/);
+  assert.throws(() => assertSecretFree({ note: "-----BEGIN ENCRYPTED PRIVATE KEY-----" }), /credential-like value/);
+  assert.throws(() => assertSecretFree({ note: "https://user@example.com/private" }), /credential-like value/);
   assert.throws(() => assertSecretFree({ note: "-----BEGIN PRIVATE KEY-----" }), /credential-like value/);
   assert.doesNotThrow(() => assertSecretFree({ commit: "1756c0b9f3cf94493f287ea29ae766ad668fb7cf", url: "https://github.com/EveryInc/compound-engineering-plugin.git", signatureSha256: "a".repeat(64) }));
 });
@@ -306,6 +309,18 @@ test("artifact validation rejects closed-shape drift and stale pre-images", () =
     const extraInventoryField = structuredClone(artifacts);
     extraInventoryField.inventory.unexpected = true;
     assert.throws(() => writeArtifacts(target, extraInventoryField), /closed shape/);
+
+    const shortInventory = structuredClone(artifacts);
+    shortInventory.inventory.skills.pop();
+    assert.throws(() => writeArtifacts(target, shortInventory), /expected exactly 29 entries/);
+
+    const staleExecutableDigest = structuredClone(artifacts);
+    staleExecutableDigest.lock.executables.entries[0].objectId = "0".repeat(40);
+    assert.throws(() => writeArtifacts(target, staleExecutableDigest), /entries digest mismatch/);
+
+    const stalePackageScriptDigest = structuredClone(artifacts);
+    stalePackageScriptDigest.lock.packageScripts.entries[0].command = "bun --version";
+    assert.throws(() => writeArtifacts(target, stalePackageScriptDigest), /entries digest mismatch/);
 
     const secretPackageCommand = structuredClone(artifacts);
     secretPackageCommand.lock.packageScripts.entries[0].command = "curl -H 'Authorization: Basic YTpi'";

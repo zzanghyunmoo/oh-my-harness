@@ -42,6 +42,13 @@ export const DEFAULT_POLICY = Object.freeze({
   packageVersion: "3.19.0",
   expectedSkillCount: 29,
   requireSignedCommit: true,
+  expectedInventorySha256: "9332006c292d0402c75c5e8280792aec4cdbdefed9804f8a77edf086c8d3a49c",
+  expectedManifestObjectId: "13a2571aeae39921461e025b91b54ec06b9dc739",
+  expectedDependencyLockObjectId: "90abd9f19e8303373ac762fa86a6f13f8a36f435",
+  expectedExecutablesSha256: "bd2aa28cbdace6ac4753c39e34012f0395492cbe9e74d6ac4794da3ab7870a36",
+  expectedPackageScriptsSha256: "5051a7f4331b9254fc39d3d47b9124c6d3172aeee81729eb8ecd32e50b796fd3",
+  expectedSignatureSha256: "3f204ed1d1b7eb347017437d683f2dfd50fe25b39b14f3f513c9a0c385cf8302",
+  expectedSignedPayloadSha256: "1f5a7a763bb63225fe199c256ff6f783b54408a9f042c9fd8138b1a3d4be0223",
   githubVerification: Object.freeze({
     provider: "github",
     apiUrl: `${GITHUB_API_ORIGIN}/repos/${UPSTREAM_OWNER}/${UPSTREAM_REPOSITORY}/commits/1756c0b9f3cf94493f287ea29ae766ad668fb7cf`,
@@ -111,16 +118,39 @@ function assertInventoryShape(inventory) {
     ["expectedCount", "ordering", "pattern", "runtimeFilters"],
     "inventory.derivation",
   );
-  if (!Array.isArray(inventory.derivation.runtimeFilters) || inventory.derivation.runtimeFilters.length !== 0) {
-    fail("inventory.derivation.runtimeFilters: expected empty array");
+  if (inventory.schemaVersion !== "1.0.0") fail("inventory.schemaVersion: expected 1.0.0");
+  const expectedSource = { commit: DEFAULT_POLICY.commit, tag: DEFAULT_POLICY.tag, tree: DEFAULT_POLICY.tree };
+  if (!isDeepStrictEqual(inventory.source, expectedSource)) fail("inventory.source: pinned source mismatch");
+  if (
+    inventory.derivation.expectedCount !== DEFAULT_POLICY.expectedSkillCount ||
+    inventory.derivation.ordering !== "lexicographic-by-id" ||
+    inventory.derivation.pattern !== "skills/*/SKILL.md" ||
+    !Array.isArray(inventory.derivation.runtimeFilters) ||
+    inventory.derivation.runtimeFilters.length !== 0
+  ) {
+    fail("inventory.derivation: fixed derivation contract mismatch");
   }
-  if (!Array.isArray(inventory.skills)) fail("inventory.skills: expected array");
+  if (!Array.isArray(inventory.skills) || inventory.skills.length !== DEFAULT_POLICY.expectedSkillCount) {
+    fail(`inventory.skills: expected exactly ${DEFAULT_POLICY.expectedSkillCount} entries`);
+  }
   for (const [index, skill] of inventory.skills.entries()) {
     assertClosedRecord(skill, ["id", "objectId", "path"], `inventory.skills[${index}]`);
-    for (const key of ["id", "objectId", "path"]) {
-      if (typeof skill[key] !== "string" || !skill[key]) fail(`inventory.skills[${index}].${key}: expected string`);
-    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.id)) fail(`inventory.skills[${index}].id: invalid skill id`);
+    if (!/^[0-9a-f]{40}$/.test(skill.objectId)) fail(`inventory.skills[${index}].objectId: invalid Git object id`);
+    if (skill.path !== `skills/${skill.id}/SKILL.md`) fail(`inventory.skills[${index}].path: skill path mismatch`);
   }
+  const skillIds = inventory.skills.map(({ id }) => id);
+  if (new Set(skillIds).size !== skillIds.length || !isDeepStrictEqual(skillIds, [...skillIds].sort())) {
+    fail("inventory.skills: IDs must be unique and lexicographically ordered");
+  }
+}
+
+function assertCanonicalEntries(entries, digest, key, path) {
+  const entryKeys = entries.map(key);
+  if (new Set(entryKeys).size !== entryKeys.length || !isDeepStrictEqual(entryKeys, [...entryKeys].sort())) {
+    fail(`${path}.entries: keys must be unique and lexicographically ordered`);
+  }
+  if (digest !== canonicalSha256(entries)) fail(`${path}.canonicalSha256: entries digest mismatch`);
 }
 
 function validateArtifactModels(artifacts) {
@@ -134,8 +164,63 @@ function validateArtifactModels(artifacts) {
   assertJsonSchema(artifacts.lock, lockSchema, lockSchema, "lock");
   assertSecretFree(artifacts.inventory);
   assertSecretFree(artifacts.lock);
-  if (artifacts.lock.inventory.canonicalSha256 !== canonicalSha256(artifacts.inventory)) {
-    fail("lock inventory digest does not match inventory");
+
+  const { inventory, lock } = artifacts;
+  const expectedLockSource = {
+    commit: DEFAULT_POLICY.commit,
+    owner: DEFAULT_POLICY.owner,
+    repository: DEFAULT_POLICY.repository,
+    tag: DEFAULT_POLICY.tag,
+    tagType: "lightweight",
+    tree: DEFAULT_POLICY.tree,
+    url: DEFAULT_POLICY.sourceUrl,
+  };
+  if (lock.schemaVersion !== "1.0.0") fail("lock.schemaVersion: expected 1.0.0");
+  if (!isDeepStrictEqual(lock.source, expectedLockSource)) fail("lock.source: pinned source mismatch");
+  if (lock.inventory.count !== inventory.skills.length || lock.inventory.path !== INVENTORY_RELATIVE_PATH) {
+    fail("lock.inventory: inventory count or path mismatch");
+  }
+  const inventoryDigest = canonicalSha256(inventory);
+  if (
+    inventoryDigest !== DEFAULT_POLICY.expectedInventorySha256 ||
+    lock.inventory.canonicalSha256 !== inventoryDigest
+  ) {
+    fail("lock inventory digest does not match the pinned inventory");
+  }
+  if (
+    lock.manifest.name !== DEFAULT_POLICY.packageName ||
+    lock.manifest.version !== DEFAULT_POLICY.packageVersion ||
+    lock.manifest.path !== "package.json" ||
+    lock.manifest.objectId !== DEFAULT_POLICY.expectedManifestObjectId
+  ) {
+    fail("lock.manifest: pinned manifest mismatch");
+  }
+  if (
+    lock.dependencyLock.path !== "bun.lock" ||
+    lock.dependencyLock.objectId !== DEFAULT_POLICY.expectedDependencyLockObjectId
+  ) {
+    fail("lock.dependencyLock: pinned dependency lock mismatch");
+  }
+  assertCanonicalEntries(lock.executables.entries, lock.executables.canonicalSha256, ({ path }) => path, "lock.executables");
+  assertCanonicalEntries(lock.packageScripts.entries, lock.packageScripts.canonicalSha256, ({ name }) => name, "lock.packageScripts");
+  if (
+    lock.executables.canonicalSha256 !== DEFAULT_POLICY.expectedExecutablesSha256 ||
+    lock.packageScripts.canonicalSha256 !== DEFAULT_POLICY.expectedPackageScriptsSha256 ||
+    lock.packageScripts.executionPolicy !== "deny-all"
+  ) {
+    fail("lock executable or package-script policy mismatch");
+  }
+  const receipt = DEFAULT_POLICY.githubVerification;
+  if (
+    lock.provenance.provider !== receipt.provider ||
+    lock.provenance.apiUrl !== receipt.apiUrl ||
+    lock.provenance.verified !== receipt.verified ||
+    lock.provenance.reason !== receipt.reason ||
+    lock.provenance.verifiedAt !== receipt.verifiedAt ||
+    lock.provenance.signatureSha256 !== DEFAULT_POLICY.expectedSignatureSha256 ||
+    lock.provenance.signedPayloadSha256 !== DEFAULT_POLICY.expectedSignedPayloadSha256
+  ) {
+    fail("lock.provenance: pinned verification receipt mismatch");
   }
 }
 
@@ -147,10 +232,7 @@ function trustedGitCandidates() {
     if (!isAbsolute(configured)) fail("OH_MY_HARNESS_GIT_EXECUTABLE must be an absolute path");
     return [configured];
   }
-  if (process.platform === "win32") {
-    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
-    return [join(programFiles, "Git", "cmd", "git.exe")];
-  }
+  if (process.platform === "win32") return [];
   return ["/usr/bin/git", "/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
 }
 
