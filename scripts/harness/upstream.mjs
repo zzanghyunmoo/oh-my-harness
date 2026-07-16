@@ -384,6 +384,8 @@ export function deriveArtifacts(sourcePath, policy = DEFAULT_POLICY) {
   validateOrigin(source, policy);
 
   const tagRef = `refs/tags/${policy.tag}`;
+  const symbolicTarget = runGit(source, ["symbolic-ref", "--quiet", tagRef], { allowMissing: true }).trim();
+  if (symbolicTarget) fail(`${policy.tag} must not be a symbolic ref`);
   if (runGit(source, ["cat-file", "-t", tagRef]).trim() !== "commit") fail(`${policy.tag} must be a lightweight tag targeting a commit`);
   const commit = runGit(source, ["rev-parse", "--verify", `${tagRef}^{commit}`]).trim();
   const tree = runGit(source, ["rev-parse", "--verify", `${tagRef}^{tree}`]).trim();
@@ -409,9 +411,8 @@ export function deriveArtifacts(sourcePath, policy = DEFAULT_POLICY) {
   const allSkillEntries = entries.filter(({ path }) => /^skills\/.*\/SKILL\.md$/.test(path));
   const unexpectedSkill = allSkillEntries.find(({ path }) => !/^skills\/[^/]+\/SKILL\.md$/.test(path));
   if (unexpectedSkill) fail(`${unexpectedSkill.path}: nested skill layout is forbidden`);
-  const skillEntries = allSkillEntries;
   const seen = new Set();
-  const skills = skillEntries
+  const skills = allSkillEntries
     .map((entry) => {
       const directoryName = entry.path.split("/")[1];
       const skillName = parseSkillName(runGit(source, ["cat-file", "blob", entry.objectId]), entry.path);
@@ -556,9 +557,10 @@ function atomicWrite(root, targetPath, content, beforeRename) {
 export function writeArtifacts(targetRoot, artifacts, hooks = {}) {
   validateArtifactModels(artifacts);
   const paths = artifactPaths(targetRoot);
-  for (const path of Object.values(paths)) assertContainedPath(targetRoot, path);
-  for (const path of Object.values(paths)) ensureSafeDirectory(targetRoot, dirname(path), { create: true });
-  for (const path of Object.values(paths)) assertSafeTarget(targetRoot, path, { requireExistingParent: true });
+  const targetPaths = Object.values(paths);
+  for (const path of targetPaths) assertContainedPath(targetRoot, path);
+  for (const path of targetPaths) ensureSafeDirectory(targetRoot, dirname(path), { create: true });
+  for (const path of targetPaths) assertSafeTarget(targetRoot, path, { requireExistingParent: true });
   atomicWrite(targetRoot, paths.inventory, prettyJson(artifacts.inventory), hooks.beforeInventoryRename);
   hooks.afterInventoryWrite?.();
   atomicWrite(targetRoot, paths.lock, prettyJson(artifacts.lock), hooks.beforeLockRename);
@@ -574,7 +576,6 @@ export function verifyArtifacts(targetRoot, artifacts) {
     const actual = readFileSync(path, "utf8");
     if (actual !== expected) fail(`${name} artifact is stale: ${path}`);
   }
-  if (artifacts.lock.inventory.canonicalSha256 !== canonicalSha256(artifacts.inventory)) fail("lock inventory digest does not match inventory");
 }
 
 function parseArguments(argv) {

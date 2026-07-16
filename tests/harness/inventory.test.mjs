@@ -80,6 +80,13 @@ function readJson(path) {
   }
 }
 
+function committedArtifacts() {
+  return {
+    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
+    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
+  };
+}
+
 function fixtureRepo({ skillNames = ["alpha", "lfg"], remote = "https://github.com/EveryInc/compound-engineering-plugin.git" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "oh-my-harness-upstream-"));
   git(root, "init", "-q");
@@ -153,6 +160,29 @@ test("derivation reads pinned Git objects instead of the checked-out branch", ()
   }
 });
 
+test("derivation ignores inherited hostile Git environment", () => {
+  const root = fixtureRepo();
+  const policy = fixturePolicy(root);
+  const hostileEnvironment = {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.hooksPath",
+    GIT_CONFIG_VALUE_0: "/tmp/forbidden-hooks",
+    GIT_OBJECT_DIRECTORY: "/tmp/forbidden-objects",
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "/tmp/forbidden-alternates",
+  };
+  const previous = Object.fromEntries(Object.keys(hostileEnvironment).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, hostileEnvironment);
+    assert.doesNotThrow(() => deriveArtifacts(root, policy));
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("derivation rejects origin, tag, manifest, layout, and frontmatter drift", () => {
   const wrongOrigin = fixtureRepo({ remote: "git@github.com:EveryInc/compound-engineering-plugin.git" });
   try {
@@ -171,6 +201,16 @@ test("derivation rejects origin, tag, manifest, layout, and frontmatter drift", 
     assert.throws(() => deriveArtifacts(tagDrift, policy), /tag commit drift/);
   } finally {
     rmSync(tagDrift, { recursive: true, force: true });
+  }
+
+  const symbolicTag = fixtureRepo();
+  try {
+    const policy = fixturePolicy(symbolicTag);
+    git(symbolicTag, "update-ref", "-d", "refs/tags/compound-engineering-v3.19.0");
+    git(symbolicTag, "symbolic-ref", "refs/tags/compound-engineering-v3.19.0", "refs/heads/master");
+    assert.throws(() => deriveArtifacts(symbolicTag, policy), /must not be a symbolic ref/);
+  } finally {
+    rmSync(symbolicTag, { recursive: true, force: true });
   }
 
   const manifestDrift = fixtureRepo();
@@ -211,11 +251,14 @@ test("derivation rejects origin, tag, manifest, layout, and frontmatter drift", 
 
 test("write publishes inventory before lock and verify detects mixed generations", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
-  const artifacts = {
-    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
-    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
-  };
+  const artifacts = committedArtifacts();
+  const inventoryPath = join(target, "harness", "inventory", "compound-engineering-v3.19.0.json");
+  const lockPath = join(target, "harness", "locks", "compound-engineering-v3.19.0.lock.json");
   try {
+    assert.throws(() => writeArtifacts(target, artifacts, { beforeInventoryRename: () => { throw new Error("interrupt-before-publication"); } }), /interrupt-before-publication/);
+    assert.equal(existsSync(inventoryPath), false);
+    assert.equal(existsSync(lockPath), false);
+
     assert.throws(() => writeArtifacts(target, artifacts, { afterInventoryWrite: () => { throw new Error("interrupt"); } }), /interrupt/);
     assert.throws(() => verifyArtifacts(target, artifacts), /missing|stale/);
     writeArtifacts(target, artifacts);
@@ -267,6 +310,15 @@ test("derivation rejects repository alternates and replacement refs", () => {
   } finally {
     rmSync(replacements, { recursive: true, force: true });
   }
+
+  const promisor = fixtureRepo();
+  try {
+    const policy = fixturePolicy(promisor);
+    git(promisor, "config", "remote.origin.promisor", "true");
+    assert.throws(() => deriveArtifacts(promisor, policy), /promisor|lazy-fetch/);
+  } finally {
+    rmSync(promisor, { recursive: true, force: true });
+  }
 });
 
 test("CLI ignores PATH shims and enforces command arguments", () => {
@@ -316,10 +368,7 @@ test("CLI ignores PATH shims and enforces command arguments", () => {
 
 test("artifact validation rejects closed-shape drift and stale pre-images", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
-  const artifacts = {
-    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
-    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
-  };
+  const artifacts = committedArtifacts();
   try {
     const extraLockField = structuredClone(artifacts);
     extraLockField.lock.unexpected = true;
@@ -362,10 +411,7 @@ test("artifact validation rejects closed-shape drift and stale pre-images", () =
 
 test("write detects an artifact parent replacement before rename", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
-  const artifacts = {
-    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
-    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
-  };
+  const artifacts = committedArtifacts();
   try {
     writeArtifacts(target, artifacts);
     const inventoryParent = join(target, "harness", "inventory");
@@ -386,13 +432,36 @@ test("write detects an artifact parent replacement before rename", () => {
   }
 });
 
+test("write refuses final symlink and non-regular targets", () => {
+  const artifacts = committedArtifacts();
+
+  const symlinkTarget = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
+  const outside = mkdtempSync(join(tmpdir(), "oh-my-harness-outside-"));
+  const canary = join(outside, "canary.json");
+  try {
+    mkdirSync(join(symlinkTarget, "harness", "inventory"), { recursive: true });
+    writeFileSync(canary, "outside\n");
+    symlinkSync(canary, join(symlinkTarget, "harness", "inventory", "compound-engineering-v3.19.0.json"));
+    assert.throws(() => writeArtifacts(symlinkTarget, artifacts), /unsafe output target/);
+    assert.equal(readFileSync(canary, "utf8"), "outside\n");
+  } finally {
+    rmSync(symlinkTarget, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+
+  const directoryTarget = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
+  try {
+    mkdirSync(join(directoryTarget, "harness", "locks", "compound-engineering-v3.19.0.lock.json"), { recursive: true });
+    assert.throws(() => writeArtifacts(directoryTarget, artifacts), /unsafe output target/);
+  } finally {
+    rmSync(directoryTarget, { recursive: true, force: true });
+  }
+});
+
 test("write and verify refuse an ancestor symlink", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
   const outside = mkdtempSync(join(tmpdir(), "oh-my-harness-outside-"));
-  const artifacts = {
-    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
-    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
-  };
+  const artifacts = committedArtifacts();
   try {
     symlinkSync(outside, join(target, "harness"));
     assert.throws(() => writeArtifacts(target, artifacts), /symlink|unsafe/i);
