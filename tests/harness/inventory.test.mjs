@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { deflateSync, inflateSync } from "node:zlib";
 
 import {
   assertSecretFree,
@@ -221,6 +222,24 @@ test("write publishes inventory before lock and verify detects mixed generations
     assert.doesNotThrow(() => verifyArtifacts(target, artifacts));
   } finally {
     rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test("derivation rejects a Git object stored under the wrong hash", () => {
+  const root = fixtureRepo();
+  try {
+    const policy = fixturePolicy(root);
+    const objectId = git(root, "rev-parse", "HEAD:package.json");
+    const objectPath = join(root, ".git", "objects", objectId.slice(0, 2), objectId.slice(2));
+    const object = inflateSync(readFileSync(objectPath));
+    const bodyStart = object.indexOf(0) + 1;
+    assert.ok(bodyStart > 0 && bodyStart < object.length);
+    object[bodyStart] ^= 1;
+    chmodSync(objectPath, 0o644);
+    writeFileSync(objectPath, deflateSync(object));
+    assert.throws(() => deriveArtifacts(root, policy), /hash(?:-path)? mismatch|sha1 mismatch|corrupt/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

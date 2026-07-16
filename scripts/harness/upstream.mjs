@@ -307,6 +307,10 @@ function assertRepositoryIsolation(sourcePath) {
   if (promisor) fail("promisor/lazy-fetch repositories are forbidden");
 }
 
+function assertObjectIntegrity(sourcePath, commit) {
+  runGit(sourcePath, ["fsck", "--strict", "--no-dangling", commit]);
+}
+
 function parseSignedCommit(rawCommit, requireSignedCommit) {
   const lines = rawCommit.split("\n");
   const signatureLines = [];
@@ -385,6 +389,7 @@ export function deriveArtifacts(sourcePath, policy = DEFAULT_POLICY) {
   const tree = runGit(source, ["rev-parse", "--verify", `${tagRef}^{tree}`]).trim();
   if (commit !== policy.commit) fail(`tag commit drift: expected ${policy.commit}, got ${commit}`);
   if (tree !== policy.tree) fail(`tag tree drift: expected ${policy.tree}, got ${tree}`);
+  assertObjectIntegrity(source, commit);
 
   const rawCommit = runGit(source, ["cat-file", "commit", commit]);
   const signed = parseSignedCommit(rawCommit, policy.requireSignedCommit);
