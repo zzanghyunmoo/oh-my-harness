@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +29,12 @@ import {
 } from "../../scripts/harness/upstream.mjs";
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+const UPSTREAM_CLI = join(REPO_ROOT, "scripts", "harness", "upstream.mjs");
+const EXPECTED_INVENTORY_SHA256 = "9332006c292d0402c75c5e8280792aec4cdbdefed9804f8a77edf086c8d3a49c";
+const EXPECTED_SIGNATURE_SHA256 = "3f204ed1d1b7eb347017437d683f2dfd50fe25b39b14f3f513c9a0c385cf8302";
+const EXPECTED_PAYLOAD_SHA256 = "1f5a7a763bb63225fe199c256ff6f783b54408a9f042c9fd8138b1a3d4be0223";
+const EXPECTED_MANIFEST_OBJECT_ID = "13a2571aeae39921461e025b91b54ec06b9dc739";
+const EXPECTED_DEPENDENCY_LOCK_OBJECT_ID = "90abd9f19e8303373ac762fa86a6f13f8a36f435";
 const EXPECTED_SKILL_IDS = [
   "ce-brainstorm",
   "ce-code-review",
@@ -112,6 +128,7 @@ test("secret policy rejects credential material but permits public provenance", 
   assert.throws(() => assertSecretFree({ nested: { githubToken: "secret" } }), /secret-bearing field/);
   assert.throws(() => assertSecretFree({ nested: { ACCESS_KEY: "secret" } }), /secret-bearing field/);
   assert.throws(() => assertSecretFree({ note: "Bearer abcdefghijklmnopqrstuvwxyz" }), /credential-like value/);
+  assert.throws(() => assertSecretFree({ note: "Basic YTpi" }), /credential-like value/);
   assert.throws(() => assertSecretFree({ note: "-----BEGIN PRIVATE KEY-----" }), /credential-like value/);
   assert.doesNotThrow(() => assertSecretFree({ commit: "1756c0b9f3cf94493f287ea29ae766ad668fb7cf", url: "https://github.com/EveryInc/compound-engineering-plugin.git", signatureSha256: "a".repeat(64) }));
 });
@@ -230,6 +247,51 @@ test("derivation rejects repository alternates and replacement refs", () => {
   }
 });
 
+test("CLI ignores PATH shims and enforces command arguments", () => {
+  if (process.platform === "win32") return;
+  const source = fixtureRepo();
+  const fakeBin = mkdtempSync(join(tmpdir(), "oh-my-harness-fake-git-"));
+  const canary = join(fakeBin, "executed");
+  const fakeGit = join(fakeBin, "git");
+  try {
+    writeFileSync(fakeGit, `#!/bin/sh\necho executed > "${canary}"\nexit 1\n`);
+    chmodSync(fakeGit, 0o755);
+    const shimResult = spawnSync(process.execPath, [UPSTREAM_CLI, "verify", "--source", source], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` },
+    });
+    assert.notEqual(shimResult.status, 0);
+    assert.equal(existsSync(canary), false);
+    assert.match(shimResult.stderr, /tag commit drift/);
+
+    const relativeGitResult = spawnSync(process.execPath, [UPSTREAM_CLI, "verify", "--source", source], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, OH_MY_HARNESS_GIT_EXECUTABLE: "git" },
+    });
+    assert.notEqual(relativeGitResult.status, 0);
+    assert.match(relativeGitResult.stderr, /must be an absolute path/);
+
+    const missingSourceResult = spawnSync(process.execPath, [UPSTREAM_CLI, "verify"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    assert.notEqual(missingSourceResult.status, 0);
+    assert.match(missingSourceResult.stderr, /Usage:/);
+
+    const missingWriteResult = spawnSync(process.execPath, [UPSTREAM_CLI, "generate", "--source", source], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    assert.notEqual(missingWriteResult.status, 0);
+    assert.match(missingWriteResult.stderr, /requires --write/);
+  } finally {
+    rmSync(source, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
 test("artifact validation rejects closed-shape drift and stale pre-images", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
   const artifacts = {
@@ -245,13 +307,46 @@ test("artifact validation rejects closed-shape drift and stale pre-images", () =
     extraInventoryField.inventory.unexpected = true;
     assert.throws(() => writeArtifacts(target, extraInventoryField), /closed shape/);
 
+    const secretPackageCommand = structuredClone(artifacts);
+    secretPackageCommand.lock.packageScripts.entries[0].command = "curl -H 'Authorization: Basic YTpi'";
+    assert.throws(() => writeArtifacts(target, secretPackageCommand), /credential-like value/);
+
     writeArtifacts(target, artifacts);
     const inventoryPath = join(target, "harness", "inventory", "compound-engineering-v3.19.0.json");
+    const originalInventory = readFileSync(inventoryPath, "utf8");
+    const sameSizeEdit = `${originalInventory[0] === "{" ? " " : "{"}${originalInventory.slice(1)}`;
+    assert.equal(Buffer.byteLength(sameSizeEdit), Buffer.byteLength(originalInventory));
     assert.throws(
-      () => writeArtifacts(target, artifacts, { beforeInventoryRename: () => writeFileSync(inventoryPath, "user edit\n") }),
+      () => writeArtifacts(target, artifacts, { beforeInventoryRename: () => writeFileSync(inventoryPath, sameSizeEdit) }),
       /pre-image changed/,
     );
-    assert.equal(readFileSync(inventoryPath, "utf8"), "user edit\n");
+    assert.equal(readFileSync(inventoryPath, "utf8"), sameSizeEdit);
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test("write detects an artifact parent replacement before rename", () => {
+  const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
+  const artifacts = {
+    inventory: readJson(join(REPO_ROOT, "harness/inventory/compound-engineering-v3.19.0.json")),
+    lock: readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json")),
+  };
+  try {
+    writeArtifacts(target, artifacts);
+    const inventoryParent = join(target, "harness", "inventory");
+    const displacedParent = join(target, "harness", "inventory-displaced");
+    assert.throws(
+      () =>
+        writeArtifacts(target, artifacts, {
+          beforeInventoryRename: () => {
+            renameSync(inventoryParent, displacedParent);
+            mkdirSync(inventoryParent);
+          },
+        }),
+      /output parent changed/,
+    );
+    assert.equal(readFileSync(join(displacedParent, "compound-engineering-v3.19.0.json"), "utf8"), prettyJson(artifacts.inventory));
   } finally {
     rmSync(target, { recursive: true, force: true });
   }
@@ -284,6 +379,11 @@ test("committed CE inventory contains exactly 29 skills including lfg", () => {
   const lock = readJson(join(REPO_ROOT, "harness/locks/compound-engineering-v3.19.0.lock.json"));
   assert.equal(lock.source.commit, DEFAULT_POLICY.commit);
   assert.equal(lock.source.tree, DEFAULT_POLICY.tree);
-  assert.equal(lock.inventory.canonicalSha256, canonicalSha256(inventory));
+  assert.equal(lock.manifest.objectId, EXPECTED_MANIFEST_OBJECT_ID);
+  assert.equal(lock.dependencyLock.objectId, EXPECTED_DEPENDENCY_LOCK_OBJECT_ID);
+  assert.equal(lock.provenance.signatureSha256, EXPECTED_SIGNATURE_SHA256);
+  assert.equal(lock.provenance.signedPayloadSha256, EXPECTED_PAYLOAD_SHA256);
+  assert.equal(canonicalSha256(inventory), EXPECTED_INVENTORY_SHA256);
+  assert.equal(lock.inventory.canonicalSha256, EXPECTED_INVENTORY_SHA256);
   assert.equal(lock.packageScripts.executionPolicy, "deny-all");
 });

@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 const SECRET_KEY_PATTERN = /(?:apikey|accesskey|privatekey|authorization|credentials?|password|secret(?:value)?|token)$/;
 const CREDENTIAL_VALUES = [
-  /\b(?:bearer|basic)\s+[a-z0-9+/=_-]{12,}\b/i,
+  /\bbearer\s+[a-z0-9+/=_-]{12,}\b/i,
+  /\bbasic\s+[a-z0-9+/]{4,}={0,2}\b/i,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b(?:gh[pousr]_|sk-|xox[baprs]-)[a-z0-9_-]{12,}\b/i,
 ];

@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { constants as fsConstants } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalSha256, assertSecretFree, prettyJson, sha256Text } from "./canonical.mjs";
@@ -141,20 +141,40 @@ function validateArtifactModels(artifacts) {
 
 let cachedGitExecutable;
 
+function trustedGitCandidates() {
+  const configured = process.env.OH_MY_HARNESS_GIT_EXECUTABLE;
+  if (configured) {
+    if (!isAbsolute(configured)) fail("OH_MY_HARNESS_GIT_EXECUTABLE must be an absolute path");
+    return [configured];
+  }
+  if (process.platform === "win32") {
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    return [join(programFiles, "Git", "cmd", "git.exe")];
+  }
+  return ["/usr/bin/git", "/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
+}
+
 function resolveGitExecutable() {
   if (cachedGitExecutable) return cachedGitExecutable;
-  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
-    if (!directory) continue;
-    const candidate = join(directory, process.platform === "win32" ? "git.exe" : "git");
+  for (const candidate of trustedGitCandidates()) {
     try {
       accessSync(candidate, fsConstants.X_OK);
-      cachedGitExecutable = realpathSync(candidate);
+      const executable = realpathSync(candidate);
+      const relativeToRepo = relative(REPO_ROOT, executable);
+      if (!relativeToRepo.startsWith("..") && !isAbsolute(relativeToRepo)) {
+        fail(`trusted Git executable cannot be inside the repository: ${executable}`);
+      }
+      const stat = lstatSync(executable);
+      if (!stat.isFile() || (stat.mode & 0o022) !== 0) fail(`trusted Git executable has unsafe permissions: ${executable}`);
+      cachedGitExecutable = executable;
       return cachedGitExecutable;
-    } catch {
-      // Continue to the next PATH entry.
+    } catch (error) {
+      if (process.env.OH_MY_HARNESS_GIT_EXECUTABLE) {
+        fail(`configured Git executable is unavailable or unsafe: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
-  return fail("trusted Git executable was not found on PATH");
+  return fail("trusted Git executable was not found; set OH_MY_HARNESS_GIT_EXECUTABLE to an absolute path");
 }
 
 function isolatedGitEnvironment(gitExecutable) {
@@ -400,11 +420,20 @@ function assertSafeTarget(root, targetPath, { requireExistingParent = false } = 
   }
 }
 
-function pathIdentity(path, { includeSize = true } = {}) {
+function pathIdentity(path, { includeContent = true } = {}) {
   if (!existsSync(path)) return null;
-  const stat = lstatSync(path);
-  const identity = { device: stat.dev, inode: stat.ino, mode: stat.mode };
-  if (includeSize) identity.size = stat.size;
+  const stat = lstatSync(path, { bigint: true });
+  const identity = {
+    device: stat.dev.toString(),
+    inode: stat.ino.toString(),
+    mode: stat.mode.toString(),
+  };
+  if (includeContent && stat.isFile()) {
+    identity.changedAtNs = stat.ctimeNs.toString();
+    identity.modifiedAtNs = stat.mtimeNs.toString();
+    identity.size = stat.size.toString();
+    identity.contentSha256 = sha256Text(readFileSync(path, "utf8"));
+  }
   return identity;
 }
 
@@ -415,7 +444,7 @@ function assertPathIdentity(path, expected, label) {
 function atomicWrite(root, targetPath, content, beforeRename) {
   assertSafeTarget(root, targetPath, { requireExistingParent: true });
   const parentPath = dirname(targetPath);
-  const parentIdentity = pathIdentity(parentPath, { includeSize: false });
+  const parentIdentity = pathIdentity(parentPath, { includeContent: false });
   const targetIdentity = pathIdentity(targetPath);
   const temporaryPath = join(parentPath, `.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
   let descriptor;
@@ -426,7 +455,7 @@ function atomicWrite(root, targetPath, content, beforeRename) {
     closeSync(descriptor);
     descriptor = undefined;
     beforeRename?.();
-    if (!isDeepStrictEqual(pathIdentity(parentPath, { includeSize: false }), parentIdentity)) {
+    if (!isDeepStrictEqual(pathIdentity(parentPath, { includeContent: false }), parentIdentity)) {
       fail(`output parent changed during artifact publication: ${parentPath}`);
     }
     assertPathIdentity(targetPath, targetIdentity, "output pre-image");
@@ -470,20 +499,18 @@ function parseArguments(argv) {
 
 export function main(argv = process.argv.slice(2)) {
   const { command, source, write } = parseArguments(argv);
+  if (command === "verify" && write) fail("verify does not accept --write");
+  if (command === "generate" && !write) fail("generate requires --write");
+  if (command !== "verify" && command !== "generate") fail(`unknown command: ${command}`);
+
   const artifacts = deriveArtifacts(source);
   if (command === "verify") {
-    if (write) fail("verify does not accept --write");
     verifyArtifacts(REPO_ROOT, artifacts);
     process.stdout.write(`harness:upstream:verify ok — ${artifacts.inventory.skills.length} skills at ${DEFAULT_POLICY.commit}\n`);
     return;
   }
-  if (command === "generate") {
-    if (!write) fail("generate requires --write");
-    writeArtifacts(REPO_ROOT, artifacts);
-    process.stdout.write(`Generated ${INVENTORY_RELATIVE_PATH} then ${LOCK_RELATIVE_PATH}\n`);
-    return;
-  }
-  fail(`unknown command: ${command}`);
+  writeArtifacts(REPO_ROOT, artifacts);
+  process.stdout.write(`Generated ${INVENTORY_RELATIVE_PATH} then ${LOCK_RELATIVE_PATH}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
