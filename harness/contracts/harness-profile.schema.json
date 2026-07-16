@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/blob/main/harness/contracts/harness-profile.schema.json",
+  "title": "Oh My Harness runtime-neutral profile",
+  "description": "Secret-free source, runtime, platform, companion, and evidence-tier intent shared by all runtime adapters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "id", "displayName", "source", "contractRefs", "ownership", "platforms", "runtimes", "tiers"],
+  "properties": {
+    "$schema": { "const": "../contracts/harness-profile.schema.json" },
+    "schemaVersion": { "const": "1.0.0" },
+    "id": { "$ref": "#/$defs/stableId" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "source": { "$ref": "#/$defs/source" },
+    "contractRefs": { "$ref": "#/$defs/contractRefs" },
+    "ownership": { "$ref": "#/$defs/ownership" },
+    "platforms": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/platform" },
+      "uniqueItems": true
+    },
+    "runtimes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/runtime" },
+      "uniqueItems": true
+    },
+    "tiers": { "$ref": "#/$defs/tiers" }
+  },
+  "$defs": {
+    "stableId": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "tree", "lockRef", "inventoryRef"],
+      "properties": {
+        "tag": { "const": "compound-engineering-v3.19.0" },
+        "commit": { "const": "1756c0b9f3cf94493f287ea29ae766ad668fb7cf" },
+        "tree": { "const": "808d20cc08a2b45e0200e68f5b9f604c55cf8a06" },
+        "lockRef": { "const": "../locks/compound-engineering-v3.19.0.lock.json" },
+        "inventoryRef": { "const": "../inventory/compound-engineering-v3.19.0.json" }
+      }
+    },
+    "contractRefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature", "runtimeAdapter", "conformanceResult"],
+      "properties": {
+        "feature": { "const": "../contracts/feature-contract.schema.json" },
+        "runtimeAdapter": { "const": "../contracts/runtime-adapter.schema.json" },
+        "conformanceResult": { "const": "../contracts/conformance-result.schema.json" }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upstreamPayload", "sourceReceipt", "generatedCore", "projectOverlay", "nativeLifecycle", "personalConfiguration"],
+      "properties": {
+        "upstreamPayload": { "const": "upstream" },
+        "sourceReceipt": { "const": "harness" },
+        "generatedCore": { "const": "harness" },
+        "projectOverlay": { "const": "project" },
+        "nativeLifecycle": { "const": "runtime" },
+        "personalConfiguration": { "const": "user" }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "os", "architecture", "lane"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "os": { "type": "string", "enum": ["linux", "darwin"] },
+        "architecture": { "type": "string", "enum": ["x64", "arm64"] },
+        "lane": { "type": "string", "enum": ["hermetic-release", "personal-certification"] }
+      }
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "required": { "type": "boolean" },
+        "fallbackId": { "$ref": "#/$defs/stableId" }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "required": { "const": false } } },
+          "then": { "type": "object", "required": ["fallbackId"] },
+          "else": { "type": "object", "properties": { "fallbackId": { "const": null } } }
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "descriptorRef", "platformRefs", "companions"],
+      "properties": {
+        "id": { "type": "string", "enum": ["claude-code", "codex", "opencode", "pi"] },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "descriptorRef": { "type": "string", "pattern": "^\\.\\./adapters/[a-z][a-z0-9-]*\\.json$" },
+        "platformRefs": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/stableId" },
+          "uniqueItems": true
+        },
+        "companions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/companion" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hermeticTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "platformRef", "resultTier"],
+      "properties": {
+        "required": { "const": true },
+        "platformRef": { "$ref": "#/$defs/stableId" },
+        "resultTier": { "const": "hermetic" }
+      }
+    },
+    "personalTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "platformRef", "resultTier"],
+      "properties": {
+        "required": { "const": true },
+        "platformRef": { "$ref": "#/$defs/stableId" },
+        "resultTier": { "const": "personal" }
+      }
+    },
+    "hostedTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "resultTier", "defaultStatus"],
+      "properties": {
+        "required": { "const": false },
+        "resultTier": { "const": "hosted" },
+        "defaultStatus": { "const": "not-run" }
+      }
+    },
+    "tiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hermetic", "personal", "hosted"],
+      "properties": {
+        "hermetic": { "$ref": "#/$defs/hermeticTier" },
+        "personal": { "$ref": "#/$defs/personalTier" },
+        "hosted": { "$ref": "#/$defs/hostedTier" }
+      }
+    }
+  }
+}

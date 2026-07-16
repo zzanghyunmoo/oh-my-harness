@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/blob/main/harness/contracts/feature-contract.schema.json",
+  "title": "Oh My Harness feature contract",
+  "description": "Runtime-neutral workflow, capability, safety, scenario, failure, and evidence-oracle contract for one upstream feature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "id", "source", "workflow", "capabilities", "safety", "requiredScenarios", "expectedFailures", "evidenceOracle"],
+  "properties": {
+    "$schema": { "const": "../contracts/feature-contract.schema.json" },
+    "schemaVersion": { "const": "1.0.0" },
+    "id": { "$ref": "#/$defs/stableId" },
+    "source": { "$ref": "#/$defs/source" },
+    "workflow": { "$ref": "#/$defs/workflow" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "safety": { "$ref": "#/$defs/safety" },
+    "requiredScenarios": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/scenarioKind" },
+      "uniqueItems": true,
+      "allOf": [
+        { "type": "array", "contains": { "const": "discovery-invocation" } },
+        { "type": "array", "contains": { "const": "scripted-interaction" } },
+        { "type": "array", "contains": { "const": "artifact" } },
+        { "type": "array", "contains": { "const": "handoff" } },
+        { "type": "array", "contains": { "const": "approval-safety" } },
+        { "type": "array", "contains": { "const": "expected-failure" } },
+        { "type": "array", "contains": { "const": "evidence-oracle" } }
+      ]
+    },
+    "expectedFailures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["failed", "blocked", "timeout", "cancelled", "infra-error", "not-run", "expired"]
+      },
+      "uniqueItems": true
+    },
+    "evidenceOracle": { "$ref": "#/$defs/evidenceOracle" }
+  },
+  "$defs": {
+    "stableId": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventoryRef", "featureId"],
+      "properties": {
+        "inventoryRef": { "const": "../inventory/compound-engineering-v3.19.0.json" },
+        "featureId": { "$ref": "#/$defs/stableId" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "kind": { "type": "string", "enum": ["input", "output", "handoff", "evidence"] },
+        "required": { "type": "boolean" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "inputRefs", "outputRefs", "handoffRefs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "inputRefs": { "type": "array", "items": { "$ref": "#/$defs/stableId" }, "uniqueItems": true },
+        "outputRefs": { "type": "array", "items": { "$ref": "#/$defs/stableId" }, "uniqueItems": true },
+        "handoffRefs": { "type": "array", "items": { "$ref": "#/$defs/stableId" }, "uniqueItems": true }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fromStep", "artifactRefs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "fromStep": { "$ref": "#/$defs/stableId" },
+        "artifactRefs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/stableId" }, "uniqueItems": true }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts", "steps", "handoffs"],
+      "properties": {
+        "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" }, "uniqueItems": true },
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" }, "uniqueItems": true },
+        "handoffs": { "type": "array", "items": { "$ref": "#/$defs/handoff" }, "uniqueItems": true }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "readiness", "safetyClass"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "readiness": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["not-configured", "ready", "unavailable-by-auth", "hidden-by-mode", "runtime-gated", "setup-only"]
+          },
+          "uniqueItems": true
+        },
+        "safetyClass": { "type": "string", "enum": ["local-configuration", "external-provider", "external-workspace"] }
+      }
+    },
+    "requiredCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/capability" },
+        { "type": "object", "properties": { "readiness": { "const": ["ready"] } } }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional"],
+      "properties": {
+        "required": { "type": "array", "items": { "$ref": "#/$defs/requiredCapability" }, "uniqueItems": true },
+        "optional": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "uniqueItems": true }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sideEffectClass", "approval", "failureBoundary"],
+      "properties": {
+        "sideEffectClass": { "type": "string", "enum": ["none", "local-read", "local-write", "external-read", "external-write"] },
+        "approval": { "type": "string", "enum": ["none", "confirm-write", "runtime-native"] },
+        "failureBoundary": { "type": "string", "enum": ["before-discovery", "before-model", "before-side-effect"] }
+      }
+    },
+    "scenarioKind": {
+      "type": "string",
+      "enum": ["discovery-invocation", "scripted-interaction", "artifact", "handoff", "approval-safety", "expected-failure", "evidence-oracle"]
+    },
+    "evidenceOracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "kind": { "type": "string", "enum": ["structural", "state", "review"] },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    }
+  }
+}
