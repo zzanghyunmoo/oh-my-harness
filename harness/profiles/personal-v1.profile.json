@@ -1,0 +1,99 @@
+{
+  "$schema": "../contracts/harness-profile.schema.json",
+  "schemaVersion": "1.0.0",
+  "id": "personal-v1",
+  "displayName": "Oh My Harness personal v1",
+  "source": {
+    "tag": "compound-engineering-v3.19.0",
+    "commit": "1756c0b9f3cf94493f287ea29ae766ad668fb7cf",
+    "tree": "808d20cc08a2b45e0200e68f5b9f604c55cf8a06",
+    "lockRef": "../locks/compound-engineering-v3.19.0.lock.json",
+    "inventoryRef": "../inventory/compound-engineering-v3.19.0.json"
+  },
+  "contractRefs": {
+    "feature": "../contracts/feature-contract.schema.json",
+    "runtimeAdapter": "../contracts/runtime-adapter.schema.json",
+    "conformanceResult": "../contracts/conformance-result.schema.json"
+  },
+  "ownership": {
+    "upstreamPayload": "upstream",
+    "sourceReceipt": "harness",
+    "generatedCore": "harness",
+    "projectOverlay": "project",
+    "nativeLifecycle": "runtime",
+    "personalConfiguration": "user"
+  },
+  "platforms": [
+    {
+      "id": "darwin-arm64-personal",
+      "os": "darwin",
+      "architecture": "arm64",
+      "lane": "personal-certification"
+    },
+    {
+      "id": "linux-x64-release",
+      "os": "linux",
+      "architecture": "x64",
+      "lane": "hermetic-release"
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "claude-code",
+      "version": "2.1.210",
+      "descriptorRef": "../adapters/claude-code.json",
+      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "companions": []
+    },
+    {
+      "id": "codex",
+      "version": "0.144.4",
+      "descriptorRef": "../adapters/codex.json",
+      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "companions": []
+    },
+    {
+      "id": "opencode",
+      "version": "1.18.0",
+      "descriptorRef": "../adapters/opencode.json",
+      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "companions": []
+    },
+    {
+      "id": "pi",
+      "version": "0.80.7",
+      "descriptorRef": "../adapters/pi.json",
+      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "companions": [
+        {
+          "id": "pi-ask-user",
+          "version": "0.13.0",
+          "required": false,
+          "fallbackId": "plain-text-question"
+        },
+        {
+          "id": "pi-subagents",
+          "version": "0.34.0",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "tiers": {
+    "hermetic": {
+      "required": true,
+      "platformRef": "linux-x64-release",
+      "resultTier": "hermetic"
+    },
+    "personal": {
+      "required": true,
+      "platformRef": "darwin-arm64-personal",
+      "resultTier": "personal"
+    },
+    "hosted": {
+      "required": false,
+      "resultTier": "hosted",
+      "defaultStatus": "not-run"
+    }
+  }
+}
