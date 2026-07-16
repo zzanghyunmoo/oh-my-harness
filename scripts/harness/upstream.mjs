@@ -30,6 +30,8 @@ const UPSTREAM_OWNER = "EveryInc";
 const UPSTREAM_REPOSITORY = "compound-engineering-plugin";
 const GITHUB_ORIGIN = "https:" + "//github.com";
 const GITHUB_API_ORIGIN = "https:" + "//api.github.com";
+const GIT_TIMEOUT_MS = 5_000;
+const GIT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 export const DEFAULT_POLICY = Object.freeze({
   owner: UPSTREAM_OWNER,
@@ -282,8 +284,8 @@ function runGit(sourcePath, args, { allowMissing = false, encoding = "utf8" } = 
     return execFileSync(gitExecutable, ["-C", sourcePath, ...args], {
       encoding,
       env: isolatedGitEnvironment(gitExecutable),
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: 15_000,
+      maxBuffer: GIT_MAX_BUFFER_BYTES,
+      timeout: GIT_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {

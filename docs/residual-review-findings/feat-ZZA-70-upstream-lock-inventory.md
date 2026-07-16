@@ -10,6 +10,6 @@ Source context:
 
 ## Residual Review Findings
 
-- **P1** — `tests/harness/inventory.test.mjs:163` — Complete hostile no-mutation verification matrix — [GitHub issue #20](https://github.com/zzanghyunmoo/oh-my-harness/issues/20)
+- **P1** — `tests/harness/inventory.test.mjs:163` — Complete hostile no-mutation verification matrix — [GitHub issue #20](https://github.com/zzanghyunmoo/oh-my-harness/issues/20) — resolved in PR #21.
 
-The U1 PR already covers hostile inherited Git environment, promisor repositories, symbolic tag refs, corrupt object databases, final symlink/non-regular targets, pre-publication interruption, and mixed-generation repair. Issue #20 retains the remaining subprocess timeout/overflow and CLI generate-then-verify integration coverage.
+The U1 PR now covers hostile inherited Git environment, promisor repositories, symbolic tag refs, corrupt object databases, subprocess timeout/overflow, final symlink/non-regular targets, pre-publication interruption, mixed-generation repair, and canonical generate-then-verify byte identity. Issue #20 was closed after the remaining coverage passed.

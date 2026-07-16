@@ -366,6 +366,43 @@ test("CLI ignores PATH shims and enforces command arguments", () => {
   }
 });
 
+test("Git subprocess timeout and overflow fail without artifact mutation", () => {
+  if (process.platform === "win32") return;
+  const source = mkdtempSync(join(tmpdir(), "oh-my-harness-git-boundary-"));
+  const fakeBin = mkdtempSync(join(tmpdir(), "oh-my-harness-fake-git-"));
+  const fakeGit = join(fakeBin, "git");
+  const inventoryPath = join(REPO_ROOT, "harness", "inventory", "compound-engineering-v3.19.0.json");
+  const lockPath = join(REPO_ROOT, "harness", "locks", "compound-engineering-v3.19.0.lock.json");
+  const before = { inventory: readFileSync(inventoryPath), lock: readFileSync(lockPath) };
+  try {
+    writeFileSync(fakeGit, "#!/bin/sh\n/bin/sleep 6\n");
+    chmodSync(fakeGit, 0o755);
+    const timeoutResult = spawnSync(process.execPath, [UPSTREAM_CLI, "verify", "--source", source], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, OH_MY_HARNESS_GIT_EXECUTABLE: fakeGit },
+    });
+    assert.notEqual(timeoutResult.status, 0);
+    assert.match(timeoutResult.stderr, /timed out|ETIMEDOUT/i);
+
+    writeFileSync(fakeGit, "#!/bin/sh\nwhile :; do printf '0123456789abcdef0123456789abcdef'; done\n");
+    chmodSync(fakeGit, 0o755);
+    const overflowResult = spawnSync(process.execPath, [UPSTREAM_CLI, "verify", "--source", source], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, OH_MY_HARNESS_GIT_EXECUTABLE: fakeGit },
+    });
+    assert.notEqual(overflowResult.status, 0);
+    assert.match(overflowResult.stderr, /maxBuffer|ENOBUFS/i);
+
+    assert.deepEqual(readFileSync(inventoryPath), before.inventory);
+    assert.deepEqual(readFileSync(lockPath), before.lock);
+  } finally {
+    rmSync(source, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
 test("artifact validation rejects closed-shape drift and stale pre-images", () => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
   const artifacts = committedArtifacts();
