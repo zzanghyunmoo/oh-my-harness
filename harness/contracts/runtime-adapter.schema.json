@@ -94,7 +94,11 @@
       "allOf": [
         {
           "if": { "type": "object", "properties": { "required": { "const": false } } },
-          "then": { "type": "object", "required": ["fallbackId"] },
+          "then": {
+            "type": "object",
+            "required": ["fallbackId"],
+            "properties": { "fallbackId": { "$ref": "#/$defs/stableId" } }
+          },
           "else": { "type": "object", "properties": { "fallbackId": { "const": null } } }
         }
       ]
