@@ -3,13 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "description": "Cross-runtime coding-agent harness with Pi compatibility surfaces.",
-  "keywords": ["agent-harness", "pi-package"],
+  "keywords": [
+    "agent-harness",
+    "pi-package"
+  ],
   "type": "module",
   "scripts": {
     "profile:verify": "node scripts/profile-pack.mjs verify",
     "profile:lock": "node scripts/profile-pack.mjs lock --write",
     "profile:apply": "node scripts/profile-pack.mjs apply",
     "test:harness": "node --test tests/harness/*.test.mjs",
+    "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
     "harness:upstream:generate": "node scripts/harness/upstream.mjs generate",
     "harness:upstream:verify": "node scripts/harness/upstream.mjs verify",
     "test:workspace-connectors": "rm -rf .tmp/workspace-connectors-test && tsc --outDir .tmp/workspace-connectors-test --rootDir . --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck extensions/workspace-connectors/index.ts extensions/workspace-connectors/*.test.ts extensions/setup-doctor/index.ts extensions/setup-doctor/*.test.ts && node --test .tmp/workspace-connectors-test/extensions/workspace-connectors/*.test.js .tmp/workspace-connectors-test/extensions/setup-doctor/*.test.js"
@@ -21,7 +25,9 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.75.3",
     "@types/node": "^25.8.0",
-    "typescript": "^6.0.3"
+    "tar-stream": "3.2.0",
+    "typescript": "^6.0.3",
+    "yauzl": "3.4.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -33,8 +39,14 @@
       "./extensions/workspace-connectors",
       "./extensions/setup-doctor"
     ],
-    "skills": ["./skills"],
-    "prompts": ["./prompts"],
-    "themes": ["./themes"]
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "themes": [
+      "./themes"
+    ]
   }
 }

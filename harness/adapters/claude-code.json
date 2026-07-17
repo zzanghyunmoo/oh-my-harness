@@ -1,0 +1,132 @@
+{
+  "$schema": "../contracts/runtime-adapter.schema.json",
+  "companions": [],
+  "id": "claude-code",
+  "native": {
+    "discovery": {
+      "executableId": "harness-lifecycle",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "verify-native-discovery"
+        },
+        {
+          "id": "payload-root",
+          "kind": "placeholder"
+        }
+      ]
+    },
+    "headlessEvidence": {
+      "protocol": "jsonl",
+      "version": "1.0.0"
+    },
+    "install": {
+      "executableId": "harness-lifecycle",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "install-native-payload"
+        },
+        {
+          "id": "payload-root",
+          "kind": "placeholder"
+        }
+      ]
+    },
+    "invocation": {
+      "executableId": "runtime",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "-p"
+        },
+        {
+          "kind": "literal",
+          "value": "--output-format"
+        },
+        {
+          "kind": "literal",
+          "value": "stream-json"
+        },
+        {
+          "kind": "literal",
+          "value": "--verbose"
+        }
+      ]
+    },
+    "preModelGate": {
+      "configurationScope": "managed-plugin-hooks",
+      "kind": "session-hook",
+      "phase": "pre-model",
+      "sourceRef": {
+        "commit": "67f390c9a0b1440d369aebe2ff6a5023db35bf8e",
+        "locations": [
+          "plugins/plugin-dev/skills/hook-development/SKILL.md",
+          "plugins/hookify/hooks/hooks.json"
+        ],
+        "owner": "anthropics",
+        "repository": "claude-code"
+      },
+      "status": "candidate",
+      "surfaceId": "UserPromptSubmit"
+    }
+  },
+  "optionalExtensions": [],
+  "platforms": [
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083767",
+          "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-darwin-arm64.tar.gz",
+          "id": 477083767,
+          "name": "claude-darwin-arm64.tar.gz",
+          "sha256": "0d30caeef4dd693b331da31e0e0250e4ca6c5ec811f58ce961c2441d27efb1a2"
+        },
+        "kind": "release-archive",
+        "owner": "anthropics",
+        "provider": "github",
+        "repository": "claude-code",
+        "tag": "v2.1.210"
+      },
+      "architecture": "arm64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "claude",
+        "sha256": "1b471d62d1117482689d75447f5e050c640da717a5a3c91e6c13792450f8c662"
+      },
+      "id": "darwin-arm64-personal",
+      "os": "darwin",
+      "variant": "darwin"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083808",
+          "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-linux-x64.tar.gz",
+          "id": 477083808,
+          "name": "claude-linux-x64.tar.gz",
+          "sha256": "3db32c13a1e16b2d867d096a9808f42d8678c5597d10799a1904fd897e043beb"
+        },
+        "kind": "release-archive",
+        "owner": "anthropics",
+        "provider": "github",
+        "repository": "claude-code",
+        "tag": "v2.1.210"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "claude",
+        "sha256": "e7d2ceb53ed4c2ced1fe7fc1c6331c98dc5f7b4c9b2722d9c5fa3dd5dff6f719"
+      },
+      "id": "linux-x64-release",
+      "os": "linux",
+      "variant": "glibc"
+    }
+  ],
+  "runtime": {
+    "name": "claude-code",
+    "version": "2.1.210"
+  },
+  "schemaVersion": "1.1.0"
+}

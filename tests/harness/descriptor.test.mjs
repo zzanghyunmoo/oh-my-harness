@@ -1,0 +1,149 @@
+import assert from "node:assert/strict";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { gzipSync } from "node:zlib";
+import tar from "tar-stream";
+
+import { inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
+import { loadRuntimeDescriptors, validateDescriptor } from "../../scripts/harness/descriptors.mjs";
+
+const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+const ADAPTER_ROOT = join(REPO_ROOT, "harness", "adapters");
+
+async function tarGzip(entries) {
+  const pack = tar.pack();
+  const chunks = [];
+  pack.on("data", (chunk) => chunks.push(chunk));
+  for (const entry of entries) {
+    await new Promise((resolve, reject) => pack.entry(entry.header, entry.body ?? Buffer.alloc(0), (error) => error ? reject(error) : resolve()));
+  }
+  pack.finalize();
+  await new Promise((resolve, reject) => pack.on("end", resolve).on("error", reject));
+  return gzipSync(Buffer.concat(chunks));
+}
+
+async function withArchive(entries, callback) {
+  const root = mkdtempSync(join(tmpdir(), "oh-my-harness-archive-"));
+  const path = join(root, "fixture.tar.gz");
+  try {
+    writeFileSync(path, await tarGzip(entries));
+    return await callback(path);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("U3 commits exactly four valid descriptors and resolves eight tuples", async () => {
+  assert.deepEqual(readdirSync(ADAPTER_ROOT).sort(), ["claude-code.json", "codex.json", "opencode.json", "pi.json"]);
+  const resolved = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
+  assert.deepEqual(resolved.runtimes.map(({ id }) => id), ["claude-code", "codex", "opencode", "pi"]);
+  assert.equal(resolved.tuples.length, 8);
+  for (const runtime of resolved.runtimes) {
+    assert.equal(existsSync(join(ADAPTER_ROOT, `${runtime.id}.json`)), true);
+    assert.doesNotThrow(() => validateDescriptor(runtime.descriptor));
+  }
+});
+
+test("descriptor semantic validation rejects declaration drift and hostile strings", async () => {
+  const { runtimes } = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
+  const baseline = runtimes.find(({ id }) => id === "pi").descriptor;
+  const mutations = [
+    ["version", (value) => { value.runtime.version = "0.80.8"; }],
+    ["platform", (value) => { value.platforms[0].architecture = "x64"; }],
+    ["valid executable digest drift", (value) => { value.platforms[0].executable.sha256 = "f".repeat(64); }],
+    ["valid archive digest drift", (value) => { value.platforms[0].acquisition.asset.sha256 = "e".repeat(64); }],
+    ["valid member drift", (value) => { value.platforms[0].executable.memberPath = "pi/other"; }],
+    ["valid variant drift", (value) => { value.platforms[0].variant = "other"; }],
+    ["valid asset identity drift", (value) => {
+      value.platforms[0].acquisition.asset.id += 1;
+      value.platforms[0].acquisition.asset.apiUrl = `https://api.github.com/repos/earendil-works/pi/releases/assets/${value.platforms[0].acquisition.asset.id}`;
+    }],
+    ["release", (value) => { value.platforms[0].acquisition.tag = "main"; }],
+    ["valid invocation drift", (value) => { value.native.invocation.tokens[1].value = "json"; }],
+    ["shell", (value) => { value.native.invocation.tokens[0].value = "--mode;rm"; }],
+    ["path", (value) => { value.native.install.tokens[1] = { kind: "literal", value: "/tmp/payload" }; }],
+    ["gate", (value) => { value.native.preModelGate.status = "passed"; }],
+    ["valid gate source drift", (value) => { value.native.preModelGate.sourceRef.commit = "f".repeat(40); }],
+    ["valid surface drift", (value) => { value.native.preModelGate.surfaceId = "before-input"; }],
+    ["companion", (value) => { value.companions = []; }],
+    ["skill body", (value) => { value.skillBody = "copied"; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const value = structuredClone(baseline);
+    mutate(value);
+    assert.throws(() => validateDescriptor(value), undefined, label);
+  }
+});
+
+test("offline tar derivation is deterministic and rejects unsafe members", async () => {
+  const executable = Buffer.from("fixture executable\n");
+  await withArchive([{ header: { name: "bin/pi", mode: 0o755, type: "file" }, body: executable }], async (path) => {
+    const first = await inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" });
+    const second = await inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" });
+    assert.deepEqual(second, first);
+    assert.equal(first.memberPath, "bin/pi");
+    assert.match(first.executableSha256, /^[0-9a-f]{64}$/);
+  });
+
+  for (const header of [
+    { name: "../pi", mode: 0o755, type: "file" },
+    { name: "dir/../pi", mode: 0o755, type: "file" },
+    { name: "/pi", mode: 0o755, type: "file" },
+    { name: "pi", mode: 0o777, type: "file" },
+    { name: "pi", mode: 0o755, type: "symlink", linkname: "other" },
+    { name: "pi", mode: 0o755, type: "link", linkname: "other" },
+    { name: "pi", mode: 0o755, type: "character-device" },
+    { name: "pi", mode: 0o755, type: "fifo" },
+  ]) {
+    await withArchive([{ header }], async (path) => assert.rejects(inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" })));
+  }
+
+  const bomb = Buffer.alloc(128 * 1024, 0x41);
+  await withArchive([
+    { header: { name: "bin/pi", mode: 0o755, type: "file" }, body: executable },
+    { header: { name: "share/padding", mode: 0o644, type: "file" }, body: bomb },
+  ], async (path) => assert.rejects(inspectArchive(path, {
+    format: "tar.gz",
+    expectedBasename: "pi",
+    limits: { compressedBytes: 1024 * 1024, entries: 8, uncompressedBytes: 1024 * 1024, selectedBytes: 1024, ratio: 2 },
+  }), /ratio/i));
+});
+
+test("loader rejects extra adapter files and duplicate profile platforms", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oh-my-harness-repo-"));
+  try {
+    cpSync(join(REPO_ROOT, "harness"), join(root, "harness"), { recursive: true });
+    writeFileSync(join(root, "harness", "adapters", "extra.json"), "{}\n");
+    await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /exactly four regular descriptor/i);
+    rmSync(join(root, "harness", "adapters", "extra.json"));
+    const profilePath = join(root, "harness", "profiles", "personal-v1.profile.json");
+    const profile = JSON.parse(readFileSync(profilePath, "utf8"));
+    profile.platforms.push(structuredClone(profile.platforms[0]));
+    writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+    await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /duplicate/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("release URL policy rejects mutable or unreviewed identities", () => {
+  const identity = { owner: "earendil-works", repository: "pi", tag: "v0.80.7", assetName: "pi-linux-x64.tar.gz" };
+  assert.doesNotThrow(() => validateReleaseUrl("https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz", identity));
+  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=opaque", identity, { redirected: true }));
+  for (const url of [
+    "http://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
+    "https://evil.example/pi-linux-x64.tar.gz",
+    "https://user@github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
+    "https://github.com/earendil-works/pi/releases/latest/download/pi-linux-x64.tar.gz",
+    "file:///tmp/pi.tar.gz",
+  ]) assert.throws(() => validateReleaseUrl(url, identity));
+  for (const url of [
+    "https://github.com/other/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?authorization=secret&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dother-pi-linux-x64.tar.gz&sig=opaque",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=one&sig=two",
+  ]) assert.throws(() => validateReleaseUrl(url, identity, { redirected: true }));
+});

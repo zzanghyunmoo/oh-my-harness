@@ -1,0 +1,146 @@
+{
+  "claimBoundary": "Provider metadata and executable digests derived from the exact downloaded archives; native source anchors are declarations pending U16 characterization.",
+  "runtimes": {
+    "claude-code": {
+      "descriptorCanonicalSha256": "1c0f70f60a2b32935048e79b0b1cb1ec18f0be0a313eb1fe43fd1d2be0307f39",
+      "gateSource": {
+        "commit": "67f390c9a0b1440d369aebe2ff6a5023db35bf8e",
+        "locations": [
+          "plugins/plugin-dev/skills/hook-development/SKILL.md",
+          "plugins/hookify/hooks/hooks.json"
+        ],
+        "owner": "anthropics",
+        "repository": "claude-code"
+      },
+      "platforms": {
+        "darwin-arm64-personal": {
+          "architecture": "arm64",
+          "archive": "0d30caeef4dd693b331da31e0e0250e4ca6c5ec811f58ce961c2441d27efb1a2",
+          "asset": "claude-darwin-arm64.tar.gz",
+          "assetId": 477083767,
+          "exe": "1b471d62d1117482689d75447f5e050c640da717a5a3c91e6c13792450f8c662",
+          "member": "claude",
+          "os": "darwin",
+          "variant": "darwin"
+        },
+        "linux-x64-release": {
+          "architecture": "x64",
+          "archive": "3db32c13a1e16b2d867d096a9808f42d8678c5597d10799a1904fd897e043beb",
+          "asset": "claude-linux-x64.tar.gz",
+          "assetId": 477083808,
+          "exe": "e7d2ceb53ed4c2ced1fe7fc1c6331c98dc5f7b4c9b2722d9c5fa3dd5dff6f719",
+          "member": "claude",
+          "os": "linux",
+          "variant": "glibc"
+        }
+      },
+      "version": "2.1.210"
+    },
+    "codex": {
+      "descriptorCanonicalSha256": "a5cc7e30526254e06090aa32067050a3a652a30cfb71edb63bcc846313ad3851",
+      "gateSource": {
+        "commit": "315195492c80fdade38e917c18f9584efd599304",
+        "locations": [
+          "codex-rs/hooks/src/events/user_prompt_submit.rs",
+          "codex-rs/hooks/src/engine/output_parser.rs"
+        ],
+        "owner": "openai",
+        "repository": "codex"
+      },
+      "platforms": {
+        "darwin-arm64-personal": {
+          "architecture": "arm64",
+          "archive": "77c8969a481302f9db1d9ea2a6c21c083abae3f1a8fc8a7275dc38323699391e",
+          "asset": "codex-aarch64-apple-darwin.tar.gz",
+          "assetId": 476297075,
+          "exe": "3302acbda5f53de1a71ebdb0c0f2aae0d47f9324aa9fb6b4e78a47014fd51c7d",
+          "member": "codex-aarch64-apple-darwin",
+          "os": "darwin",
+          "variant": "darwin"
+        },
+        "linux-x64-release": {
+          "architecture": "x64",
+          "archive": "37c985be9d89e8c4f43b3aa0594c1213eac212d30ae2b95221f08fec807515d1",
+          "asset": "codex-x86_64-unknown-linux-musl.tar.gz",
+          "assetId": 476296992,
+          "exe": "2b3edc9cdfd1717fba3dbc92817205a8a2c7511d459e456d4817eeff6f78ed7a",
+          "member": "codex-x86_64-unknown-linux-musl",
+          "os": "linux",
+          "variant": "musl"
+        }
+      },
+      "version": "0.144.4"
+    },
+    "opencode": {
+      "descriptorCanonicalSha256": "526a6c7dcc8faa93698848c87d62b5374120e7e8279e4ed048bcd0b8354b131e",
+      "gateSource": {
+        "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
+        "locations": [
+          "packages/plugin/src/index.ts::Hooks[\"chat.message\"]",
+          "packages/opencode/src/session/prompt.ts"
+        ],
+        "owner": "anomalyco",
+        "repository": "opencode"
+      },
+      "platforms": {
+        "darwin-arm64-personal": {
+          "architecture": "arm64",
+          "archive": "2b2b5e2da7a3bc82cad8551373114683e8632df09f5ea6af1b9ea36961795abd",
+          "asset": "opencode-darwin-arm64.zip",
+          "assetId": 477106206,
+          "exe": "74537e1cdb65451b593a8854af26ea6a8482d87350958e326f53141f62849ac4",
+          "member": "opencode",
+          "os": "darwin",
+          "variant": "darwin"
+        },
+        "linux-x64-release": {
+          "architecture": "x64",
+          "archive": "83216f77d9fb7f6aaa2642074905814f7aca52483dd2f0678f1ade5c4dc84eb9",
+          "asset": "opencode-linux-x64-baseline.tar.gz",
+          "assetId": 477106395,
+          "exe": "e59904ab94083dd56372d200cdd1c0d3bff5ffe6330d4cc8710e0c7dbfa82305",
+          "member": "opencode",
+          "os": "linux",
+          "variant": "baseline-glibc"
+        }
+      },
+      "version": "1.18.0"
+    },
+    "pi": {
+      "descriptorCanonicalSha256": "87979c625f4484bb0477a95de2e146ef14191214feef569faffcf633711ed5d1",
+      "gateSource": {
+        "commit": "216e672e7c9fc65682553394b74e483c0c9e47f7",
+        "locations": [
+          "packages/coding-agent/src/core/extensions/types.ts::InputEvent",
+          "packages/coding-agent/src/core/extensions/runner.ts"
+        ],
+        "owner": "earendil-works",
+        "repository": "pi"
+      },
+      "platforms": {
+        "darwin-arm64-personal": {
+          "architecture": "arm64",
+          "archive": "0f15771ef76ecd69b03e28fecf0c512593ff6e2477acf39e35bc2c8a4056d1e3",
+          "asset": "pi-darwin-arm64.tar.gz",
+          "assetId": 476916189,
+          "exe": "c6142608f05312eae230e73a33bc91dcf674097d64d1c29b64af16b22bb7d034",
+          "member": "pi/pi",
+          "os": "darwin",
+          "variant": "standalone"
+        },
+        "linux-x64-release": {
+          "architecture": "x64",
+          "archive": "c5f5a9a77a38e68fcb089dd4e3505abb64c98d19595b55818c961be779889719",
+          "asset": "pi-linux-x64.tar.gz",
+          "assetId": 476916193,
+          "exe": "a4a5a1bbef2a52a48b5033ded1841b79ce8b00362a95294f5c459ebe790d0982",
+          "member": "pi/pi",
+          "os": "linux",
+          "variant": "standalone"
+        }
+      },
+      "version": "0.80.7"
+    }
+  },
+  "schemaVersion": "1.0.0"
+}

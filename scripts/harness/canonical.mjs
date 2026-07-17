@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 const SECRET_KEY_PATTERN = /(?:apikey|accesskey|privatekey|authorization|credentials?|password|secret(?:value)?|token)$/;
+const SAFE_STRUCTURAL_KEYS = new Set(["actiontoken", "tokens"]);
 const CREDENTIAL_VALUES = [
   /\bbearer\s+[a-z0-9+/=_-]{12,}\b/i,
   /\bbasic\s+[a-z0-9+/]{4,}={0,2}\b/i,
@@ -58,7 +59,8 @@ export function assertSecretFree(value, path = "$") {
   }
   if (value && typeof value === "object") {
     for (const [key, entry] of Object.entries(value)) {
-      if (SECRET_KEY_PATTERN.test(normalizedKey(key))) throw new Error(`${path}.${key}: secret-bearing field is forbidden`);
+      const normalized = normalizedKey(key);
+      if (!SAFE_STRUCTURAL_KEYS.has(normalized) && SECRET_KEY_PATTERN.test(normalized)) throw new Error(`${path}.${key}: secret-bearing field is forbidden`);
       assertSecretFree(entry, `${path}.${key}`);
     }
     return;
