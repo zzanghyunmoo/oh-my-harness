@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD013 -->
+
 # Concepts
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
@@ -78,8 +80,20 @@ A compatibility boundary that exposes the Runtime-Neutral Harness Core through o
 
 A Runtime Adapter may use native capabilities as optional extensions, but it must not weaken or silently change the common workflow and artifact contract.
 
+### Upstream Trust Receipt
+
+A secret-free immutable binding between an upstream release's repository identity, source objects, provenance evidence, executable surface, package scripts, dependency lock, and Source-derived Feature Inventory.
+
+An Upstream Trust Receipt separates content identity from authenticated acquisition: offline verification can prove pinned objects and expected origin configuration, while acquisition provenance remains a separately reviewed claim.
+
+### Source-derived Feature Inventory
+
+The deterministic list of upstream capabilities discovered from immutable source objects, with each entry bound to content identity rather than copied behavior.
+
+The inventory is runtime-neutral. Runtime support is evaluated later by the Conformance Matrix instead of filtering capabilities out during derivation.
+
 ### Conformance Matrix
 
-The automated cross-product of the version-pinned Compound Engineering feature inventory and the supported coding-agent runtimes.
+The automated cross-product of the version-pinned Source-derived Feature Inventory and the supported coding-agent runtimes.
 
 Every required cell must produce an explicit pass or fail with execution evidence. Missing capabilities, skipped scenarios, and silent degradation cannot satisfy the release gate.
