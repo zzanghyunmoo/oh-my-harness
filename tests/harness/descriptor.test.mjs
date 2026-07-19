@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import tar from "tar-stream";
 
-import { inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
+import { downloadReleaseArchive, inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
 import { loadRuntimeDescriptors, validateDescriptor } from "../../scripts/harness/descriptors.mjs";
 
-const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const ADAPTER_ROOT = join(REPO_ROOT, "harness", "adapters");
 
 async function tarGzip(entries) {
@@ -123,8 +124,43 @@ test("loader rejects extra adapter files and duplicate profile platforms", async
     profile.platforms.push(structuredClone(profile.platforms[0]));
     writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /duplicate/i);
+    renameSync(profilePath, `${profilePath}.missing`);
+    await assert.rejects(
+      loadRuntimeDescriptors({ repoRoot: root }),
+      (error) => {
+        assert.match(error.message, /profile JSON.*ENOENT/i);
+        assert.equal(error.message.includes(root), false);
+        return true;
+      },
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("release downloads require a digest and stop on a bounded timeout", async () => {
+  const identity = { owner: "earendil-works", repository: "pi", tag: "v0.80.7", assetName: "pi-linux-x64.tar.gz" };
+  const url = "https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz";
+  await assert.rejects(downloadReleaseArchive(url, identity), /expected SHA-256/i);
+  await assert.rejects(downloadReleaseArchive(url, identity, { expectedSha256: "0".repeat(64), timeoutMs: 0 }), /timeout/i);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, { signal }) => new Promise((_resolve, reject) => {
+    const watchdog = setTimeout(() => reject(new Error("test fetch did not abort")), 1_000);
+    signal.addEventListener("abort", () => {
+      clearTimeout(watchdog);
+      reject(signal.reason);
+    }, { once: true });
+  });
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      downloadReleaseArchive(url, identity, { expectedSha256: "0".repeat(64), timeoutMs: 25 }),
+      /timeout|aborted/i,
+    );
+    assert.ok(Date.now() - started < 2_000);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

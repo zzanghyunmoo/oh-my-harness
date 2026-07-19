@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { generateExpectedKeys, loadRuntimeDescriptors, verifyExpectedKeys } from "../../scripts/harness/descriptors.mjs";
 
-const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 test("expected planner returns canonical 29 by 4 Cartesian keys", async () => {
   const resolved = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });

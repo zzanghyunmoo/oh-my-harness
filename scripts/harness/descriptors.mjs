@@ -17,9 +17,16 @@ const EXPECTED_RUNTIME_IDS = Object.freeze(Object.keys(EXPECTED_VERSIONS).sort()
 const REVIEWED_EVIDENCE_PATH = "harness/evidence/reviewed-runtime-evidence.json";
 const KEY_PATTERN = /^[a-z][a-z0-9-]*::[a-z][a-z0-9-]*$/;
 
-function readJson(path) {
+function readJson(path, label) {
   try { return JSON.parse(readFileSync(path, "utf8")); }
-  catch (error) { throw new Error(`Failed to read JSON ${path}: ${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) {
+    const detail = error instanceof SyntaxError
+      ? error.message
+      : error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "unknown error";
+    throw new Error(`Failed to read ${label}: ${detail}`);
+  }
 }
 
 function assertUnique(values, label) {
@@ -90,8 +97,8 @@ function validateReviewedDescriptor(descriptor, evidence) {
 }
 
 export function validateDescriptor(descriptor, { schema, reviewedEvidence } = {}) {
-  const activeSchema = schema ?? readJson(resolve(MODULE_REPO_ROOT, "harness/contracts/runtime-adapter.schema.json"));
-  const activeEvidence = reviewedEvidence ?? readJson(resolve(MODULE_REPO_ROOT, REVIEWED_EVIDENCE_PATH));
+  const activeSchema = schema ?? readJson(resolve(MODULE_REPO_ROOT, "harness/contracts/runtime-adapter.schema.json"), "runtime adapter schema JSON");
+  const activeEvidence = reviewedEvidence ?? readJson(resolve(MODULE_REPO_ROOT, REVIEWED_EVIDENCE_PATH), "reviewed runtime evidence JSON");
   validateSchema(descriptor, activeSchema);
   assertSecretFree(descriptor);
   if (descriptor.runtime.name !== descriptor.id) throw new Error("descriptor runtime name must match descriptor ID");
@@ -176,10 +183,10 @@ export function verifyExpectedKeys(context, suppliedKeys) {
 export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {}) {
   const root = realpathSync(repoRoot);
   const profilePath = resolve(root, "harness/profiles/personal-v1.profile.json");
-  const profile = readJson(profilePath);
-  const profileSchema = readJson(resolve(root, "harness/contracts/harness-profile.schema.json"));
-  const descriptorSchema = readJson(resolve(root, "harness/contracts/runtime-adapter.schema.json"));
-  const reviewedEvidence = readJson(resolve(root, REVIEWED_EVIDENCE_PATH));
+  const profile = readJson(profilePath, "profile JSON");
+  const profileSchema = readJson(resolve(root, "harness/contracts/harness-profile.schema.json"), "profile schema JSON");
+  const descriptorSchema = readJson(resolve(root, "harness/contracts/runtime-adapter.schema.json"), "runtime adapter schema JSON");
+  const reviewedEvidence = readJson(resolve(root, REVIEWED_EVIDENCE_PATH), "reviewed runtime evidence JSON");
   assertSecretFree(reviewedEvidence);
   const adapterRoot = resolve(root, "harness/adapters");
   const adapterEntries = readdirSync(adapterRoot, { withFileTypes: true });
@@ -190,8 +197,8 @@ export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {
   assertSecretFree(profile);
   const lockPath = resolveOwnedRef(root, profilePath, profile.source.lockRef, "profile lockRef");
   const inventoryPath = resolveOwnedRef(root, profilePath, profile.source.inventoryRef, "profile inventoryRef");
-  const lock = readJson(lockPath);
-  const inventory = readJson(inventoryPath);
+  const lock = readJson(lockPath, "upstream lock JSON");
+  const inventory = readJson(inventoryPath, "upstream inventory JSON");
   assertSecretFree(lock);
   assertSecretFree(inventory);
   const featureIds = validateSourceIdentity(profile, lock, inventory);
@@ -206,7 +213,7 @@ export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {
     if (runtime.version !== EXPECTED_VERSIONS[runtime.id]) throw new Error(`${runtime.id} profile version drift`);
     if (runtime.descriptorRef !== `../adapters/${runtime.id}.json`) throw new Error(`${runtime.id} descriptor ref drift`);
     const descriptorPath = resolveOwnedRef(root, profilePath, runtime.descriptorRef, `${runtime.id} descriptorRef`);
-    const descriptor = readJson(descriptorPath);
+    const descriptor = readJson(descriptorPath, `${runtime.id} descriptor JSON`);
     validateDescriptor(descriptor, { schema: descriptorSchema, reviewedEvidence });
     if (descriptor.id !== runtime.id || descriptor.runtime.version !== runtime.version) throw new Error(`${runtime.id} profile/descriptor identity drift`);
     if (!isDeepStrictEqual(descriptor.companions, runtime.companions)) throw new Error(`${runtime.id} profile/descriptor companion drift`);

@@ -20,6 +20,7 @@ const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "objects.githubus
 const AZURE_RELEASE_QUERY_KEYS = new Set(["sp", "sv", "sr", "spr", "se", "rscd", "rsct", "skoid", "sktid", "skt", "ske", "sks", "skv", "sig"]);
 const OBJECT_QUERY_KEYS = new Set(["X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Signature", "X-Amz-SignedHeaders", "response-content-disposition", "response-content-type"]);
 const FORBIDDEN_TOKEN = /[\0-\x1f\x7f;&|`$<>\\]/;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
 
 async function sha256File(path) {
   const hash = createHash("sha256");
@@ -175,14 +176,20 @@ export function validateReleaseUrl(value, identity, { redirected = false } = {})
   return url;
 }
 
-export async function downloadReleaseArchive(initialUrl, identity, { expectedSha256 } = {}) {
+export async function downloadReleaseArchive(initialUrl, identity, { expectedSha256, timeoutMs = DOWNLOAD_TIMEOUT_MS } = {}) {
   validateReleaseUrl(initialUrl, identity);
+  if (typeof expectedSha256 !== "string" || !/^[0-9a-f]{64}$/.test(expectedSha256)) throw new Error("release download requires an exact expected SHA-256");
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error("release download timeout must be a positive integer");
   const root = await mkdtemp(join(tmpdir(), "oh-my-harness-download-"));
   const path = join(root, identity.assetName);
   let url = initialUrl;
   try {
     for (let redirects = 0; redirects <= 3; redirects++) {
-      const response = await fetch(url, { redirect: "manual", headers: { accept: "application/octet-stream" } });
+      const response = await fetch(url, {
+        redirect: "manual",
+        headers: { accept: "application/octet-stream" },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         if (redirects === 3) throw new Error("release download exceeded redirect limit");
         url = validateReleaseUrl(new URL(response.headers.get("location"), url).href, identity, { redirected: true }).href;

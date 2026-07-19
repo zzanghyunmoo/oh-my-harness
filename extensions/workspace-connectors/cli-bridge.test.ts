@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   checkCliAuthStatus,
@@ -17,7 +17,7 @@ async function withFakeCli<T>(command: "gh" | "glab", body: string, fn: (dir: st
   const path = join(dir, command);
   await writeFile(path, `#!/bin/sh\n${body}\n`, "utf-8");
   await chmod(path, 0o700);
-  process.env.PATH = previousPath ? `${dir}:${previousPath}` : dir;
+  process.env.PATH = previousPath ? `${dir}${delimiter}${previousPath}` : dir;
   try {
     return await fn(dir);
   } finally {
@@ -46,7 +46,11 @@ test("validateReadOnlyCliInvocation refuses value-bearing unsafe flags and brows
   assert.throws(() => validateReadOnlyCliInvocation("gitlab", ["repo", "view", "group/project", "--browser"]), /Refusing/);
 });
 
-test("executeReadOnlyCliConnector uses trusted PATH executable and redacts output", async () => {
+test("executeReadOnlyCliConnector uses trusted PATH executable and redacts output", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX executable fixture is not portable to Windows");
+    return;
+  }
   await withFakeCli("glab", "echo glpat-secret123", async (dir) => {
     assert.equal(resolveTrustedExecutable("glab"), join(dir, "glab"));
     const result = await executeReadOnlyCliConnector("gitlab", ["issue", "list"]);
@@ -71,7 +75,11 @@ test("resolveTrustedExecutable refuses cwd-local shims", async () => {
   }
 });
 
-test("checkCliAuthStatus hard-times out a CLI that ignores SIGTERM", async () => {
+test("checkCliAuthStatus hard-times out a CLI that ignores SIGTERM", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX signal fixture is not portable to Windows");
+    return;
+  }
   await withFakeCli("gh", "trap '' TERM\nwhile true; do sleep 1; done", async () => {
     const started = Date.now();
     const status = await checkCliAuthStatus("github", 10);

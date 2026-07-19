@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import {
@@ -29,7 +30,7 @@ import {
   writeArtifacts,
 } from "../../scripts/harness/upstream.mjs";
 
-const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const UPSTREAM_CLI = join(REPO_ROOT, "scripts", "harness", "upstream.mjs");
 const EXPECTED_INVENTORY_SHA256 = "9332006c292d0402c75c5e8280792aec4cdbdefed9804f8a77edf086c8d3a49c";
 const EXPECTED_SIGNATURE_SHA256 = "3f204ed1d1b7eb347017437d683f2dfd50fe25b39b14f3f513c9a0c385cf8302";
@@ -469,7 +470,7 @@ test("write detects an artifact parent replacement before rename", () => {
   }
 });
 
-test("write refuses final symlink and non-regular targets", () => {
+test("write refuses final symlink and non-regular targets", (t) => {
   const artifacts = committedArtifacts();
 
   const symlinkTarget = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
@@ -478,9 +479,14 @@ test("write refuses final symlink and non-regular targets", () => {
   try {
     mkdirSync(join(symlinkTarget, "harness", "inventory"), { recursive: true });
     writeFileSync(canary, "outside\n");
-    symlinkSync(canary, join(symlinkTarget, "harness", "inventory", "compound-engineering-v3.19.0.json"));
-    assert.throws(() => writeArtifacts(symlinkTarget, artifacts), /unsafe output target/);
-    assert.equal(readFileSync(canary, "utf8"), "outside\n");
+    try {
+      symlinkSync(canary, join(symlinkTarget, "harness", "inventory", "compound-engineering-v3.19.0.json"));
+      assert.throws(() => writeArtifacts(symlinkTarget, artifacts), /unsafe output target/);
+      assert.equal(readFileSync(canary, "utf8"), "outside\n");
+    } catch (error) {
+      if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
+      t.diagnostic("final symlink assertion skipped because Windows symbolic links are unavailable");
+    }
   } finally {
     rmSync(symlinkTarget, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
@@ -495,12 +501,18 @@ test("write refuses final symlink and non-regular targets", () => {
   }
 });
 
-test("write and verify refuse an ancestor symlink", () => {
+test("write and verify refuse an ancestor symlink", (t) => {
   const target = mkdtempSync(join(tmpdir(), "oh-my-harness-target-"));
   const outside = mkdtempSync(join(tmpdir(), "oh-my-harness-outside-"));
   const artifacts = committedArtifacts();
   try {
-    symlinkSync(outside, join(target, "harness"));
+    try {
+      symlinkSync(outside, join(target, "harness"));
+    } catch (error) {
+      if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
+      t.skip("Windows symbolic links are unavailable");
+      return;
+    }
     assert.throws(() => writeArtifacts(target, artifacts), /symlink|unsafe/i);
     assert.throws(() => verifyArtifacts(target, artifacts), /symlink|unsafe/i);
     assert.equal(readFileSync(join(outside, ".keep"), { encoding: "utf8", flag: "a+" }), "");

@@ -234,7 +234,13 @@ function trustedGitCandidates() {
     if (!isAbsolute(configured)) fail("OH_MY_HARNESS_GIT_EXECUTABLE must be an absolute path");
     return [configured];
   }
-  if (process.platform === "win32") return [];
+  if (process.platform === "win32") {
+    return [
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+      "C:\\Program Files\\Git\\bin\\git.exe",
+      "C:\\Program Files (x86)\\Git\\cmd\\git.exe",
+    ];
+  }
   return ["/usr/bin/git", "/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
 }
 
@@ -249,7 +255,7 @@ function resolveGitExecutable() {
         fail(`trusted Git executable cannot be inside the repository: ${executable}`);
       }
       const stat = lstatSync(executable);
-      if (!stat.isFile() || (stat.mode & 0o022) !== 0) fail(`trusted Git executable has unsafe permissions: ${executable}`);
+      if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o022) !== 0)) fail(`trusted Git executable has unsafe permissions: ${executable}`);
       cachedGitExecutable = executable;
       return cachedGitExecutable;
     } catch (error) {
