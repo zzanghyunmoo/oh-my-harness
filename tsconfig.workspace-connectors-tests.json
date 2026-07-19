@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": ".tmp/workspace-connectors-test"
+  },
+  "include": [
+    "extensions/workspace-connectors/**/*.ts",
+    "extensions/setup-doctor/**/*.ts"
+  ]
+}

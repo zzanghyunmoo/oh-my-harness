@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 
 import {
 	assertSecretFree,
 	canonicalSha256,
 } from "../../scripts/harness/canonical.mjs";
+import { validateSchema as validate } from "../../scripts/harness/schema.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CONTRACT_ROOT = join(REPO_ROOT, "harness", "contracts");
@@ -76,128 +76,6 @@ function loadContracts() {
 	return contractCache;
 }
 
-function resolveRef(rootSchema, ref) {
-	if (!ref.startsWith("#/"))
-		throw new Error(
-			`external schema reference is unsupported in fixture validator: ${ref}`,
-		);
-	return ref
-		.slice(2)
-		.split("/")
-		.map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
-		.reduce((value, segment) => value?.[segment], rootSchema);
-}
-
-function matches(value, schema, rootSchema) {
-	try {
-		validate(value, schema, rootSchema);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function validate(value, schema, rootSchema = schema, path = "$") {
-	if (schema.$ref) {
-		const resolved = resolveRef(rootSchema, schema.$ref);
-		if (!resolved)
-			throw new Error(`${path}: unresolved schema reference ${schema.$ref}`);
-		return validate(value, resolved, rootSchema, path);
-	}
-	for (const child of schema.allOf ?? [])
-		validate(value, child, rootSchema, path);
-	if (schema.if) {
-		const branch = matches(value, schema.if, rootSchema)
-			? schema.then
-			: schema.else;
-		if (branch) validate(value, branch, rootSchema, path);
-	}
-	if (
-		Object.hasOwn(schema, "const") &&
-		!isDeepStrictEqual(value, schema.const)
-	) {
-		throw new Error(`${path}: expected schema const`);
-	}
-	if (
-		schema.enum &&
-		!schema.enum.some((candidate) => isDeepStrictEqual(candidate, value))
-	) {
-		throw new Error(`${path}: value is not in schema enum`);
-	}
-	if (schema.type === "object") {
-		if (!value || typeof value !== "object" || Array.isArray(value))
-			throw new Error(`${path}: expected object`);
-		for (const key of schema.required ?? []) {
-			if (!Object.hasOwn(value, key))
-				throw new Error(`${path}.${key}: required field is missing`);
-		}
-		if (schema.additionalProperties === false) {
-			for (const key of Object.keys(value)) {
-				if (!Object.hasOwn(schema.properties ?? {}, key))
-					throw new Error(`${path}.${key}: additional field is forbidden`);
-			}
-		}
-		for (const [key, child] of Object.entries(schema.properties ?? {})) {
-			if (Object.hasOwn(value, key))
-				validate(value[key], child, rootSchema, `${path}.${key}`);
-		}
-		return;
-	}
-	if (schema.type === "array") {
-		if (!Array.isArray(value)) throw new Error(`${path}: expected array`);
-		if (schema.minItems !== undefined && value.length < schema.minItems)
-			throw new Error(`${path}: too few items`);
-		if (schema.maxItems !== undefined && value.length > schema.maxItems)
-			throw new Error(`${path}: too many items`);
-		if (
-			schema.uniqueItems &&
-			new Set(value.map((entry) => JSON.stringify(entry))).size !== value.length
-		) {
-			throw new Error(`${path}: duplicate array item`);
-		}
-		value.forEach((entry, index) =>
-			validate(entry, schema.items ?? {}, rootSchema, `${path}[${index}]`),
-		);
-		if (schema.contains) {
-			const count = value.filter((entry) =>
-				matches(entry, schema.contains, rootSchema),
-			).length;
-			if (count < (schema.minContains ?? 1))
-				throw new Error(`${path}: required contained item is missing`);
-		}
-		return;
-	}
-	if (schema.type === "string") {
-		if (typeof value !== "string") throw new Error(`${path}: expected string`);
-		if (schema.minLength !== undefined && value.length < schema.minLength)
-			throw new Error(`${path}: string is too short`);
-		if (schema.pattern && !new RegExp(schema.pattern).test(value))
-			throw new Error(`${path}: pattern mismatch`);
-		if (schema.format === "uri" && !URL.canParse(value))
-			throw new Error(`${path}: invalid URI`);
-		if (schema.format === "date-time" && Number.isNaN(Date.parse(value)))
-			throw new Error(`${path}: invalid date-time`);
-		return;
-	}
-	if (schema.type === "boolean" && typeof value !== "boolean")
-		throw new Error(`${path}: expected boolean`);
-	if (schema.type === "integer" && !Number.isInteger(value))
-		throw new Error(`${path}: expected integer`);
-	if (
-		schema.type === "number" &&
-		(typeof value !== "number" || !Number.isFinite(value))
-	) {
-		throw new Error(`${path}: expected finite number`);
-	}
-	if (
-		(schema.type === "integer" || schema.type === "number") &&
-		schema.minimum !== undefined &&
-		value < schema.minimum
-	) {
-		throw new Error(`${path}: number is below minimum`);
-	}
-}
-
 function featureFixture() {
 	return {
 		$schema: "../contracts/feature-contract.schema.json",
@@ -261,38 +139,38 @@ function featureFixture() {
 }
 
 function adapterFixture() {
+	const lifecycle = (operation) => ({
+		executableId: "harness-lifecycle",
+		tokens: [{ kind: "literal", value: operation }, { kind: "placeholder", id: "payload-root" }],
+	});
 	return {
 		$schema: "../contracts/runtime-adapter.schema.json",
-		schemaVersion: "1.0.0",
+		schemaVersion: "1.1.0",
 		id: "pi",
 		runtime: { name: "pi", version: "0.80.7" },
-		platforms: [
-			{
-				id: "darwin-arm64-personal",
-				os: "darwin",
-				architecture: "arm64",
-				executableSha256: SHA256,
-				acquisition: {
-					kind: "package",
-					immutableId: "npm:pi@0.80.7",
-					sha256: "b".repeat(64),
-				},
+		platforms: ["darwin-arm64-personal", "linux-x64-release"].map((id) => ({
+			id,
+			os: id.startsWith("darwin") ? "darwin" : "linux",
+			architecture: id.startsWith("darwin") ? "arm64" : "x64",
+			variant: "standalone",
+			executable: { id: "runtime", memberPath: "pi", sha256: SHA256 },
+			acquisition: {
+				kind: "release-archive", provider: "github", owner: "earendil-works", repository: "pi", tag: "v0.80.7",
+				asset: { id: 1, name: `pi-${id}.tar.gz`, apiUrl: "https://api.github.com/repos/earendil-works/pi/releases/assets/1", downloadUrl: `https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-${id}.tar.gz`, sha256: "b".repeat(64) },
 			},
-		],
+		})),
 		native: {
-			install: {
-				kind: "package",
-				argv: ["pi", "install", "npm:@scope/package"],
+			install: lifecycle("install-native-payload"),
+			discovery: lifecycle("verify-native-discovery"),
+			invocation: { executableId: "runtime", tokens: [{ kind: "literal", value: "--mode" }, { kind: "literal", value: "rpc" }] },
+			preModelGate: {
+				kind: "input-hook", phase: "pre-model", surfaceId: "input", configurationScope: "package-extension", status: "candidate",
+				sourceRef: { owner: "earendil-works", repository: "pi", commit: "a".repeat(40), locations: ["packages/coding-agent/src/core/extensions/types.ts::InputEvent"] },
 			},
-			discovery: { kind: "skill-path", argv: ["pi", "--list-skills"] },
-			invocation: { kind: "native-command", argv: ["pi", "--mode", "json"] },
-			preModelGate: { kind: "extension-hook", phase: "pre-model" },
-			headlessEvidence: { protocol: "json", version: "1.0.0" },
+			headlessEvidence: { protocol: "rpc", version: "1.0.0" },
 		},
 		companions: [{ id: "pi-subagents", version: "0.34.0", required: true }],
-		optionalExtensions: [
-			{ id: "blocking-question", changesCommonContract: false },
-		],
+		optionalExtensions: [{ id: "blocking-question", changesCommonContract: false }],
 	};
 }
 
@@ -558,8 +436,12 @@ test("runtime adapter contract requires immutable tuples and structured native s
 	assert.throws(() => validate(missingGate, schema), /required field/);
 
 	const shellCommand = structuredClone(fixture);
-	shellCommand.native.invocation.command = "pi --mode json";
+	shellCommand.native.invocation.argv = ["pi --mode json"];
 	assert.throws(() => validate(shellCommand, schema), /additional field/);
+
+	const legacy = structuredClone(fixture);
+	legacy.schemaVersion = "1.0.0";
+	assert.throws(() => validate(legacy, schema), /schema const/);
 
 	const optionalWithoutFallback = structuredClone(fixture);
 	optionalWithoutFallback.companions = [

@@ -2,16 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zzanghyunmoo/oh-my-harness/blob/main/harness/contracts/runtime-adapter.schema.json",
   "title": "Oh My Harness runtime adapter contract",
-  "description": "Runtime-native lifecycle, gate, companion, receipt, and headless evidence declaration.",
+  "description": "Declarative runtime-native lifecycle, candidate gate, immutable release acquisition, companion, and headless evidence declaration.",
   "type": "object",
   "additionalProperties": false,
   "required": ["$schema", "schemaVersion", "id", "runtime", "platforms", "native", "companions", "optionalExtensions"],
   "properties": {
     "$schema": { "const": "../contracts/runtime-adapter.schema.json" },
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "id": { "type": "string", "enum": ["claude-code", "codex", "opencode", "pi"] },
     "runtime": { "$ref": "#/$defs/runtime" },
-    "platforms": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/platformReceipt" }, "uniqueItems": true },
+    "platforms": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/platformReceipt" }, "uniqueItems": true },
     "native": { "$ref": "#/$defs/native" },
     "companions": { "type": "array", "items": { "$ref": "#/$defs/companion" }, "uniqueItems": true },
     "optionalExtensions": { "type": "array", "items": { "$ref": "#/$defs/optionalExtension" }, "uniqueItems": true }
@@ -19,6 +19,7 @@
   "$defs": {
     "stableId": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "gitCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "runtime": {
       "type": "object", "additionalProperties": false,
       "required": ["name", "version"],
@@ -27,40 +28,94 @@
         "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
       }
     },
+    "releaseAsset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "name", "apiUrl", "downloadUrl", "sha256"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "apiUrl": { "type": "string", "format": "uri" },
+        "downloadUrl": { "type": "string", "format": "uri" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "acquisition": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "immutableId", "sha256"],
+      "required": ["kind", "provider", "owner", "repository", "tag", "asset"],
       "properties": {
-        "kind": { "type": "string", "enum": ["package", "registry", "release-archive"] },
-        "immutableId": { "type": "string", "minLength": 1 },
+        "kind": { "const": "release-archive" },
+        "provider": { "const": "github" },
+        "owner": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "tag": { "type": "string", "pattern": "^(?:v|rust-v)[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "asset": { "$ref": "#/$defs/releaseAsset" }
+      }
+    },
+    "executable": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "memberPath", "sha256"],
+      "properties": {
+        "id": { "const": "runtime" },
+        "memberPath": { "type": "string", "minLength": 1 },
         "sha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "platformReceipt": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "os", "architecture", "executableSha256", "acquisition"],
+      "required": ["id", "os", "architecture", "variant", "executable", "acquisition"],
       "properties": {
         "id": { "$ref": "#/$defs/stableId" },
         "os": { "type": "string", "enum": ["linux", "darwin"] },
         "architecture": { "type": "string", "enum": ["x64", "arm64"] },
-        "executableSha256": { "$ref": "#/$defs/sha256" },
+        "variant": { "type": "string", "enum": ["musl", "baseline-glibc", "glibc", "darwin", "standalone"] },
+        "executable": { "$ref": "#/$defs/executable" },
         "acquisition": { "$ref": "#/$defs/acquisition" }
       }
     },
+    "actionToken": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["literal", "placeholder"] },
+        "value": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "enum": ["runtime-root", "payload-root", "workspace-root", "evidence-endpoint"] }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "kind": { "const": "literal" } } },
+          "then": { "type": "object", "required": ["value"], "properties": { "id": { "const": null } } },
+          "else": { "type": "object", "required": ["id"], "properties": { "value": { "const": null } } }
+        }
+      ]
+    },
     "nativeAction": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "argv"],
+      "required": ["executableId", "tokens"],
       "properties": {
-        "kind": { "type": "string", "enum": ["package", "registry", "plugin", "skill-path", "native-command", "structured-cli"] },
-        "argv": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "minLength": 1 } }
+        "executableId": { "type": "string", "enum": ["harness-lifecycle", "runtime"] },
+        "tokens": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/actionToken" } }
+      }
+    },
+    "sourceRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "repository", "commit", "locations"],
+      "properties": {
+        "owner": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "commit": { "$ref": "#/$defs/gitCommit" },
+        "locations": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
       }
     },
     "preModelGate": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "phase"],
+      "required": ["kind", "phase", "surfaceId", "sourceRef", "configurationScope", "status"],
       "properties": {
-        "kind": { "type": "string", "enum": ["extension-hook", "session-hook", "input-hook", "permission-hook"] },
-        "phase": { "const": "pre-model" }
+        "kind": { "type": "string", "enum": ["extension-hook", "session-hook", "input-hook"] },
+        "phase": { "const": "pre-model" },
+        "surfaceId": { "type": "string", "minLength": 1 },
+        "sourceRef": { "$ref": "#/$defs/sourceRef" },
+        "configurationScope": { "type": "string", "enum": ["managed-hooks", "project-plugin", "managed-plugin-hooks", "package-extension"] },
+        "status": { "type": "string", "enum": ["candidate", "candidate-deny-unproven"] }
       }
     },
     "headlessEvidence": {
@@ -68,7 +123,7 @@
       "required": ["protocol", "version"],
       "properties": {
         "protocol": { "type": "string", "enum": ["json", "jsonl", "rpc"] },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        "version": { "const": "1.0.0" }
       }
     },
     "native": {
@@ -94,11 +149,7 @@
       "allOf": [
         {
           "if": { "type": "object", "properties": { "required": { "const": false } } },
-          "then": {
-            "type": "object",
-            "required": ["fallbackId"],
-            "properties": { "fallbackId": { "$ref": "#/$defs/stableId" } }
-          },
+          "then": { "type": "object", "required": ["fallbackId"], "properties": { "fallbackId": { "$ref": "#/$defs/stableId" } } },
           "else": { "type": "object", "properties": { "fallbackId": { "const": null } } }
         }
       ]

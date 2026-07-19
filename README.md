@@ -1,112 +1,123 @@
 # oh-my-harness
 
-Cross-runtime coding-agent harness for distributing Compound Engineering and shared guardrails through native Codex, OpenCode, Claude Code, and Pi surfaces.
+Codex, OpenCode, Claude Code, Pi에 같은 Compound Engineering 자산과 안전 정책을 배포하기 위한 cross-runtime coding-agent harness입니다. 기존 Pi 확장은 v1 동안 호환 surface로 유지합니다.
 
-The existing Pi extensions remain available as compatibility surfaces while the runtime-neutral harness is implemented.
+## 현재 구현 범위
 
-## Install
+- U1: Compound Engineering upstream을 고정하는 trust receipt와 29개 skill inventory
+- U2: runtime-neutral feature, profile, adapter, conformance contract
+- U3: Codex, OpenCode, Claude Code, Pi의 정확한 버전과 플랫폼 acquisition descriptor
+
+Native pre-model gate 실행, 실제 설치·업데이트 오케스트레이션, conformance runner는 후속 unit에서 구현합니다. 현재 descriptor가 존재한다는 사실만으로 native gate 또는 설치가 완료됐다고 보지 않습니다.
+
+## 요구사항
+
+- Node.js 22.19 이상
+- npm
+- Git
+- Pi 호환 확장을 사용할 경우 Pi
+
+## 빠른 시작
+
+```bash
+git clone https://github.com/zzanghyunmoo/oh-my-harness.git
+cd oh-my-harness
+npm ci
+npm run profile:verify
+npm run harness:descriptors:verify
+npm run test:harness
+npm run test:workspace-connectors
+```
+
+Descriptor 검증이 성공하면 `personal-v1` profile 기준으로 4개 runtime, 8개 runtime/platform tuple, 116개 expected conformance key와 canonical SHA-256을 출력합니다.
+
+Pi 패키지만 설치하려면 다음 명령을 사용합니다.
 
 ```bash
 pi install git:github.com/zzanghyunmoo/oh-my-harness
 ```
 
-For SSH/private repo:
+SSH 또는 private repository를 사용한다면:
 
 ```bash
 pi install git:git@github.com:zzanghyunmoo/oh-my-harness
 ```
 
-Existing installations that use the former `zzanghyunmoo/oh-my-pi` source should migrate to the new install spec. The legacy `/oh-my-pi`, `/oh-my-pi-doctor`, `omp:` and `OH_MY_PI_*` compatibility surfaces remain available during v1.
+이전 `zzanghyunmoo/oh-my-pi` 설치는 위 source로 옮겨야 합니다. `/oh-my-pi`, `/oh-my-pi-doctor`, `omp:`, `OH_MY_PI_*` 호환 surface는 v1 동안 유지됩니다.
 
-## Contains
+## 저장소 구성
 
-- `extensions/env-loader`: CWD `.env` 로더 (다른 익스텐션보다 먼저 환경변수 로딩)
-- `extensions/workspace-connectors`: Linear/Notion MCP connector tools, read-only GitHub/GitLab CLI bridges, and connector login/status/logout commands
-- `extensions/quotio-provider`: Quotio LiteLLM proxy provider (OpenAI-compatible, dynamic model discovery)
-- `extensions/setup-doctor`: read-only setup doctor and command palette
-- `docs/profiles`: commit-safe profile pack and deterministic profile lock receipt
+- `harness/contracts`: runtime-neutral schema
+- `harness/adapters`: 네 runtime의 immutable descriptor
+- `harness/profiles`: 설치·검증 대상 tuple을 닫는 profile
+- `harness/inventory`, `harness/locks`: 검토된 upstream inventory와 trust receipt
+- `scripts/harness`: descriptor, acquisition, upstream 검증기
+- `extensions/env-loader`: CWD `.env`를 가장 먼저 읽는 opt-in 환경 로더
+- `extensions/workspace-connectors`: Linear/Notion MCP와 read-only GitHub/GitLab CLI bridge
+- `extensions/quotio-provider`: OpenAI-compatible Quotio LiteLLM provider
+- `extensions/setup-doctor`: read-only setup doctor와 command palette
+- `docs/profiles`: commit-safe Pi compatibility profile pack
 
-## Setup
+## Pi compatibility profile
 
-See `docs/blueprints/secret-references.md` for the versioned, secret-free blueprint
-that separates committed intent from local-only values.
-
-Profiles are described in `docs/profiles/*.profile.json`. Verify the committed
-profile lock before recreating a machine:
+커밋 가능한 설정 의도와 로컬 secret의 분리는 `docs/blueprints/secret-references.md`에 설명되어 있습니다. 적용 전에 deterministic lock을 검증합니다.
 
 ```bash
 npm run profile:verify
-npm run profile:apply -- --profile proxy-provider  # Quotio provider only
-npm run profile:apply -- --profile workspace       # Linear/Notion/GitHub connectors
-npm run profile:apply -- --profile full            # connectors + Quotio provider
+npm run profile:apply -- --profile proxy-provider
+npm run profile:apply -- --profile workspace
+npm run profile:apply -- --profile full
 ```
 
-`profile:apply` does not run `pi install`, write `.env`, edit settings, or start OAuth by default.
-Use its output as a safe checklist for `default`, `workspace`, `proxy-provider`, or
-`full` profile setup. The dry-run also prints a copyable `settings.json` package entry
-that filters oh-my-harness resources to the selected profile extensions. Connector setup
-intent is then selected inside Pi with `/connector-setup full`,
-`/connector-setup selective ...`, or `/connector-setup minimal`.
+`profile:apply`는 기본적으로 `pi install`을 실행하거나 `.env`와 settings를 수정하거나 OAuth를 시작하지 않습니다. 대신 선택한 profile에 필요한 안전한 checklist와 복사 가능한 `settings.json` package entry를 출력합니다.
 
-에이전트가 실행되는 디렉토리(CWD)에 `.env` 파일을 생성하여 익스텐션을 설정합니다:
+그 다음 Pi 안에서 connector 노출 범위를 선택합니다.
+
+```text
+/connector-setup full
+/connector-setup selective tenant:company capability:git
+/connector-setup selective service:linear service:notion
+/connector-setup minimal
+```
+
+## CWD `.env`
+
+에이전트를 실행하는 작업 디렉터리의 `.env`가 환경변수 source입니다. 값은 기존 `process.env`를 덮어쓰며, 각 확장은 명시적으로 `true`인 토글만 활성화합니다.
 
 ```bash
-# 익스텐션 토글 (opt-in, 명시적으로 true 설정 필요)
 ENABLE_QUOTIO=true
 ENABLE_WORKSPACE_CONNECTORS=true
 
-# Workspace connector access-key fallback (브라우저 OAuth가 불가할 때만 사용, 커밋하지 않음)
 LINEAR_API_KEY=<local-linear-api-key>
 NOTION_API_KEY=<local-notion-integration-token>
 # 또는 NOTION_TOKEN=<local-notion-integration-token>
 
-# Optional company GitLab host selector for glab-based reads (token은 glab가 관리)
 GITLAB_HOST=<company-gitlab-host>
 
-# Quotio Provider 설정 (로컬 값은 커밋하지 않음)
 QUOTIO_BASE_URL=<local-quotio-openai-compatible-base-url>
 QUOTIO_API_KEY=<local-quotio-api-key>
 ```
 
-- 토글 변수가 없거나 `true`가 아니면 해당 익스텐션은 비활성화됩니다.
-- CWD에 `.env`가 없으면 기존 환경변수(`~/.zshrc` 등)만으로 동작합니다.
-- CWD `.env`의 값은 기존 `process.env`를 덮어씁니다.
+OAuth token은 저장소 밖의 `~/.pi/agent/workspace-connectors-auth.json`에, connector setup state는 `~/.pi/agent/workspace-connectors-setup.json`에 저장됩니다. Browser OAuth를 쓸 수 없을 때만 CWD `.env`의 access key로 fallback합니다.
 
-## Commands
+## 주요 명령
 
-- `/connector-setup full` — Select the full connector surface: personal Linear/Notion/GitHub plus company Jira/Confluence/GitLab readiness.
-- `/connector-setup selective tenant:company capability:git` — Select connector intent by tenant/capability; use `service:linear service:notion` for explicit services.
-- `/connector-setup minimal` — Intentionally hide issue-tracker, wiki, and git connector affordances.
-- `/oh-my-harness` — Show the command palette and setup help.
-- `/oh-my-harness-doctor` — Check local env, capability registry, connector/provider metadata, safety policies, gh/glab auth, connector readiness, and local-only paths.
-- `/oh-my-pi`, `/oh-my-pi-doctor` — Legacy-compatible aliases for the commands above.
-- `/quotio-status` — Check Quotio provider connectivity and authentication (enabled by `proxy-provider` or `full` profile).
-- `/connector-login linear|notion` — Direct browser OAuth login for OAuth MCP workspace connectors.
-- `/connector-status [service]` — Show connector setup readiness plus OAuth/access-key status.
-- `/connector-logout <service|tenant:personal|tenant:company|capability:git> [--confirm]` — Preview first; clears only Pi-managed OAuth state when confirmed.
-- `/connector-tools linear|notion` — List connector tools after OAuth login or access-key env setup.
+- `/oh-my-harness`: command palette와 setup 도움말
+- `/oh-my-harness-doctor`: 환경, capability, provider, safety policy, CLI auth, 로컬 경로 점검
+- `/connector-login linear|notion`: browser OAuth 시작
+- `/connector-status [service]`: setup 및 auth 상태 확인
+- `/connector-logout <selector> [--confirm]`: preview 후 Pi-managed OAuth state만 삭제
+- `/connector-tools linear|notion`: 준비된 connector tool 목록
+- `/quotio-status`: Quotio 연결과 인증 상태 확인
 
-`/connector-login` opens the browser directly and receives the OAuth callback on
-`127.0.0.1`. It no longer pauses the Pi TUI or runs `mcp-remote-client` inside
-the terminal. OAuth tokens are stored outside the repo at
-`~/.pi/agent/workspace-connectors-auth.json` by default. Connector setup mode is
-stored separately at `~/.pi/agent/workspace-connectors-setup.json` by default.
-Override those local-only paths with `OH_MY_PI_CONNECTOR_AUTH_PATH` and
-`OH_MY_PI_CONNECTOR_SETUP_PATH` when needed.
+GitHub와 GitLab은 각각 인증된 `gh`, `glab` 실행파일을 fail-closed read-only allowlist로 사용합니다. oh-my-harness는 GitLab token을 저장하지 않습니다. Jira와 Confluence는 setup에서 보이지만 non-interactive Atlassian auth 경로가 정해질 때까지 runtime tool은 닫혀 있습니다.
 
-If browser OAuth is unavailable, set `LINEAR_API_KEY` or
-`NOTION_API_KEY`/`NOTION_TOKEN` in the CWD `.env`. Connector tools prefer stored
-OAuth tokens and then fall back to the configured access key.
+## 커밋하지 않을 항목
 
-GitHub uses the authenticated `gh` CLI through a fail-closed read-only allowlist.
-GitLab uses the authenticated `glab` CLI the same way; oh-my-harness never stores
-GitLab tokens. Jira and Confluence are setup-visible company capabilities, but
-runtime tools stay gated until a non-interactive Atlassian auth route is selected.
-
-## Do not commit
-
-- Pi auth files: `~/.pi/agent/auth.json`
-- OAuth state: `.mcp-auth`, `~/.pi/agent/workspace-connectors-auth.json`
-- Connector setup state: `~/.pi/agent/workspace-connectors-setup.json`
-- Sessions: `~/.pi/agent/sessions`
-- API keys / tokens / `.env`
+- `.env`와 API key 또는 token
+- `node_modules/`
+- `~/.pi/agent/auth.json`
+- `.mcp-auth/`
+- `~/.pi/agent/workspace-connectors-auth.json`
+- `~/.pi/agent/workspace-connectors-setup.json`
+- `~/.pi/agent/sessions/`

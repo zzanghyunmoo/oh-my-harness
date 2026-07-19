@@ -71,13 +71,20 @@ test("setup state writes secret-free versioned JSON outside the repo", async () 
   });
 });
 
-test("setup state refuses symlinked override paths", async () => {
+test("setup state refuses symlinked override paths", async (t) => {
   const previous = process.env.OH_MY_PI_CONNECTOR_SETUP_PATH;
   const dir = await mkdtemp(join(tmpdir(), "oh-my-pi-setup-state-link-"));
   const target = join(dir, "target.json");
   const link = join(dir, "link.json");
   try {
-    await symlink(target, link);
+    try {
+      await symlink(target, link);
+    } catch (error) {
+      const unavailable = error instanceof Error && "code" in error && error.code === "EPERM";
+      if (process.platform !== "win32" || !unavailable) throw error;
+      t.skip("Windows symbolic links are unavailable");
+      return;
+    }
     process.env.OH_MY_PI_CONNECTOR_SETUP_PATH = link;
     assert.throws(() => getConnectorSetupPath(), /symlinked connector setup state path/);
   } finally {

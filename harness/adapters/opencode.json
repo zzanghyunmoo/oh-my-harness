@@ -1,0 +1,128 @@
+{
+  "$schema": "../contracts/runtime-adapter.schema.json",
+  "companions": [],
+  "id": "opencode",
+  "native": {
+    "discovery": {
+      "executableId": "harness-lifecycle",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "verify-native-discovery"
+        },
+        {
+          "id": "payload-root",
+          "kind": "placeholder"
+        }
+      ]
+    },
+    "headlessEvidence": {
+      "protocol": "json",
+      "version": "1.0.0"
+    },
+    "install": {
+      "executableId": "harness-lifecycle",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "install-native-payload"
+        },
+        {
+          "id": "payload-root",
+          "kind": "placeholder"
+        }
+      ]
+    },
+    "invocation": {
+      "executableId": "runtime",
+      "tokens": [
+        {
+          "kind": "literal",
+          "value": "run"
+        },
+        {
+          "kind": "literal",
+          "value": "--format"
+        },
+        {
+          "kind": "literal",
+          "value": "json"
+        }
+      ]
+    },
+    "preModelGate": {
+      "configurationScope": "project-plugin",
+      "kind": "extension-hook",
+      "phase": "pre-model",
+      "sourceRef": {
+        "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
+        "locations": [
+          "packages/plugin/src/index.ts::Hooks[\"chat.message\"]",
+          "packages/opencode/src/session/prompt.ts"
+        ],
+        "owner": "anomalyco",
+        "repository": "opencode"
+      },
+      "status": "candidate-deny-unproven",
+      "surfaceId": "chat.message"
+    }
+  },
+  "optionalExtensions": [],
+  "platforms": [
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477106206",
+          "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-darwin-arm64.zip",
+          "id": 477106206,
+          "name": "opencode-darwin-arm64.zip",
+          "sha256": "2b2b5e2da7a3bc82cad8551373114683e8632df09f5ea6af1b9ea36961795abd"
+        },
+        "kind": "release-archive",
+        "owner": "anomalyco",
+        "provider": "github",
+        "repository": "opencode",
+        "tag": "v1.18.0"
+      },
+      "architecture": "arm64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "opencode",
+        "sha256": "74537e1cdb65451b593a8854af26ea6a8482d87350958e326f53141f62849ac4"
+      },
+      "id": "darwin-arm64-personal",
+      "os": "darwin",
+      "variant": "darwin"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477106395",
+          "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-linux-x64-baseline.tar.gz",
+          "id": 477106395,
+          "name": "opencode-linux-x64-baseline.tar.gz",
+          "sha256": "83216f77d9fb7f6aaa2642074905814f7aca52483dd2f0678f1ade5c4dc84eb9"
+        },
+        "kind": "release-archive",
+        "owner": "anomalyco",
+        "provider": "github",
+        "repository": "opencode",
+        "tag": "v1.18.0"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "opencode",
+        "sha256": "e59904ab94083dd56372d200cdd1c0d3bff5ffe6330d4cc8710e0c7dbfa82305"
+      },
+      "id": "linux-x64-release",
+      "os": "linux",
+      "variant": "baseline-glibc"
+    }
+  ],
+  "runtime": {
+    "name": "opencode",
+    "version": "1.18.0"
+  },
+  "schemaVersion": "1.1.0"
+}
