@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -8,14 +8,17 @@ import { fileURLToPath } from "node:url";
 
 import {
   CLI_TOOL_DEFINITIONS,
+  RUNTIME_TOOL_PROFILE_MANIFEST,
   RUNTIME_TOOL_PROFILES,
   classifyCliInvocation,
   cliToolDefinitionsForRuntime,
   cliToolServiceIdsForRuntimes,
   executeCliTool,
+  getRuntimeToolProfileAssignment,
   listCliToolStatus,
   redactCliOutput,
   resolveCliExecutable,
+  validateRuntimeToolProfileManifest,
 } from "../../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
 import { buildToolInstallPlan, parseToolArguments } from "../../scripts/tools/manage.mjs";
 
@@ -70,6 +73,13 @@ test("CLI tool catalog covers every requested role/backend mapping exactly once"
 });
 
 test("runtime profiles bind one requested backend to each issue, wiki, and git role", () => {
+  assert.deepEqual(RUNTIME_TOOL_PROFILE_MANIFEST.profiles.map(({ id }) => id), ["personal", "company"]);
+  assert.deepEqual(RUNTIME_TOOL_PROFILE_MANIFEST.runtimes, [
+    { runtimeId: "claude-code", profileId: "company" },
+    { runtimeId: "codex", profileId: "personal" },
+    { runtimeId: "opencode", profileId: "company" },
+    { runtimeId: "pi", profileId: "personal" },
+  ]);
   assert.deepEqual(RUNTIME_TOOL_PROFILES, {
     pi: { "issue-tracker": "linear", wiki: "notion", git: "github" },
     codex: { "issue-tracker": "linear", wiki: "notion", git: "github" },
@@ -84,7 +94,26 @@ test("runtime profiles bind one requested backend to each issue, wiki, and git r
   assert.deepEqual(cliToolDefinitionsForRuntime("opencode").map(({ name }) => name), company);
   assert.deepEqual(cliToolServiceIdsForRuntimes(["codex", "pi"]), ["linear", "notion", "github"]);
   assert.deepEqual(cliToolServiceIdsForRuntimes(["claude-code", "opencode"]), ["jira", "confluence", "gitlab"]);
+  assert.deepEqual(getRuntimeToolProfileAssignment("codex"), {
+    runtimeId: "codex",
+    profileId: "personal",
+    bindings: { "issue-tracker": "linear", wiki: "notion", git: "github" },
+  });
   assert.throws(() => cliToolDefinitionsForRuntime("unknown"), /unknown runtime tool profile/);
+});
+
+test("runtime tool profile manifest validation fails closed on drift", () => {
+  const duplicateRuntime = structuredClone(RUNTIME_TOOL_PROFILE_MANIFEST);
+  duplicateRuntime.runtimes[1].runtimeId = "pi";
+  assert.throws(() => validateRuntimeToolProfileManifest(duplicateRuntime), /duplicate runtime tool assignment/);
+
+  const unknownBackend = structuredClone(RUNTIME_TOOL_PROFILE_MANIFEST);
+  unknownBackend.profiles[0].bindings.wiki = "github";
+  assert.throws(() => validateRuntimeToolProfileManifest(unknownBackend), /unknown wiki backend/);
+
+  const unusedProfile = structuredClone(RUNTIME_TOOL_PROFILE_MANIFEST);
+  unusedProfile.profiles.push({ id: "unused", bindings: { "issue-tracker": "jira", wiki: "confluence", git: "gitlab" } });
+  assert.throws(() => validateRuntimeToolProfileManifest(unusedProfile), /unused profile/);
 });
 
 test("role allowlists classify safe reads, confirmed writes, API bodies, and mismatches", () => {
@@ -195,7 +224,7 @@ test("MCP server exposes only the selected runtime profile and rejects hidden to
       { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "workspace_cli_status", arguments: { cwd: workspace } } },
     ];
     const codex = await runMcp(messages, { ...process.env, PATH: "" }, "codex");
-    assert.match(codex[0].result.instructions, /issue-tracker=linear, wiki=notion, git=github/);
+    assert.match(codex[0].result.instructions, /tool profile personal: issue-tracker=linear, wiki=notion, git=github/);
     assert.deepEqual(codex[1].result.tools.map(({ name }) => name), [
       "workspace_cli_status", "issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli",
     ]);
@@ -239,6 +268,7 @@ test("tool installer is preview-first and plans exact npm packages without mutat
     fakeExecutable(bin, "npm");
     fakeExecutable(bin, "brew");
     const env = { PATH: bin };
+    assert.deepEqual(parseToolArguments([]).toolIds, ["jira", "confluence", "gitlab", "linear", "notion", "github"]);
     const options = parseToolArguments(["--tool", "linear,notion", "--json"]);
     assert.equal(options.apply, false);
     const plan = buildToolInstallPlan({ env, toolIds: options.toolIds });
@@ -272,22 +302,24 @@ test("tool installer rejects package managers and installed-tool shims from the 
   }
 });
 
-test("Windows tool planning uses WinGet, preserves npm installs, and exposes vendor limitations", () => {
+test("Windows tool planning automates the profile backends and exposes only optional vendor limitations", () => {
   const { root, bin, workspace } = fixture();
   try {
     writeFileSync(join(bin, "winget.exe"), "MZ fixture\n");
+    writeFileSync(join(bin, "powershell.exe"), "MZ fixture\n");
     const npmExecPath = join(bin, "node_modules", "npm", "bin", "npm-cli.js");
     mkdirSync(join(bin, "node_modules", "npm", "bin"), { recursive: true });
     writeFileSync(npmExecPath, "#!/usr/bin/env node\n");
     writeFileSync(join(bin, "npm.cmd"), ":: Created by npm, please don't edit manually.\r\n@ECHO OFF\r\nSETLOCAL\r\nSET \"NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js\"\r\n\"%NODE_EXE%\" \"%NPM_CLI_JS%\" %*\r\n");
     const plan = buildToolInstallPlan({
       env: { PATH: bin },
+      installRoot: join(root, "managed"),
       platform: "win32",
       toolIds: ["jira", "linear", "github", "gitlab", "confluence", "notion", "coderabbit"],
       workspace,
     });
     assert.deepEqual(plan.map(({ id, status }) => [id, status]), [
-      ["jira", "manual"],
+      ["jira", "installable"],
       ["linear", "installable"],
       ["github", "installable"],
       ["gitlab", "installable"],
@@ -296,11 +328,25 @@ test("Windows tool planning uses WinGet, preserves npm installs, and exposes ven
       ["coderabbit", "unsupported"],
     ]);
     assert.deepEqual(plan.find(({ id }) => id === "github").installer.args.slice(0, 4), ["install", "--exact", "--id", "GitHub.cli"]);
+    const jira = plan.find(({ id }) => id === "jira");
+    assert.equal(jira.installer.command, "powershell.exe");
+    assert.match(jira.installer.args.join(" "), /install-jira-windows\.ps1.*-InstallRoot/);
+    assert.equal(jira.installer.expectedArchiveSha256, "84b205a187ff498533088a8077a294e4245323a66b33f2d963430d27323923a2");
+    assert.equal(jira.installer.expectedExecutableSha256, "a94082ce583d26a2c82817f507a66dc30a93cf0bea17e4aec8473c1cec4ab351");
     assert.equal(plan.find(({ id }) => id === "linear").installer.command, "npm");
     assert.match(plan.find(({ id }) => id === "coderabbit").guidance, /WSL/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Windows Jira managed installer is valid PowerShell", (t) => {
+  if (process.platform !== "win32") return t.skip("PowerShell parser fixture");
+  const script = join(REPO_ROOT, "scripts", "tools", "install-jira-windows.ps1");
+  const quotedScript = script.replaceAll("'", "''");
+  const command = `$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile('${quotedScript}', [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }`;
+  const parsed = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr);
 });
 
 test("Windows executes npm-style CLI shims through Node without a shell", async (t) => {

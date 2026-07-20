@@ -68,9 +68,9 @@ The shared catalog preserves all 13 reviewed role/backend mappings and one execu
 
 ### Runtime Tool Profile
 
-The exact issue-tracker, wiki, and git backend bindings exposed by one coding-agent runtime.
+The exact issue-tracker, wiki, and git backend bindings exposed by one coding-agent runtime. The secret-free `runtime-tools.json` manifest is the single source of truth: reusable named profiles contain bindings and runtime assignments reference those profile IDs.
 
-Pi and Codex bind Linear, Notion, and GitHub. Claude Code and OpenCode bind Jira, Confluence, and GitLab. Adapters expose exactly one catalog tool per role and reject direct calls to hidden backends. External CLI executables remain machine-shared, so installing an extra executable does not mutate a runtime's profile.
+Pi and Codex reference the `personal` profile for Linear, Notion, and GitHub. Claude Code and OpenCode reference the `company` profile for Jira, Confluence, and GitLab. Adapters expose exactly one catalog tool per role and reject direct calls to hidden backends. `omh setup` resolves the selected runtimes' profile union automatically. External CLI executables remain machine-shared and deduplicated, so installing an extra executable does not mutate a runtime's profile.
 
 ### CLI-owned Authentication
 

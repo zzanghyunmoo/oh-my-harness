@@ -526,7 +526,7 @@ function buildPaletteReport(): string {
     "- /oh-my-harness-doctor — run read-only setup diagnostics for local env, capability registry, connector catalog, provider checks, gh/glab auth, safety policies, readiness, and local-only paths.",
     "- /oh-my-harness — show this lightweight command palette.",
     "- /oh-my-pi-doctor and /oh-my-pi — legacy-compatible aliases for the commands above.",
-    "- omh setup — preview agent/plugin and machine-shared external CLI installation; add --apply only after reviewing the plan.",
+    "- omh setup — resolve every selected agent's declared tool profile and preview the deduplicated automatic install; add --apply only after reviewing the plan.",
     "- omh doctor — inspect managed agent runtimes and shared external CLI availability with next actions.",
     "- /quotio-status — check Quotio models when ENABLE_QUOTIO=true and Quotio env is configured.",
     "- /connector-login linear|notion — start direct browser OAuth when ENABLE_WORKSPACE_CONNECTORS=true; OAuth tokens are stored locally outside the repo.",

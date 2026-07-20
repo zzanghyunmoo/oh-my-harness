@@ -342,6 +342,7 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   const claudePlugin = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".claude-plugin", "plugin.json"), "utf8"));
   const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.codex.json"), "utf8"));
   const claudeMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.claude.json"), "utf8"));
+  const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
   const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
   assert.deepEqual(packageJson.pi.skills, ["./plugins/oh-my-harness/skills"]);
@@ -357,6 +358,12 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   assert.equal(claudePlugin.mcpServers, "./.mcp.claude.json");
   assert.match(codexMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'codex'/);
   assert.match(claudeMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'claude-code'/);
+  assert.deepEqual(runtimeToolProfiles.runtimes, [
+    { runtimeId: "claude-code", profileId: "company" },
+    { runtimeId: "codex", profileId: "personal" },
+    { runtimeId: "opencode", profileId: "company" },
+    { runtimeId: "pi", profileId: "personal" },
+  ]);
   assert.equal(existsSync(skillPath), true);
   const module = await import(`${pathToFileURL(join(REPO_ROOT, packageJson.main)).href}?test=${Date.now()}`);
   const config = {};

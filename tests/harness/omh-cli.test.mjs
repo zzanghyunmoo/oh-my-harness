@@ -34,6 +34,10 @@ test("omh exposes one preview-first command surface with friendly aliases", () =
 
 test("omh derives default CLI installs from the selected runtime profiles", () => {
   assert.deepEqual(
+    parseOmhArguments(["setup"]).tools,
+    ["jira", "confluence", "gitlab", "linear", "notion", "github"],
+  );
+  assert.deepEqual(
     parseOmhArguments(["setup", "--agents", "codex,pi"]).tools,
     ["linear", "notion", "github"],
   );
@@ -72,7 +76,7 @@ test("omh setup preview is read-only and explains agent versus machine scope", a
     assert.equal(existsSync(installRoot), false);
     const output = formatOmhResult(result);
     assert.match(output, /selected per agent/);
-    assert.match(output, /issue-tracker=linear, wiki=notion, git=github/);
+    assert.match(output, /codex \[personal\]: issue-tracker=linear, wiki=notion, git=github/);
     assert.match(output, /installed once per machine/);
     assert.match(output, /No changes were made/);
   } finally {
@@ -89,8 +93,8 @@ test("omh setup preview installs only the selected runtimes' default backend uni
     ], { env: { ...process.env, PATH: "" } });
     assert.deepEqual(result.tools.map(({ id }) => id), ["jira", "confluence", "gitlab"]);
     assert.deepEqual(result.toolProfiles, [
-      { runtimeId: "claude-code", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
-      { runtimeId: "opencode", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+      { runtimeId: "claude-code", profileId: "company", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+      { runtimeId: "opencode", profileId: "company", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
     ]);
     assert.equal(existsSync(installRoot), false);
   } finally {

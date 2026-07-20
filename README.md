@@ -48,21 +48,11 @@ npm ci
 .\omh.cmd setup --apply
 ```
 
-`setup`은 `--apply`가 없으면 어떤 파일도 변경하지 않습니다. 에이전트 runtime과 harness plugin은 에이전트별로 선택합니다. 외부 CLI 실행파일은 머신에 한 번 설치해 `PATH`로 공유하지만, 각 runtime에는 아래 profile의 issue tracker, wiki, Git repository 도구만 노출됩니다. 기본 `./omh setup`은 네 runtime profile의 합집합인 Jira, Linear, GitHub, GitLab, Confluence, Notion을 계획합니다.
+`setup`은 `--apply`가 없으면 어떤 파일도 변경하지 않습니다. 에이전트 runtime과 harness plugin은 에이전트별로 선택합니다. 외부 CLI 실행파일은 머신에 한 번 설치해 `PATH`로 공유하지만, 각 runtime에는 선언된 profile의 issue tracker, wiki, Git repository 도구만 노출됩니다. 기본 `./omh setup --apply` 한 번이면 네 runtime의 profile을 자동으로 해석하고 Jira, Linear, GitHub, GitLab, Confluence, Notion의 중복 없는 합집합을 설치합니다.
 
-필요한 항목만 설치할 수도 있습니다.
+사용자가 runtime별 tool 목록을 나눠 입력할 필요는 없습니다. 매핑의 단일 소스는 `plugins/oh-my-harness/profiles/runtime-tools.json`입니다.
 
-```bash
-# Linear, Notion, GitHub가 자동 선택됨
-./omh setup --agents codex,pi
-./omh setup --agents codex,pi --apply
-
-# Jira, Confluence, GitLab(glab)이 자동 선택됨
-./omh setup --agents claude-code,opencode
-./omh setup --agents claude-code,opencode --apply
-```
-
-`--tools`는 머신에 설치할 실행파일만 명시적으로 덮어씁니다. 예를 들어 `--tools github,coderabbit`으로 CodeRabbit까지 설치할 수 있지만 runtime role profile은 바뀌지 않습니다.
+`--agents`는 일부 runtime만 설치하는 고급 선택이고, 선택한 runtime들의 profile만 자동 적용합니다. `--tools`는 profile 변경이 아니라 복구·디버깅용 실행파일 선택 override입니다. 예를 들어 `--tools coderabbit`으로 catalog의 선택 도구를 별도 설치할 수 있지만 runtime role profile은 바뀌지 않습니다.
 
 `omh`를 현재 checkout 밖에서도 사용하려면 로컬 package를 전역 연결할 수 있습니다.
 
@@ -151,6 +141,7 @@ pi install .
 - `scripts/harness`: descriptor, acquisition, upstream 검증기와 고정 버전 설치기
 - `omh`, `omh.cmd`, `bin/omh.mjs`: macOS/Linux와 Windows용 통합 preview-first 관리 CLI
 - `plugins/oh-my-harness`: Codex/Claude plugin manifest, 공용 skills, dependency-free MCP server
+- `plugins/oh-my-harness/profiles/runtime-tools.json`: runtime→tool profile 선언의 단일 소스
 - `.agents/plugins/marketplace.json`: Codex local marketplace
 - `.claude-plugin/marketplace.json`: Claude Code local marketplace
 - `.opencode/plugins/oh-my-harness.js`: OpenCode native plugin entrypoint
@@ -165,14 +156,14 @@ pi install .
 
 하나의 검증 코어를 각 런타임의 native surface로 노출합니다. Codex와 Claude Code는 각각의 plugin MCP profile, OpenCode는 native custom tools, Pi는 opt-in extension을 사용합니다.
 
-| Runtime | Issue tracker | Wiki | Git repository |
-| --- | --- | --- | --- |
-| Pi | Linear `linear` | Notion `ntn` | GitHub `gh` |
-| Codex | Linear `linear` | Notion `ntn` | GitHub `gh` |
-| Claude Code | Jira `jira` | Confluence `confluence` | GitLab `glab` |
-| OpenCode | Jira `jira` | Confluence `confluence` | GitLab `glab` |
+| Runtime | Profile | Issue tracker | Wiki | Git repository |
+| --- | --- | --- | --- | --- |
+| Pi | `personal` | Linear `linear` | Notion `ntn` | GitHub `gh` |
+| Codex | `personal` | Linear `linear` | Notion `ntn` | GitHub `gh` |
+| Claude Code | `company` | Jira `jira` | Confluence `confluence` | GitLab `glab` |
+| OpenCode | `company` | Jira `jira` | Confluence `confluence` | GitLab `glab` |
 
-각 runtime은 표의 세 role tool만 등록합니다. 다른 backend 도구를 이름으로 직접 호출해도 adapter가 거부합니다. 모든 명령은 shell 없이 trusted `PATH`의 실행파일로 호출하며 workspace-local shim, credential 인자, interactive/browser 플래그를 거부합니다. 조회는 바로 실행할 수 있고 write로 분류된 명령은 사용자가 해당 변경을 요청하거나 확인한 뒤 `confirmedWrite=true`가 있어야 실행됩니다.
+각 runtime은 manifest가 가리키는 profile의 세 role tool만 등록합니다. Manifest는 schema와 로더 양쪽에서 fail-closed 검증되며, 다른 backend 도구를 이름으로 직접 호출해도 adapter가 거부합니다. 모든 명령은 shell 없이 trusted `PATH`의 실행파일로 호출하며 workspace-local shim, credential 인자, interactive/browser 플래그를 거부합니다. 조회는 바로 실행할 수 있고 write로 분류된 명령은 사용자가 해당 변경을 요청하거나 확인한 뒤 `confirmedWrite=true`가 있어야 실행됩니다.
 
 공유 코어에는 다음 13개 role/backend 조합이 검증 가능한 전체 catalog로 남아 있습니다. Runtime profile은 이 catalog에서 정확히 세 개를 선택합니다.
 
@@ -183,7 +174,7 @@ pi install .
 | Git repository | GitHub `gh`, GitLab `glab` |
 | Code review | CodeRabbit `cr`/`coderabbit`, GitHub `gh`, GitLab `glab` |
 
-외부 CLI는 harness package에 포함하지 않습니다. 아래 명령은 runtime profile에서 사용하는 여섯 backend의 설치 상태를 검사하고, 빠진 CLI의 exact npm package, Homebrew formula 또는 WinGet package를 보여줍니다. 설치 명령도 기본값은 preview이며 `--apply`가 있을 때만 변경합니다. Catalog의 CodeRabbit은 `--only coderabbit`처럼 명시적으로 선택할 수 있습니다.
+외부 CLI는 harness package에 포함하지 않습니다. 아래 명령은 runtime profile에서 사용하는 여섯 backend의 설치 상태를 검사하고, 빠진 CLI의 exact npm package, Homebrew formula, WinGet package 또는 reviewed managed archive를 보여줍니다. 설치 명령도 기본값은 preview이며 `--apply`가 있을 때만 변경합니다. Catalog의 CodeRabbit은 `--only coderabbit`처럼 명시적으로 선택할 수 있습니다.
 
 ```bash
 ./omh tools doctor
@@ -192,7 +183,7 @@ pi install .
 ./omh tools install --only linear,notion,coderabbit --apply
 ```
 
-Windows에서는 같은 명령을 `.\omh.cmd tools ...` 형태로 실행합니다. GitHub와 GitLab은 WinGet, Linear/Confluence/Notion은 npm을 사용합니다. JiraCLI는 공식 Windows release의 `jira.exe`를 직접 설치해 `PATH`에 추가해야 합니다. CodeRabbit CLI는 vendor가 native Windows 대신 WSL을 지원하므로 Windows에서는 `unsupported`와 WSL 안내를 표시하고 나머지 도구 설치를 계속합니다.
+Windows에서는 같은 명령을 `.\omh.cmd tools ...` 형태로 실행합니다. GitHub와 GitLab은 WinGet, Linear/Confluence/Notion은 npm을 사용합니다. JiraCLI는 공식 `v1.7.0` Windows archive와 `jira.exe`의 reviewed SHA-256을 모두 검증해 managed root에 자동 설치하고 사용자 `PATH`에 등록합니다. CodeRabbit CLI는 runtime profile 기본값이 아니며, 별도로 선택하면 vendor가 native Windows 대신 WSL을 지원하므로 `unsupported`와 WSL 안내를 표시합니다.
 
 Jira는 `jira init`, Linear는 `linear auth login`과 `linear config`, GitHub/GitLab은 각 CLI의 `auth login`, Confluence는 `confluence init --read-only`, Notion은 `ntn login`, CodeRabbit은 `cr auth login`으로 사람에게 보이는 터미널에서 먼저 인증합니다. 인증 정보는 각 CLI가 소유하며 harness는 token을 저장하거나 명령 인자로 전달하지 않습니다.
 

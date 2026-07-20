@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, parse, resolve } from "node:path";
 
 import { resolveTrustedInvocation } from "./trusted-command.mjs";
@@ -85,12 +85,84 @@ export const CLI_TOOL_DEFINITIONS = Object.freeze([
 ]);
 
 const PROFILE_CAPABILITIES = Object.freeze(["issue-tracker", "wiki", "git"]);
-export const RUNTIME_TOOL_PROFILES = Object.freeze({
-  pi: Object.freeze({ "issue-tracker": "linear", wiki: "notion", git: "github" }),
-  codex: Object.freeze({ "issue-tracker": "linear", wiki: "notion", git: "github" }),
-  "claude-code": Object.freeze({ "issue-tracker": "jira", wiki: "confluence", git: "gitlab" }),
-  opencode: Object.freeze({ "issue-tracker": "jira", wiki: "confluence", git: "gitlab" }),
+const PROFILE_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode", "pi"]);
+const PROFILE_BACKENDS = Object.freeze({
+  "issue-tracker": Object.freeze(["jira", "linear"]),
+  wiki: Object.freeze(["confluence", "notion"]),
+  git: Object.freeze(["github", "gitlab"]),
 });
+
+function exactKeys(value, expected, label) {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((entry, index) => entry !== wanted[index])) {
+    fail(`${label} must contain exactly: ${wanted.join(", ")}`);
+  }
+}
+
+function record(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object`);
+  return value;
+}
+
+export function validateRuntimeToolProfileManifest(value) {
+  const manifest = record(value, "runtime tool profile manifest");
+  exactKeys(manifest, ["$schema", "schemaVersion", "profiles", "runtimes"], "runtime tool profile manifest");
+  if (manifest.$schema !== "./runtime-tools.schema.json") fail("runtime tool profile manifest has an unknown schema");
+  if (manifest.schemaVersion !== "1.0.0") fail("runtime tool profile manifest has an unsupported schemaVersion");
+  if (!Array.isArray(manifest.profiles) || manifest.profiles.length === 0) fail("runtime tool profiles must be a non-empty array");
+  if (!Array.isArray(manifest.runtimes) || manifest.runtimes.length !== PROFILE_RUNTIME_IDS.length) {
+    fail(`runtime tool assignments must contain exactly ${PROFILE_RUNTIME_IDS.length} entries`);
+  }
+
+  const profileIds = new Set();
+  const profiles = manifest.profiles.map((entry, index) => {
+    const profile = record(entry, `profiles[${index}]`);
+    exactKeys(profile, ["id", "bindings"], `profiles[${index}]`);
+    if (typeof profile.id !== "string" || !/^[a-z][a-z0-9-]*$/.test(profile.id)) fail(`profiles[${index}].id must be a stable id`);
+    if (profileIds.has(profile.id)) fail(`duplicate runtime tool profile: ${profile.id}`);
+    profileIds.add(profile.id);
+    const bindings = record(profile.bindings, `profiles[${index}].bindings`);
+    exactKeys(bindings, PROFILE_CAPABILITIES, `profiles[${index}].bindings`);
+    const normalizedBindings = Object.fromEntries(PROFILE_CAPABILITIES.map((capability) => {
+      const service = bindings[capability];
+      if (!PROFILE_BACKENDS[capability].includes(service)) fail(`profile ${profile.id} has unknown ${capability} backend: ${service}`);
+      const matches = CLI_TOOL_DEFINITIONS.filter((definition) => definition.capability === capability && definition.service === service);
+      if (matches.length !== 1) fail(`profile ${profile.id} has unknown ${capability} backend: ${service}`);
+      return [capability, service];
+    }));
+    return Object.freeze({ id: profile.id, bindings: Object.freeze(normalizedBindings) });
+  });
+
+  const runtimeIds = new Set();
+  const referencedProfiles = new Set();
+  const runtimes = manifest.runtimes.map((entry, index) => {
+    const assignment = record(entry, `runtimes[${index}]`);
+    exactKeys(assignment, ["runtimeId", "profileId"], `runtimes[${index}]`);
+    if (!PROFILE_RUNTIME_IDS.includes(assignment.runtimeId)) fail(`unknown runtime tool assignment: ${assignment.runtimeId}`);
+    if (runtimeIds.has(assignment.runtimeId)) fail(`duplicate runtime tool assignment: ${assignment.runtimeId}`);
+    if (!profileIds.has(assignment.profileId)) fail(`runtime ${assignment.runtimeId} references unknown profile: ${assignment.profileId}`);
+    runtimeIds.add(assignment.runtimeId);
+    referencedProfiles.add(assignment.profileId);
+    return Object.freeze({ runtimeId: assignment.runtimeId, profileId: assignment.profileId });
+  });
+  if (PROFILE_RUNTIME_IDS.some((runtimeId) => !runtimeIds.has(runtimeId))) fail("runtime tool assignments do not cover every supported runtime");
+  if (profiles.some(({ id }) => !referencedProfiles.has(id))) fail("runtime tool profile manifest contains an unused profile");
+  return Object.freeze({
+    $schema: manifest.$schema,
+    schemaVersion: manifest.schemaVersion,
+    profiles: Object.freeze(profiles),
+    runtimes: Object.freeze(runtimes),
+  });
+}
+
+const rawRuntimeToolProfileManifest = JSON.parse(readFileSync(new URL("../profiles/runtime-tools.json", import.meta.url), "utf8"));
+export const RUNTIME_TOOL_PROFILE_MANIFEST = validateRuntimeToolProfileManifest(rawRuntimeToolProfileManifest);
+const PROFILE_BY_ID = new Map(RUNTIME_TOOL_PROFILE_MANIFEST.profiles.map((profile) => [profile.id, profile]));
+const ASSIGNMENT_BY_RUNTIME = new Map(RUNTIME_TOOL_PROFILE_MANIFEST.runtimes.map((assignment) => [assignment.runtimeId, assignment]));
+export const RUNTIME_TOOL_PROFILES = Object.freeze(Object.fromEntries(
+  RUNTIME_TOOL_PROFILE_MANIFEST.runtimes.map(({ runtimeId, profileId }) => [runtimeId, PROFILE_BY_ID.get(profileId).bindings]),
+));
 
 const TOOL_BY_NAME = new Map(CLI_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const WRITE_WORDS = new Set([
@@ -120,9 +192,14 @@ function fail(message) {
 }
 
 export function getRuntimeToolProfile(runtimeId) {
-  const profile = RUNTIME_TOOL_PROFILES[runtimeId];
-  if (!profile) fail(`unknown runtime tool profile: ${runtimeId}`);
-  return profile;
+  return getRuntimeToolProfileAssignment(runtimeId).bindings;
+}
+
+export function getRuntimeToolProfileAssignment(runtimeId) {
+  const assignment = ASSIGNMENT_BY_RUNTIME.get(runtimeId);
+  if (!assignment) fail(`unknown runtime tool profile: ${runtimeId}`);
+  const profile = PROFILE_BY_ID.get(assignment.profileId);
+  return Object.freeze({ runtimeId, profileId: profile.id, bindings: profile.bindings });
 }
 
 export function cliToolDefinitionsForRuntime(runtimeId) {

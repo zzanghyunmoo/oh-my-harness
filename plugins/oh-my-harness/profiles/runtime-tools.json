@@ -1,0 +1,40 @@
+{
+  "$schema": "./runtime-tools.schema.json",
+  "schemaVersion": "1.0.0",
+  "profiles": [
+    {
+      "id": "personal",
+      "bindings": {
+        "issue-tracker": "linear",
+        "wiki": "notion",
+        "git": "github"
+      }
+    },
+    {
+      "id": "company",
+      "bindings": {
+        "issue-tracker": "jira",
+        "wiki": "confluence",
+        "git": "gitlab"
+      }
+    }
+  ],
+  "runtimes": [
+    {
+      "runtimeId": "claude-code",
+      "profileId": "company"
+    },
+    {
+      "runtimeId": "codex",
+      "profileId": "personal"
+    },
+    {
+      "runtimeId": "opencode",
+      "profileId": "company"
+    },
+    {
+      "runtimeId": "pi",
+      "profileId": "personal"
+    }
+  ]
+}
