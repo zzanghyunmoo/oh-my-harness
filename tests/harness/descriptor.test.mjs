@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import tar from "tar-stream";
 
-import { downloadReleaseArchive, inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
+import { downloadReleaseArchive, extractArchiveExecutable, inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
 import { loadRuntimeDescriptors, validateDescriptor } from "../../scripts/harness/descriptors.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -86,6 +86,17 @@ test("offline tar derivation is deterministic and rejects unsafe members", async
     assert.deepEqual(second, first);
     assert.equal(first.memberPath, "bin/pi");
     assert.match(first.executableSha256, /^[0-9a-f]{64}$/);
+    const destinationPath = join(dirname(path), "extracted-pi");
+    const extracted = await extractArchiveExecutable(path, {
+      destinationPath,
+      expectedArchiveSha256: first.archiveSha256,
+      expectedBasename: "pi",
+      expectedExecutableSha256: first.executableSha256,
+      expectedMemberPath: "bin/pi",
+      format: "tar.gz",
+    });
+    assert.equal(readFileSync(destinationPath, "utf8"), executable.toString("utf8"));
+    assert.equal(extracted.executableSha256, first.executableSha256);
   });
 
   for (const header of [
@@ -168,6 +179,7 @@ test("release URL policy rejects mutable or unreviewed identities", () => {
   const identity = { owner: "earendil-works", repository: "pi", tag: "v0.80.7", assetName: "pi-linux-x64.tar.gz" };
   assert.doesNotThrow(() => validateReleaseUrl("https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz", identity));
   assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=opaque", identity, { redirected: true }));
+  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=opaque&jwt=opaque&response-content-disposition=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&response-content-type=application%2Foctet-stream", identity, { redirected: true }));
   for (const url of [
     "http://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
     "https://evil.example/pi-linux-x64.tar.gz",

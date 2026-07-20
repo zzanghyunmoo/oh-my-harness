@@ -3,7 +3,7 @@
   "schemaVersion": "0.1.0",
   "id": "full",
   "displayName": "Full local distribution",
-  "description": "Full profile that combines personal/company workspace connector intent, Quotio provider intent, prompts/themes, existing settings.example.json packages, and the recent pi-clear signal.",
+  "description": "Full profile that combines the role-scoped external CLI tool pack, personal/company workspace connector intent, Quotio provider intent, prompts/themes, existing settings.example.json packages, and the recent pi-clear signal.",
   "extends": [
     "workspace",
     "proxy-provider"
@@ -46,6 +46,7 @@
       "./extensions/env-loader",
       "./extensions/quotio-provider",
       "./extensions/workspace-connectors",
+      "./extensions/workspace-cli-tools",
       "./extensions/setup-doctor"
     ],
     "prompts": [
@@ -55,7 +56,7 @@
       "./themes"
     ],
     "skills": [
-      "./skills"
+      "./plugins/oh-my-harness/skills"
     ]
   },
   "extensionToggles": [
@@ -77,6 +78,13 @@
       "requiredValue": "true"
     },
     {
+      "extensionId": "workspace-cli-tools",
+      "extensionPath": "./extensions/workspace-cli-tools",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_WORKSPACE_CLI_TOOLS",
+      "requiredValue": "true"
+    },
+    {
       "extensionId": "quotio-provider",
       "extensionPath": "./extensions/quotio-provider",
       "enabledByDefault": true,
@@ -85,6 +93,13 @@
     }
   ],
   "secretRefs": [
+    {
+      "name": "ENABLE_WORKSPACE_CLI_TOOLS",
+      "kind": "toggle",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Use this profile on a Pi machine that should expose role-scoped external CLI tools.",
+      "commitPolicy": "name-and-intent-only"
+    },
     {
       "name": "ENABLE_WORKSPACE_CONNECTORS",
       "kind": "toggle",

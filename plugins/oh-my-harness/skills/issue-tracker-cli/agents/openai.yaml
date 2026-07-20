@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Tracker CLI"
+  short_description: "Work with Jira, Linear, GitHub, and GitLab issues"
+  default_prompt: "Use $issue-tracker-cli to triage issues for this repository."

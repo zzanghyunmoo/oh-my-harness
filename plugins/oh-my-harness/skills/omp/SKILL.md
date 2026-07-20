@@ -1,11 +1,12 @@
 ---
 name: omp
-description: "Route oh-my-harness namespace requests. Use when the user writes `omp: <skill-or-command>` or asks to use oh-my-harness as a facade over installed Pi skills, extension commands, tools, providers, or setup workflows."
+description: "Route oh-my-harness namespace requests. Use when the user invokes the omp prefix or asks to use oh-my-harness as a facade over installed skills, runtime commands, tools, providers, or setup workflows."
 ---
 
 # OMP Namespace
 
-Use this skill when the user invokes the oh-my-harness namespace. The `oh-my-pi:` prefix remains a v1 compatibility alias:
+Use this skill when the user invokes the oh-my-harness namespace. The
+`oh-my-pi:` prefix remains a v1 compatibility alias:
 
 ```text
 omp: <skill-or-command> [arguments]
@@ -16,8 +17,8 @@ omp: <skill-or-command> [arguments]
 - Treat `omp:` as the user-facing facade owned by `oh-my-harness`.
 - Preserve the original package/source mapping for debugging, but do not require
   the user to remember package names during normal use.
-- Prefer the matching installed Pi skill or extension command instead of
-  reimplementing upstream behavior.
+- Prefer the matching installed Compound Engineering skill or runtime command
+  instead of reimplementing upstream behavior.
 - If a target is unavailable, explain which package/profile capability is
   missing and how to verify it with `omp: doctor`.
 
@@ -35,11 +36,19 @@ omp: <skill-or-command> [arguments]
 | `omp: ask ...` | `ask-user` |
 | `omp: subagents ...` | `pi-subagents` |
 | `omp: web ...` | `librarian` |
+| `omp: issues ...` | `issue-tracker-cli` |
+| `omp: wiki ...` | `wiki-cli` |
+| `omp: repo ...` | `git-repository-cli` |
+| `omp: cli-review ...` | `code-review-cli` |
 
 Exact skill names are also valid: `omp: ce-plan ...`,
 `omp: lsp-navigation ...`, `omp: ce-worktree ...`, etc.
 
 ## Common command aliases
+
+Pi exposes the full command palette below. Codex and OpenCode route skill
+aliases everywhere and report Pi-only commands as unavailable instead of
+inventing an equivalent.
 
 | OMP input | Route to |
 | --- | --- |
@@ -55,6 +64,7 @@ Exact skill names are also valid: `omp: ce-plan ...`,
 | `omp: connector-tools notion` | Notion MCP tool listing |
 | `omp: github-auth` | GitHub CLI auth status |
 | `omp: gitlab-auth` | GitLab CLI auth status |
+| `omp: cli-status` | `/workspace-cli-status` (Pi) or `workspace_cli_status` (MCP hosts) |
 | `omp: profile-verify` | profile verification guidance |
 | `omp: profile-apply` | profile apply dry-run guidance |
 
@@ -64,3 +74,18 @@ Exact skill names are also valid: `omp: ce-plan ...`,
 2. Load the corresponding skill or use the corresponding command/tool.
 3. State the original package that owns the behavior when it helps debugging.
 4. Keep the answer in OMP vocabulary in user-facing summaries.
+
+## Management CLI
+
+Use `omh` for human-facing installation and machine diagnostics. A separate
+skill is unnecessary because this executable owns argument parsing, preview,
+status, and help while the role skills own agent tool usage.
+
+- `omh setup` previews combined agent/plugin and external CLI installation.
+- `omh agents install --only codex,pi` selects agent runtimes and plugins.
+- `omh tools install --only github,coderabbit` selects machine-shared CLIs.
+- `omh status` and `omh doctor` are read-only.
+
+Do not add `--apply` unless the user explicitly asked to perform the displayed
+installation. Never describe an external CLI as installed per agent: those
+executables are installed once and shared through the machine `PATH`.

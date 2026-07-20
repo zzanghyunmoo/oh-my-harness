@@ -1,0 +1,46 @@
+{
+  "name": "oh-my-harness",
+  "version": "0.2.0",
+  "description": "Cross-runtime engineering harness with role-scoped workspace CLI tools",
+  "author": {
+    "name": "zzanghyunmoo",
+    "url": "https://github.com/zzanghyunmoo"
+  },
+  "homepage": "https://github.com/zzanghyunmoo/oh-my-harness",
+  "repository": "https://github.com/zzanghyunmoo/oh-my-harness",
+  "keywords": [
+    "agent-harness",
+    "compound-engineering",
+    "codex",
+    "opencode",
+    "pi",
+    "jira",
+    "linear",
+    "confluence",
+    "notion",
+    "github",
+    "gitlab",
+    "coderabbit"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Oh My Harness",
+    "shortDescription": "Engineering workflows and workspace CLI tools",
+    "longDescription": "Oh My Harness exposes the OMP workflow namespace plus role-scoped Jira, Linear, GitHub, GitLab, Confluence, Notion, and CodeRabbit CLI tools.",
+    "developerName": "zzanghyunmoo",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write",
+      "External Tools"
+    ],
+    "websiteURL": "https://github.com/zzanghyunmoo/oh-my-harness",
+    "defaultPrompt": [
+      "Triage the current repository's issues",
+      "Review this change with the configured review tools",
+      "Find the relevant project wiki documentation"
+    ]
+  }
+}

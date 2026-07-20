@@ -64,6 +64,10 @@ function fail(message) {
   throw new Error(message);
 }
 
+function escapesRoot(rel) {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
 function assertJsonSchema(value, schema, rootSchema, path = "$") {
   if (schema.$ref) {
     const segments = schema.$ref.replace(/^#\//, "").split("/");
@@ -244,14 +248,14 @@ function trustedGitCandidates() {
   return ["/usr/bin/git", "/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
 }
 
-function resolveGitExecutable() {
+export function resolveGitExecutable() {
   if (cachedGitExecutable) return cachedGitExecutable;
   for (const candidate of trustedGitCandidates()) {
     try {
       accessSync(candidate, fsConstants.X_OK);
       const executable = realpathSync(candidate);
       const relativeToRepo = relative(REPO_ROOT, executable);
-      if (!relativeToRepo.startsWith("..") && !isAbsolute(relativeToRepo)) {
+      if (!escapesRoot(relativeToRepo)) {
         fail(`trusted Git executable cannot be inside the repository: ${executable}`);
       }
       const stat = lstatSync(executable);
@@ -267,7 +271,7 @@ function resolveGitExecutable() {
   return fail("trusted Git executable was not found; set OH_MY_HARNESS_GIT_EXECUTABLE to an absolute path");
 }
 
-function isolatedGitEnvironment(gitExecutable) {
+export function isolatedGitEnvironment(gitExecutable) {
   const env = {
     PATH: dirname(gitExecutable),
     HOME: process.platform === "win32" ? process.env.USERPROFILE ?? "" : "/dev/null",
@@ -483,7 +487,7 @@ function assertContainedPath(root, targetPath) {
   const rootPath = resolve(root);
   const resolvedTarget = resolve(targetPath);
   const rel = relative(rootPath, resolvedTarget);
-  if (rel.startsWith("..") || isAbsolute(rel)) fail(`unsafe output path outside repository root: ${resolvedTarget}`);
+  if (escapesRoot(rel)) fail(`unsafe output path outside repository root: ${resolvedTarget}`);
   const rootStat = lstatSync(rootPath);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) fail(`unsafe repository root: ${rootPath}`);
   return { rootPath, resolvedTarget, rel };
@@ -504,7 +508,7 @@ function ensureSafeDirectory(root, targetDirectory, { create = false } = {}) {
   const realRoot = realpathSync(rootPath);
   const realTarget = realpathSync(resolvedTarget);
   const realRel = relative(realRoot, realTarget);
-  if (realRel.startsWith("..") || isAbsolute(realRel)) fail(`unsafe resolved output path: ${resolvedTarget}`);
+  if (escapesRoot(realRel)) fail(`unsafe resolved output path: ${resolvedTarget}`);
 }
 
 function assertSafeTarget(root, targetPath, { requireExistingParent = false } = {}) {

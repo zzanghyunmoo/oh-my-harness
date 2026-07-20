@@ -3,7 +3,7 @@
   "schemaVersion": "0.1.0",
   "id": "workspace",
   "displayName": "Workspace connectors",
-  "description": "Profile for machines that should expose personal Linear/Notion/GitHub and company GitLab plus staged Jira/Confluence connector UX without committing OAuth state.",
+  "description": "Profile for machines that should expose the role-scoped external CLI tool pack plus personal Linear/Notion OAuth, read-only GitHub/GitLab compatibility bridges, and staged hosted Jira/Confluence connector UX without committing auth state.",
   "extends": [
     "default"
   ],
@@ -44,6 +44,7 @@
       "./extensions/env-loader",
       "./extensions/quotio-provider",
       "./extensions/workspace-connectors",
+      "./extensions/workspace-cli-tools",
       "./extensions/setup-doctor"
     ],
     "prompts": [
@@ -53,7 +54,7 @@
       "./themes"
     ],
     "skills": [
-      "./skills"
+      "./plugins/oh-my-harness/skills"
     ]
   },
   "extensionToggles": [
@@ -75,6 +76,13 @@
       "requiredValue": "true"
     },
     {
+      "extensionId": "workspace-cli-tools",
+      "extensionPath": "./extensions/workspace-cli-tools",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_WORKSPACE_CLI_TOOLS",
+      "requiredValue": "true"
+    },
+    {
       "extensionId": "quotio-provider",
       "extensionPath": "./extensions/quotio-provider",
       "enabledByDefault": false,
@@ -83,6 +91,13 @@
     }
   ],
   "secretRefs": [
+    {
+      "name": "ENABLE_WORKSPACE_CLI_TOOLS",
+      "kind": "toggle",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Use this profile on a Pi machine that should expose role-scoped external CLI tools.",
+      "commitPolicy": "name-and-intent-only"
+    },
     {
       "name": "ENABLE_WORKSPACE_CONNECTORS",
       "kind": "toggle",

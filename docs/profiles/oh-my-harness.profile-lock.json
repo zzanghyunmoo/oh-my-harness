@@ -12,7 +12,7 @@
     {
       "id": "default",
       "source": "docs/profiles/default.profile.json",
-      "sha256": "902f9774373f0a1fa0e709c6badcda90b44007692e0b35608fa9e51694f6de6f",
+      "sha256": "beaad0120a84e14fb8ff4d659f7056513c0f4457230a7c8425e8f70c0c3913f7",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"
@@ -21,6 +21,7 @@
         "./extensions/env-loader",
         "./extensions/quotio-provider",
         "./extensions/workspace-connectors",
+        "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
       ],
       "enabledToggles": [],
@@ -28,7 +29,7 @@
       "connectors": [],
       "providers": [],
       "skills": [
-        "./skills"
+        "./plugins/oh-my-harness/skills"
       ],
       "prompts": [
         "./prompts"
@@ -40,7 +41,7 @@
     {
       "id": "full",
       "source": "docs/profiles/full.profile.json",
-      "sha256": "f166dc4300652f9e42e346ac97bbe0f5b2e733ca136ba448bd458dd3dad5789d",
+      "sha256": "27a3f28902c39432edbdd3ab868b5c1e9b550a491f899b5769a48ae70eb88f67",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-web-access",
@@ -51,13 +52,16 @@
         "./extensions/env-loader",
         "./extensions/quotio-provider",
         "./extensions/workspace-connectors",
+        "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
       ],
       "enabledToggles": [
         "ENABLE_WORKSPACE_CONNECTORS=true",
+        "ENABLE_WORKSPACE_CLI_TOOLS=true",
         "ENABLE_QUOTIO=true"
       ],
       "secretRefNames": [
+        "ENABLE_WORKSPACE_CLI_TOOLS",
         "ENABLE_WORKSPACE_CONNECTORS",
         "ENABLE_QUOTIO",
         "QUOTIO_BASE_URL",
@@ -75,7 +79,7 @@
         "quotio"
       ],
       "skills": [
-        "./skills"
+        "./plugins/oh-my-harness/skills"
       ],
       "prompts": [
         "./prompts"
@@ -87,7 +91,7 @@
     {
       "id": "proxy-provider",
       "source": "docs/profiles/proxy-provider.profile.json",
-      "sha256": "c1a3af9ae574442908bb63b0faa9d4445aa12f1c4a961599c2c1623c0d07c645",
+      "sha256": "a53573338a19fbaf03f08d8f0495f16890eb23e9ac8da605c578a26419403e0a",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"
@@ -96,6 +100,7 @@
         "./extensions/env-loader",
         "./extensions/quotio-provider",
         "./extensions/workspace-connectors",
+        "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
       ],
       "enabledToggles": [
@@ -111,7 +116,7 @@
         "quotio"
       ],
       "skills": [
-        "./skills"
+        "./plugins/oh-my-harness/skills"
       ],
       "prompts": [
         "./prompts"
@@ -123,7 +128,7 @@
     {
       "id": "workspace",
       "source": "docs/profiles/workspace.profile.json",
-      "sha256": "96a2a5efb1c2ab69d71d1d6eed1435c4de7b5635773dca918432d9ce11997d64",
+      "sha256": "77486a412014644390c0017b4b03deec5d4aad2998d1bb637bca1932afb7ae0f",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-web-access",
@@ -134,12 +139,15 @@
         "./extensions/env-loader",
         "./extensions/quotio-provider",
         "./extensions/workspace-connectors",
+        "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
       ],
       "enabledToggles": [
-        "ENABLE_WORKSPACE_CONNECTORS=true"
+        "ENABLE_WORKSPACE_CONNECTORS=true",
+        "ENABLE_WORKSPACE_CLI_TOOLS=true"
       ],
       "secretRefNames": [
+        "ENABLE_WORKSPACE_CLI_TOOLS",
         "ENABLE_WORKSPACE_CONNECTORS"
       ],
       "connectors": [
@@ -152,7 +160,7 @@
       ],
       "providers": [],
       "skills": [
-        "./skills"
+        "./plugins/oh-my-harness/skills"
       ],
       "prompts": [
         "./prompts"

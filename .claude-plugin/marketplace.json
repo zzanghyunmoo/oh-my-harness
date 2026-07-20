@@ -1,0 +1,17 @@
+{
+  "name": "oh-my-harness",
+  "owner": {
+    "name": "zzanghyunmoo"
+  },
+  "description": "Cross-runtime engineering workflow and CLI tool plugins",
+  "version": "0.2.0",
+  "plugins": [
+    {
+      "name": "oh-my-harness",
+      "source": "./plugins/oh-my-harness",
+      "description": "OMP workflows and role-scoped Jira, Linear, GitHub, GitLab, Confluence, Notion, and CodeRabbit tools",
+      "version": "0.2.0",
+      "category": "development"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Review CLI"
+  short_description: "Review changes with CodeRabbit, GitHub, or GitLab"
+  default_prompt: "Use $code-review-cli to review the current changes and report actionable findings."

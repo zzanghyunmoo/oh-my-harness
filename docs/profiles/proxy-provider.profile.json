@@ -28,6 +28,7 @@
       "./extensions/env-loader",
       "./extensions/quotio-provider",
       "./extensions/workspace-connectors",
+      "./extensions/workspace-cli-tools",
       "./extensions/setup-doctor"
     ],
     "prompts": [
@@ -37,7 +38,7 @@
       "./themes"
     ],
     "skills": [
-      "./skills"
+      "./plugins/oh-my-harness/skills"
     ]
   },
   "extensionToggles": [
@@ -63,6 +64,13 @@
       "extensionPath": "./extensions/workspace-connectors",
       "enabledByDefault": false,
       "toggleEnvVar": "ENABLE_WORKSPACE_CONNECTORS",
+      "requiredValue": "not-true"
+    },
+    {
+      "extensionId": "workspace-cli-tools",
+      "extensionPath": "./extensions/workspace-cli-tools",
+      "enabledByDefault": false,
+      "toggleEnvVar": "ENABLE_WORKSPACE_CLI_TOOLS",
       "requiredValue": "not-true"
     }
   ],

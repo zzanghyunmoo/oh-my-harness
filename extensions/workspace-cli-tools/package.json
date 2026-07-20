@@ -1,0 +1,7 @@
+{
+  "name": "workspace-cli-tools",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Pi extension exposing role-scoped workspace CLI tools",
+  "type": "module"
+}

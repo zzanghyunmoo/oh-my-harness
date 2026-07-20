@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, lstatSync, rmSync, statSync } from "node:fs";
+import { chmodSync, createReadStream, createWriteStream, lstatSync, rmSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
@@ -17,12 +17,15 @@ export const ARCHIVE_LIMITS = Object.freeze({
   ratio: 100,
 });
 const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]);
-const AZURE_RELEASE_QUERY_KEYS = new Set(["sp", "sv", "sr", "spr", "se", "rscd", "rsct", "skoid", "sktid", "skt", "ske", "sks", "skv", "sig"]);
+const AZURE_RELEASE_QUERY_KEYS = new Set([
+  "sp", "sv", "sr", "spr", "se", "rscd", "rsct", "skoid", "sktid", "skt", "ske", "sks", "skv", "sig",
+  "jwt", "response-content-disposition", "response-content-type",
+]);
 const OBJECT_QUERY_KEYS = new Set(["X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Signature", "X-Amz-SignedHeaders", "response-content-disposition", "response-content-type"]);
 const FORBIDDEN_TOKEN = /[\0-\x1f\x7f;&|`$<>\\]/;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 
-async function sha256File(path) {
+export async function sha256File(path) {
   const hash = createHash("sha256");
   await pipeline(createReadStream(path), hash);
   return hash.digest("hex");
@@ -143,6 +146,73 @@ export async function inspectArchive(path, { format, expectedBasename, expectedA
   else throw new Error(`unsupported archive format: ${format}`);
   if (selected.size / Math.max(stat.size, 1) > limits.ratio) throw new Error("selected member archive ratio exceeded");
   return Object.freeze({ archiveSha256, memberPath: selected.memberPath, executableSha256: selected.executableSha256 });
+}
+
+async function extractTarMember(path, memberPath, destinationPath) {
+  const extract = tar.extract();
+  let matches = 0;
+  extract.on("entry", (header, stream, next) => {
+    Promise.resolve().then(async () => {
+      if (normalizeTarType(header.type) !== "file" || normalizedMember(header.name) !== memberPath) {
+        stream.resume();
+        await new Promise((resolve, reject) => stream.on("end", resolve).on("error", reject));
+        return;
+      }
+      matches += 1;
+      await pipeline(stream, createWriteStream(destinationPath, { flags: "wx", mode: 0o700 }));
+    }).then(next, (error) => extract.destroy(error));
+  });
+  await pipeline(createReadStream(path), createGunzip(), extract);
+  if (matches !== 1) throw new Error(`expected exactly one selected archive member, found ${matches}`);
+}
+
+async function extractZipMember(path, memberPath, destinationPath) {
+  const zip = await new Promise((resolve, reject) => yauzl.open(path, { lazyEntries: true, autoClose: true, decodeStrings: true, validateEntrySizes: true }, (error, value) => error ? reject(error) : resolve(value)));
+  let matches = 0;
+  await new Promise((resolve, reject) => {
+    zip.on("error", reject).on("end", resolve).on("entry", (entry) => {
+      Promise.resolve().then(async () => {
+        const { type } = classifyZipEntry(entry);
+        if (type !== "file" || normalizedMember(entry.fileName) !== memberPath) return;
+        matches += 1;
+        const stream = await new Promise((streamResolve, streamReject) => zip.openReadStream(entry, (error, value) => error ? streamReject(error) : streamResolve(value)));
+        await pipeline(stream, createWriteStream(destinationPath, { flags: "wx", mode: 0o700 }));
+      }).then(() => zip.readEntry(), reject);
+    });
+    zip.readEntry();
+  });
+  if (matches !== 1) throw new Error(`expected exactly one selected archive member, found ${matches}`);
+}
+
+export async function extractArchiveExecutable(path, {
+  destinationPath,
+  expectedArchiveSha256,
+  expectedBasename,
+  expectedExecutableSha256,
+  expectedMemberPath,
+  format,
+  limits = ARCHIVE_LIMITS,
+}) {
+  if (typeof destinationPath !== "string" || !destinationPath) throw new Error("executable extraction requires a destination path");
+  const inspected = await inspectArchive(path, { format, expectedBasename, expectedArchiveSha256, limits });
+  if (expectedMemberPath && inspected.memberPath !== expectedMemberPath) throw new Error("selected executable member path mismatch");
+  if (expectedExecutableSha256 && inspected.executableSha256 !== expectedExecutableSha256) throw new Error("selected executable SHA-256 mismatch");
+  try {
+    if (format === "tar.gz") await extractTarMember(path, inspected.memberPath, destinationPath);
+    else if (format === "zip") await extractZipMember(path, inspected.memberPath, destinationPath);
+    else throw new Error(`unsupported archive format: ${format}`);
+    chmodSync(destinationPath, 0o700);
+    const executableSha256 = await sha256File(destinationPath);
+    if (executableSha256 !== inspected.executableSha256) throw new Error("extracted executable SHA-256 mismatch");
+    const rechecked = await inspectArchive(path, { format, expectedBasename, expectedArchiveSha256, limits });
+    if (rechecked.archiveSha256 !== inspected.archiveSha256 || rechecked.memberPath !== inspected.memberPath || rechecked.executableSha256 !== inspected.executableSha256) {
+      throw new Error("archive changed during executable extraction");
+    }
+    return Object.freeze({ ...inspected, destinationPath });
+  } catch (error) {
+    rmSync(destinationPath, { force: true });
+    throw error;
+  }
 }
 
 function assertSignedTransportUrl(url, identity) {

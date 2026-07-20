@@ -60,6 +60,24 @@ A connector tool exposure rule where the selected setup mode and auth readiness 
 
 This keeps minimal setup from advertising excluded issue-tracker, wiki, or git tools, and keeps unauthenticated runtime calls from initiating interactive auth.
 
+### Role-scoped CLI Tool Pack
+
+A runtime-neutral set of external CLI affordances named by capability and backend, such as `issue_tracker_jira_cli`, `wiki_notion_cli`, or `code_review_gitlab_cli`.
+
+The same policy core is exposed through a plugin MCP server in Codex and Claude Code, native custom tools in OpenCode, and an opt-in extension in Pi. Each runtime must preserve the same 13 role/backend mappings, argument allowlists, write-confirmation boundary, trusted executable resolution, timeout, and output redaction.
+
+### CLI-owned Authentication
+
+An authentication boundary where Jira, Linear, GitHub, GitLab, Confluence, Notion, or CodeRabbit credentials are configured and stored by the vendor CLI outside the agent tool.
+
+The harness may pass a reviewed allowlist of existing environment variables to the child process, but it does not accept credential-bearing command arguments, persist those credentials, or launch an interactive login from a tool call. Missing authentication fails with CLI-owned setup guidance.
+
+### Confirmed CLI Write
+
+A CLI invocation that the shared classifier identifies as changing local or remote state and therefore requires both explicit user intent for the exact operation and `confirmedWrite=true` in the tool input.
+
+This is an execution interlock, not authorization to broaden scope. Read-shaped commands remain usable for discovery, while mutations cannot be smuggled through API body flags or write subcommands without crossing the same boundary.
+
 ### Connector Setup State
 
 A secret-free local record of the user's selected connector setup mode and selector choices.
@@ -97,3 +115,17 @@ The inventory is runtime-neutral. Runtime support is evaluated later by the Conf
 The automated cross-product of the version-pinned Source-derived Feature Inventory and the supported coding-agent runtimes.
 
 Every required cell must produce an explicit pass or fail with execution evidence. Missing capabilities, skipped scenarios, and silent degradation cannot satisfy the release gate.
+
+### Managed Runtime Installation
+
+A preview-first installation that materializes reviewed runtime executables and content-addressed package snapshots under one local root, then registers those immutable local sources through each runtime's native package surface.
+
+Managed Runtime Installation binds runtime archives, executables, the Oh My Harness package archive, and Compound Engineering source identity in local receipts. It does not overwrite an unrelated tool-manager executable. The managed `bin` directory is the explicit command-selection boundary.
+
+For Pi, migration replaces only known mutable or unpinned sources with exact local payloads and exact npm companion versions. Other user packages remain outside the installation's ownership boundary.
+
+### OMH Management CLI
+
+The human-facing `omh` executable that unifies runtime/plugin installation, machine-shared external CLI installation, status, diagnostics, and Pi profile planning without merging their ownership boundaries.
+
+`omh setup` composes agent and tool plans for onboarding, while `omh agents` and `omh tools` retain precise control. Every install command is preview-only without `--apply`. Agent selection controls which runtime receives the harness plugin; external CLI selection controls executables installed once on the machine and shared through `PATH`.

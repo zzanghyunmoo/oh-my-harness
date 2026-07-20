@@ -250,10 +250,10 @@ export const connectorBackendCatalog = [
     capabilitySlot: "issue-tracker",
     backendKind: "setup-only",
     adapterKind: "atlassian-staged",
-    description: "Company issue tracker capability for Atlassian Jira; setup-visible until a non-interactive runtime auth route is selected.",
-    authGuidance: "Jira is setup-visible but runtime-gated. Choose and validate a non-interactive Atlassian auth route before enabling tools.",
-    statusGuidance: "Jira readiness is currently runtime-gated; no Jira runtime tool is registered by oh-my-harness yet.",
-    fallbackMessage: "Jira runtime access is not enabled yet. Use /connector-setup full or selective setup status for staged guidance.",
+    description: "Company issue tracker capability for Atlassian Jira; the hosted connector lane remains staged while the separate CLI tool pack uses jira-cli.",
+    authGuidance: "This hosted Jira connector is runtime-gated. For non-interactive CLI access, configure jira-cli and enable workspace-cli-tools.",
+    statusGuidance: "Hosted Jira connector readiness is runtime-gated; use /workspace-cli-status for the separate jira-cli tool surface.",
+    fallbackMessage: "Hosted Jira connector access is not enabled. Use the separately authenticated issue_tracker_jira_cli tool or staged connector setup guidance.",
     setupModes: CONNECTOR_SETUP_MODES,
     exposureState: "runtime-gated",
     authOwnership: ["setup-only"],
@@ -262,7 +262,7 @@ export const connectorBackendCatalog = [
     authStrategies: [
       {
         kind: "setup-guidance",
-        description: "Setup-visible only. Runtime tools stay gated until non-interactive Atlassian auth is designed.",
+        description: "Hosted connector setup remains staged; jira-cli authentication belongs to the separate role-scoped CLI tool pack.",
       },
     ],
     staged: {
@@ -277,10 +277,10 @@ export const connectorBackendCatalog = [
     capabilitySlot: "wiki",
     backendKind: "setup-only",
     adapterKind: "atlassian-staged",
-    description: "Company wiki capability for Atlassian Confluence; setup-visible until a non-interactive runtime auth route is selected.",
-    authGuidance: "Confluence is setup-visible but runtime-gated. Choose and validate a non-interactive Atlassian auth route before enabling tools.",
-    statusGuidance: "Confluence readiness is currently runtime-gated; no Confluence runtime tool is registered by oh-my-harness yet.",
-    fallbackMessage: "Confluence runtime access is not enabled yet. Use /connector-setup full or selective setup status for staged guidance.",
+    description: "Company wiki capability for Atlassian Confluence; the hosted connector lane remains staged while the separate CLI tool pack uses confluence-cli.",
+    authGuidance: "This hosted Confluence connector is runtime-gated. For non-interactive CLI access, configure confluence-cli and enable workspace-cli-tools.",
+    statusGuidance: "Hosted Confluence connector readiness is runtime-gated; use /workspace-cli-status for the separate confluence-cli tool surface.",
+    fallbackMessage: "Hosted Confluence connector access is not enabled. Use the separately authenticated wiki_confluence_cli tool or staged connector setup guidance.",
     setupModes: CONNECTOR_SETUP_MODES,
     exposureState: "runtime-gated",
     authOwnership: ["setup-only"],
@@ -289,7 +289,7 @@ export const connectorBackendCatalog = [
     authStrategies: [
       {
         kind: "setup-guidance",
-        description: "Setup-visible only. Runtime tools stay gated until non-interactive Atlassian auth is designed.",
+        description: "Hosted connector setup remains staged; confluence-cli authentication belongs to the separate role-scoped CLI tool pack.",
       },
     ],
     staged: {
