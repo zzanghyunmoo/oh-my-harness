@@ -1,12 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
-  CLI_TOOL_DEFINITIONS,
+  cliToolDefinitionsForRuntime,
+  cliToolServiceIdsForRuntime,
   executeCliTool,
   formatCliToolResult,
   listCliToolStatus,
   type CliToolInput,
 } from "../../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
+
+const TOOL_DEFINITIONS = cliToolDefinitionsForRuntime("pi");
+const SERVICE_IDS = cliToolServiceIdsForRuntime("pi");
 
 interface NotificationContext {
   readonly ui: {
@@ -18,18 +22,18 @@ export default function workspaceCliTools(pi: ExtensionAPI) {
   if (process.env.ENABLE_WORKSPACE_CLI_TOOLS !== "true") return;
 
   pi.on("session_start", async (_event: unknown, ctx: NotificationContext) => {
-    const ready = listCliToolStatus().filter((entry) => entry.available).length;
-    ctx.ui.notify(`Workspace CLI tools loaded: ${CLI_TOOL_DEFINITIONS.length} role tools, ${ready}/7 CLI backends available.`, "info");
+    const ready = listCliToolStatus({ serviceIds: SERVICE_IDS }).filter((entry) => entry.available).length;
+    ctx.ui.notify(`Workspace CLI tools loaded for Pi: ${TOOL_DEFINITIONS.length} role tools, ${ready}/${SERVICE_IDS.length} selected CLI backends available.`, "info");
   });
 
   pi.registerCommand("workspace-cli-status", {
-    description: "Show trusted-PATH availability and install guidance for Jira, Linear, GitHub, GitLab, Confluence, Notion, and CodeRabbit CLIs.",
+    description: "Show trusted-PATH availability for Pi's selected Linear, Notion, and GitHub CLIs.",
     handler: async (_args: string, ctx: NotificationContext) => {
-      ctx.ui.notify(JSON.stringify(listCliToolStatus(), null, 2), "info");
+      ctx.ui.notify(JSON.stringify(listCliToolStatus({ serviceIds: SERVICE_IDS }), null, 2), "info");
     },
   });
 
-  for (const definition of CLI_TOOL_DEFINITIONS) {
+  for (const definition of TOOL_DEFINITIONS) {
     pi.registerTool({
       name: definition.name,
       label: definition.label,

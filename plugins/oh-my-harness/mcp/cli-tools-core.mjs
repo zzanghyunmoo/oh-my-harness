@@ -84,6 +84,14 @@ export const CLI_TOOL_DEFINITIONS = Object.freeze([
   defineTool("code_review_gitlab_cli", "Code review: GitLab CLI", "gitlab", "code-review", "Inspect merge requests or explicitly submit GitLab review actions through glab.", [["mr", "diff", "123"], ["mr", "view", "123"]]),
 ]);
 
+const PROFILE_CAPABILITIES = Object.freeze(["issue-tracker", "wiki", "git"]);
+export const RUNTIME_TOOL_PROFILES = Object.freeze({
+  pi: Object.freeze({ "issue-tracker": "linear", wiki: "notion", git: "github" }),
+  codex: Object.freeze({ "issue-tracker": "linear", wiki: "notion", git: "github" }),
+  "claude-code": Object.freeze({ "issue-tracker": "jira", wiki: "confluence", git: "gitlab" }),
+  opencode: Object.freeze({ "issue-tracker": "jira", wiki: "confluence", git: "gitlab" }),
+});
+
 const TOOL_BY_NAME = new Map(CLI_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const WRITE_WORDS = new Set([
   "add", "approve", "archive", "assign", "clone", "close", "create", "delete", "deploy", "edit",
@@ -109,6 +117,27 @@ const TOKEN_PATTERNS = [
 
 function fail(message) {
   throw new Error(message);
+}
+
+export function getRuntimeToolProfile(runtimeId) {
+  const profile = RUNTIME_TOOL_PROFILES[runtimeId];
+  if (!profile) fail(`unknown runtime tool profile: ${runtimeId}`);
+  return profile;
+}
+
+export function cliToolDefinitionsForRuntime(runtimeId) {
+  const profile = getRuntimeToolProfile(runtimeId);
+  return Object.freeze(CLI_TOOL_DEFINITIONS.filter(({ capability, service }) => profile[capability] === service));
+}
+
+export function cliToolServiceIdsForRuntime(runtimeId) {
+  const profile = getRuntimeToolProfile(runtimeId);
+  return Object.freeze(PROFILE_CAPABILITIES.map((capability) => profile[capability]));
+}
+
+export function cliToolServiceIdsForRuntimes(runtimeIds) {
+  if (!Array.isArray(runtimeIds) || runtimeIds.length === 0) fail("runtimeIds must be a non-empty array");
+  return Object.freeze([...new Set(runtimeIds.flatMap(cliToolServiceIdsForRuntime))]);
 }
 
 function truncate(value) {
@@ -380,9 +409,12 @@ export async function executeCliTool(toolName, input, options = {}) {
   });
 }
 
-export function listCliToolStatus({ env = process.env, workspace = process.cwd() } = {}) {
+export function listCliToolStatus({ env = process.env, serviceIds = Object.keys(SERVICE_DEFINITIONS), workspace = process.cwd() } = {}) {
   const checkedWorkspace = safeCwd(workspace);
-  return Object.entries(SERVICE_DEFINITIONS).map(([id, service]) => {
+  if (!Array.isArray(serviceIds) || new Set(serviceIds).size !== serviceIds.length) fail("serviceIds must be a unique array");
+  return serviceIds.map((id) => {
+    const service = SERVICE_DEFINITIONS[id];
+    if (!service) fail(`unknown CLI service: ${id}`);
     try {
       return Object.freeze({ id, label: service.label, available: true, executablePath: resolveCliExecutable(id, { env, workspace: checkedWorkspace }), install: service.install });
     } catch (error) {

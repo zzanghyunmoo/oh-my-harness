@@ -23,11 +23,11 @@
     "coderabbit"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.mcp.codex.json",
   "interface": {
     "displayName": "Oh My Harness",
     "shortDescription": "Engineering workflows and workspace CLI tools",
-    "longDescription": "Oh My Harness exposes the OMP workflow namespace plus role-scoped Jira, Linear, GitHub, GitLab, Confluence, Notion, and CodeRabbit CLI tools.",
+    "longDescription": "Oh My Harness exposes the OMP workflow namespace plus Codex-scoped Linear issue, Notion wiki, and GitHub repository CLI tools.",
     "developerName": "zzanghyunmoo",
     "category": "Coding",
     "capabilities": [

@@ -340,6 +340,8 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   const claudeMarketplace = JSON.parse(readFileSync(join(REPO_ROOT, ".claude-plugin", "marketplace.json"), "utf8"));
   const plugin = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".codex-plugin", "plugin.json"), "utf8"));
   const claudePlugin = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".claude-plugin", "plugin.json"), "utf8"));
+  const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.codex.json"), "utf8"));
+  const claudeMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.claude.json"), "utf8"));
   const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
   assert.deepEqual(packageJson.pi.skills, ["./plugins/oh-my-harness/skills"]);
@@ -351,13 +353,19 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   assert.equal(plugin.version, packageJson.version);
   assert.equal(claudePlugin.version, packageJson.version);
   assert.equal(plugin.skills, "./skills/");
-  assert.equal(plugin.mcpServers, "./.mcp.json");
-  assert.equal(claudePlugin.mcpServers, "./.mcp.json");
+  assert.equal(plugin.mcpServers, "./.mcp.codex.json");
+  assert.equal(claudePlugin.mcpServers, "./.mcp.claude.json");
+  assert.match(codexMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'codex'/);
+  assert.match(claudeMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'claude-code'/);
   assert.equal(existsSync(skillPath), true);
   const module = await import(`${pathToFileURL(join(REPO_ROOT, packageJson.main)).href}?test=${Date.now()}`);
   const config = {};
   const hooks = await module.default();
   await hooks.config(config);
   assert.deepEqual(config.skills.paths, [join(REPO_ROOT, "plugins", "oh-my-harness", "skills")]);
-  assert.equal(Object.keys(hooks.tool).length, 13);
+  assert.deepEqual(Object.keys(hooks.tool), [
+    "issue_tracker_jira_cli",
+    "wiki_confluence_cli",
+    "git_repository_gitlab_cli",
+  ]);
 });

@@ -15,5 +15,5 @@
     "git",
     "code-review"
   ],
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.claude.json"
 }

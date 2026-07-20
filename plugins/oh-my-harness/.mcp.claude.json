@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "workspace-cli-tools": {
+      "command": "node",
+      "args": [
+        "--input-type=module",
+        "--eval",
+        "import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; process.env.OH_MY_HARNESS_RUNTIME = 'claude-code'; await import(pathToFileURL(resolve(process.env.CLAUDE_PLUGIN_ROOT || process.cwd(), 'mcp/cli-tools-server.mjs')).href);"
+      ],
+      "cwd": "."
+    }
+  }
+}

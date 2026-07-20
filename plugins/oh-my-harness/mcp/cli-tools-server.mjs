@@ -2,13 +2,20 @@
 
 import readline from "node:readline";
 import {
-  CLI_TOOL_DEFINITIONS,
+  cliToolDefinitionsForRuntime,
+  cliToolServiceIdsForRuntime,
   executeCliTool,
   formatCliToolResult,
+  getRuntimeToolProfile,
   listCliToolStatus,
   redactCliOutput,
 } from "./cli-tools-core.mjs";
 
+const RUNTIME_ID = process.env.OH_MY_HARNESS_RUNTIME;
+const RUNTIME_PROFILE = getRuntimeToolProfile(RUNTIME_ID);
+const TOOL_DEFINITIONS = cliToolDefinitionsForRuntime(RUNTIME_ID);
+const SERVICE_IDS = cliToolServiceIdsForRuntime(RUNTIME_ID);
+const TOOL_NAMES = new Set(TOOL_DEFINITIONS.map(({ name }) => name));
 const SERVER_INFO = Object.freeze({ name: "oh-my-harness-cli-tools", version: "0.2.0" });
 const JSON_RPC_ERRORS = Object.freeze({ METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL_ERROR: -32603 });
 
@@ -52,7 +59,7 @@ function toolSchema(definition) {
 const STATUS_TOOL = Object.freeze({
   name: "workspace_cli_status",
   title: "Workspace CLI status",
-  description: "Check whether the seven configured CLI backends are installed on a trusted PATH and show install guidance. This does not probe credentials or network services.",
+  description: `Check the three CLI backends selected for ${RUNTIME_ID}: ${SERVICE_IDS.join(", ")}. This does not probe credentials or network services.`,
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -71,10 +78,11 @@ async function callTool(id, params) {
   }
   try {
     if (name === STATUS_TOOL.name) {
-      const status = listCliToolStatus({ workspace: args.cwd });
+      const status = listCliToolStatus({ serviceIds: SERVICE_IDS, workspace: args.cwd });
       result(id, { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], structuredContent: { services: status } });
       return;
     }
+    if (!TOOL_NAMES.has(name)) throw new Error(`${name} is not exposed by the ${RUNTIME_ID} tool profile`);
     const execution = await executeCliTool(name, args);
     result(id, {
       isError: execution.code !== 0 || execution.timedOut,
@@ -101,7 +109,7 @@ async function handle(message) {
       protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
       capabilities: { tools: { listChanged: false } },
       serverInfo: SERVER_INFO,
-      instructions: "Use the role-specific CLI tools only from an absolute coding workspace. Reads are allowlisted. Set confirmedWrite=true only after explicit user intent for the exact state change. Credentials must be configured in each CLI outside these tools.",
+      instructions: `Runtime profile ${RUNTIME_ID}: issue-tracker=${RUNTIME_PROFILE["issue-tracker"]}, wiki=${RUNTIME_PROFILE.wiki}, git=${RUNTIME_PROFILE.git}. Use these role-specific CLI tools only from an absolute coding workspace. Reads are allowlisted. Set confirmedWrite=true only after explicit user intent for the exact state change. Credentials must be configured in each CLI outside these tools.`,
     });
     return;
   }
@@ -110,7 +118,7 @@ async function handle(message) {
     return;
   }
   if (message.method === "tools/list") {
-    result(message.id, { tools: [STATUS_TOOL, ...CLI_TOOL_DEFINITIONS.map(toolSchema)] });
+    result(message.id, { tools: [STATUS_TOOL, ...TOOL_DEFINITIONS.map(toolSchema)] });
     return;
   }
   if (message.method === "tools/call") {

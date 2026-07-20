@@ -32,12 +32,28 @@ test("omh exposes one preview-first command surface with friendly aliases", () =
   assert.equal(tools.apply, false);
 });
 
+test("omh derives default CLI installs from the selected runtime profiles", () => {
+  assert.deepEqual(
+    parseOmhArguments(["setup", "--agents", "codex,pi"]).tools,
+    ["linear", "notion", "github"],
+  );
+  assert.deepEqual(
+    parseOmhArguments(["setup", "--agents", "claude,opencode"]).tools,
+    ["jira", "confluence", "gitlab"],
+  );
+  assert.deepEqual(
+    parseOmhArguments(["tools", "doctor"]).tools,
+    ["jira", "confluence", "gitlab", "linear", "notion", "github"],
+  );
+});
+
 test("omh rejects ambiguous or mutating status and doctor options", () => {
   assert.throws(() => parseOmhArguments(["setup", "--agents", "codex,codex"]), /duplicate/);
   assert.throws(() => parseOmhArguments(["setup", "--tools", "unknown"]), /must contain ids/);
   assert.throws(() => parseOmhArguments(["status", "--apply"]), /not valid/);
   assert.throws(() => parseOmhArguments(["tools", "doctor", "--apply"]), /not valid/);
   assert.throws(() => parseOmhArguments(["agents", "status", "--skip-registration"]), /not valid/);
+  assert.throws(() => parseOmhArguments(["agents", "status", "--tools", "github"]), /tool selection/);
   assert.throws(() => parseOmhArguments(["setup", "--skip-registration"]), /requires --apply/);
   assert.deepEqual(parseOmhArguments(["setup", "--help"]), { command: "help", topic: "setup", json: false });
   assert.deepEqual(parseOmhArguments(["agents", "install", "--help"]), { command: "help", topic: "agents", json: false });
@@ -56,8 +72,27 @@ test("omh setup preview is read-only and explains agent versus machine scope", a
     assert.equal(existsSync(installRoot), false);
     const output = formatOmhResult(result);
     assert.match(output, /selected per agent/);
-    assert.match(output, /shared machine-wide/);
+    assert.match(output, /issue-tracker=linear, wiki=notion, git=github/);
+    assert.match(output, /installed once per machine/);
     assert.match(output, /No changes were made/);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("omh setup preview installs only the selected runtimes' default backend union", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "omh-cli-profile-preview-"));
+  const installRoot = join(parent, "managed-root");
+  try {
+    const result = await runOmh([
+      "setup", "--agents", "claude,opencode", "--root", installRoot,
+    ], { env: { ...process.env, PATH: "" } });
+    assert.deepEqual(result.tools.map(({ id }) => id), ["jira", "confluence", "gitlab"]);
+    assert.deepEqual(result.toolProfiles, [
+      { runtimeId: "claude-code", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+      { runtimeId: "opencode", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+    ]);
+    assert.equal(existsSync(installRoot), false);
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }

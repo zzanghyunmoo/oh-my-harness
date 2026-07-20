@@ -8,7 +8,7 @@ Codex, OpenCode, Claude Code, Pi에 같은 Compound Engineering 자산과 안전
 - U2: runtime-neutral feature, profile, adapter, conformance contract
 - U3: Codex, OpenCode, Claude Code, Pi의 정확한 버전과 플랫폼 acquisition descriptor
 - macOS arm64/x64, Windows arm64/x64, Linux x64에서 Claude Code, Codex, OpenCode, Pi를 checksum으로 검증해 설치하고 각 런타임의 native package surface에 등록하는 preview-first installer
-- 네 런타임에서 공유하는 issue tracker, wiki, Git repository, code review CLI tool pack
+- 런타임별로 Linear/Notion/GitHub 또는 Jira/Confluence/GitLab만 노출하는 role-scoped CLI profile
 
 Native pre-model gate와 전체 conformance runner는 후속 unit에서 구현합니다.
 
@@ -27,7 +27,7 @@ git clone https://github.com/zzanghyunmoo/oh-my-harness.git
 cd oh-my-harness
 npm ci
 
-# Claude Code, Codex, OpenCode, Pi와 외부 CLI의 설치 계획만 확인
+# 네 runtime과 각 runtime profile에 필요한 외부 CLI의 설치 계획만 확인
 ./omh setup
 
 # 확인한 계획을 실제 적용
@@ -48,14 +48,21 @@ npm ci
 .\omh.cmd setup --apply
 ```
 
-`setup`은 `--apply`가 없으면 어떤 파일도 변경하지 않습니다. 에이전트 runtime과 harness plugin은 에이전트별로 선택하고, 외부 CLI 실행파일은 머신에 한 번 설치해 모든 에이전트가 `PATH`를 통해 공유합니다.
+`setup`은 `--apply`가 없으면 어떤 파일도 변경하지 않습니다. 에이전트 runtime과 harness plugin은 에이전트별로 선택합니다. 외부 CLI 실행파일은 머신에 한 번 설치해 `PATH`로 공유하지만, 각 runtime에는 아래 profile의 issue tracker, wiki, Git repository 도구만 노출됩니다. 기본 `./omh setup`은 네 runtime profile의 합집합인 Jira, Linear, GitHub, GitLab, Confluence, Notion을 계획합니다.
 
 필요한 항목만 설치할 수도 있습니다.
 
 ```bash
-./omh setup --agents codex,pi --tools github,coderabbit
-./omh setup --agents codex,pi --tools github,coderabbit --apply
+# Linear, Notion, GitHub가 자동 선택됨
+./omh setup --agents codex,pi
+./omh setup --agents codex,pi --apply
+
+# Jira, Confluence, GitLab(glab)이 자동 선택됨
+./omh setup --agents claude-code,opencode
+./omh setup --agents claude-code,opencode --apply
 ```
+
+`--tools`는 머신에 설치할 실행파일만 명시적으로 덮어씁니다. 예를 들어 `--tools github,coderabbit`으로 CodeRabbit까지 설치할 수 있지만 runtime role profile은 바뀌지 않습니다.
 
 `omh`를 현재 checkout 밖에서도 사용하려면 로컬 package를 전역 연결할 수 있습니다.
 
@@ -77,7 +84,7 @@ omh doctor
 omh setup                 agent와 외부 CLI를 함께 preview/apply
 omh agents install        고정 runtime과 harness plugin을 에이전트별 설치
 omh agents status         managed runtime 상태 확인
-omh tools install         머신 공유 외부 CLI 선택 설치
+omh tools install         runtime profile 합집합의 머신 공유 외부 CLI 설치
 omh tools doctor          외부 CLI 실행파일 확인
 omh status                agent와 CLI 상태를 한 번에 확인
 omh doctor                상태와 다음 명령을 함께 출력
@@ -156,7 +163,18 @@ pi install .
 
 ## Workspace CLI tool pack
 
-하나의 검증 코어를 각 런타임의 native surface로 노출합니다. Codex와 Claude Code는 plugin MCP server, OpenCode는 native custom tools, Pi는 opt-in extension을 사용합니다. 모든 명령은 shell 없이 trusted `PATH`의 실행파일로 호출하며 workspace-local shim, credential 인자, interactive/browser 플래그를 거부합니다. 조회는 바로 실행할 수 있고 write로 분류된 명령은 사용자가 해당 변경을 요청하거나 확인한 뒤 `confirmedWrite=true`가 있어야 실행됩니다.
+하나의 검증 코어를 각 런타임의 native surface로 노출합니다. Codex와 Claude Code는 각각의 plugin MCP profile, OpenCode는 native custom tools, Pi는 opt-in extension을 사용합니다.
+
+| Runtime | Issue tracker | Wiki | Git repository |
+| --- | --- | --- | --- |
+| Pi | Linear `linear` | Notion `ntn` | GitHub `gh` |
+| Codex | Linear `linear` | Notion `ntn` | GitHub `gh` |
+| Claude Code | Jira `jira` | Confluence `confluence` | GitLab `glab` |
+| OpenCode | Jira `jira` | Confluence `confluence` | GitLab `glab` |
+
+각 runtime은 표의 세 role tool만 등록합니다. 다른 backend 도구를 이름으로 직접 호출해도 adapter가 거부합니다. 모든 명령은 shell 없이 trusted `PATH`의 실행파일로 호출하며 workspace-local shim, credential 인자, interactive/browser 플래그를 거부합니다. 조회는 바로 실행할 수 있고 write로 분류된 명령은 사용자가 해당 변경을 요청하거나 확인한 뒤 `confirmedWrite=true`가 있어야 실행됩니다.
+
+공유 코어에는 다음 13개 role/backend 조합이 검증 가능한 전체 catalog로 남아 있습니다. Runtime profile은 이 catalog에서 정확히 세 개를 선택합니다.
 
 | 역할 | 지원 CLI |
 | --- | --- |
@@ -165,7 +183,7 @@ pi install .
 | Git repository | GitHub `gh`, GitLab `glab` |
 | Code review | CodeRabbit `cr`/`coderabbit`, GitHub `gh`, GitLab `glab` |
 
-외부 CLI는 harness package에 포함하지 않습니다. 아래 명령은 설치 상태를 검사하고, 빠진 CLI의 exact npm package, Homebrew formula 또는 WinGet package를 보여줍니다. 설치 명령도 기본값은 preview이며 `--apply`가 있을 때만 변경합니다.
+외부 CLI는 harness package에 포함하지 않습니다. 아래 명령은 runtime profile에서 사용하는 여섯 backend의 설치 상태를 검사하고, 빠진 CLI의 exact npm package, Homebrew formula 또는 WinGet package를 보여줍니다. 설치 명령도 기본값은 preview이며 `--apply`가 있을 때만 변경합니다. Catalog의 CodeRabbit은 `--only coderabbit`처럼 명시적으로 선택할 수 있습니다.
 
 ```bash
 ./omh tools doctor
@@ -231,10 +249,10 @@ OAuth token은 저장소 밖의 `~/.pi/agent/workspace-connectors-auth.json`에,
 - `/connector-status [service]`: setup 및 auth 상태 확인
 - `/connector-logout <selector> [--confirm]`: preview 후 Pi-managed OAuth state만 삭제
 - `/connector-tools linear|notion`: 준비된 connector tool 목록
-- `/workspace-cli-status`: Pi role-scoped CLI 실행파일과 설치 가이드 확인
+- `/workspace-cli-status`: Pi profile의 Linear, Notion, GitHub CLI 실행파일과 설치 가이드 확인
 - `/quotio-status`: Quotio 연결과 인증 상태 확인
 
-기존 `workspace-connectors`의 hosted Linear/Notion OAuth와 read-only GitHub/GitLab bridge는 Pi 호환 surface로 유지됩니다. 별도 `workspace-cli-tools` extension은 Jira와 Confluence를 포함한 13개 role-scoped CLI tool을 제공하며, 각 CLI의 이미 설정된 non-interactive 인증만 재사용합니다.
+기존 `workspace-connectors`의 hosted Linear/Notion OAuth와 read-only GitHub/GitLab bridge는 Pi 호환 surface로 유지됩니다. 별도 `workspace-cli-tools` extension은 Pi profile의 Linear issue, Notion wiki, GitHub repository 도구만 등록하며, 각 CLI의 이미 설정된 non-interactive 인증만 재사용합니다.
 
 ## npm script 호환 surface
 

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import workspaceCliTools from "./index.js";
 
-test("Pi workspace CLI extension registers all 13 role tools behind its opt-in toggle", () => {
+test("Pi workspace CLI extension registers its Linear, Notion, and GitHub role profile", () => {
   const previous = process.env.ENABLE_WORKSPACE_CLI_TOOLS;
   const tools: Array<{ name: string }> = [];
   const commands: string[] = [];
@@ -20,8 +20,11 @@ test("Pi workspace CLI extension registers all 13 role tools behind its opt-in t
     if (previous === undefined) delete process.env.ENABLE_WORKSPACE_CLI_TOOLS;
     else process.env.ENABLE_WORKSPACE_CLI_TOOLS = previous;
   }
-  assert.equal(tools.length, 13);
-  assert.equal(new Set(tools.map(({ name }) => name)).size, 13);
+  assert.deepEqual(tools.map(({ name }) => name), [
+    "issue_tracker_linear_cli",
+    "wiki_notion_cli",
+    "git_repository_github_cli",
+  ]);
   assert.deepEqual(commands, ["workspace-cli-status"]);
   assert.deepEqual(events, ["session_start"]);
 });

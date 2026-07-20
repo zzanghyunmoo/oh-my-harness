@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   CLI_TOOL_DEFINITIONS,
+  RUNTIME_TOOL_PROFILES,
   classifyCliInvocation,
+  cliToolDefinitionsForRuntime,
+  cliToolServiceIdsForRuntimes,
   executeCliTool,
   listCliToolStatus,
   redactCliOutput,
@@ -35,10 +38,10 @@ function fixture() {
   return { root, bin, workspace };
 }
 
-async function runMcp(messages, env) {
+async function runMcp(messages, env, runtimeId) {
   const child = spawn(process.execPath, [MCP_SERVER], {
     cwd: join(REPO_ROOT, "plugins", "oh-my-harness"),
-    env,
+    env: { ...env, OH_MY_HARNESS_RUNTIME: runtimeId },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
@@ -64,6 +67,24 @@ test("CLI tool catalog covers every requested role/backend mapping exactly once"
       "code-review:coderabbit", "code-review:github", "code-review:gitlab",
     ],
   );
+});
+
+test("runtime profiles bind one requested backend to each issue, wiki, and git role", () => {
+  assert.deepEqual(RUNTIME_TOOL_PROFILES, {
+    pi: { "issue-tracker": "linear", wiki: "notion", git: "github" },
+    codex: { "issue-tracker": "linear", wiki: "notion", git: "github" },
+    "claude-code": { "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+    opencode: { "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
+  });
+  const personal = ["issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli"];
+  const company = ["issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli"];
+  assert.deepEqual(cliToolDefinitionsForRuntime("pi").map(({ name }) => name), personal);
+  assert.deepEqual(cliToolDefinitionsForRuntime("codex").map(({ name }) => name), personal);
+  assert.deepEqual(cliToolDefinitionsForRuntime("claude-code").map(({ name }) => name), company);
+  assert.deepEqual(cliToolDefinitionsForRuntime("opencode").map(({ name }) => name), company);
+  assert.deepEqual(cliToolServiceIdsForRuntimes(["codex", "pi"]), ["linear", "notion", "github"]);
+  assert.deepEqual(cliToolServiceIdsForRuntimes(["claude-code", "opencode"]), ["jira", "confluence", "gitlab"]);
+  assert.throws(() => cliToolDefinitionsForRuntime("unknown"), /unknown runtime tool profile/);
 });
 
 test("role allowlists classify safe reads, confirmed writes, API bodies, and mismatches", () => {
@@ -164,21 +185,48 @@ test("relative PATH entries are not trusted even when they resolve outside the w
   }
 });
 
-test("MCP server lists 13 role tools plus status and executes through the shared core", async (t) => {
-  if (process.platform === "win32") return t.skip("POSIX fixture");
-  const { root, bin, workspace } = fixture();
+test("MCP server exposes only the selected runtime profile and rejects hidden tools", async () => {
+  const { root, workspace } = fixture();
   try {
-    fakeExecutable(bin, "gh", "printf '%s\\n' \"$*\"");
     const messages = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
-      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "issue_tracker_github_cli", arguments: { args: ["issue", "list"], cwd: workspace } } },
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "issue_tracker_jira_cli", arguments: { args: ["issue", "list"], cwd: workspace } } },
+      { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "workspace_cli_status", arguments: { cwd: workspace } } },
     ];
-    const responses = await runMcp(messages, { ...process.env, PATH: bin });
+    const codex = await runMcp(messages, { ...process.env, PATH: "" }, "codex");
+    assert.match(codex[0].result.instructions, /issue-tracker=linear, wiki=notion, git=github/);
+    assert.deepEqual(codex[1].result.tools.map(({ name }) => name), [
+      "workspace_cli_status", "issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli",
+    ]);
+    assert.equal(codex[2].result.isError, true);
+    assert.match(codex[2].result.content[0].text, /not exposed by the codex tool profile/);
+    assert.deepEqual(codex[3].result.structuredContent.services.map(({ id }) => id), ["linear", "notion", "github"]);
+
+    const claude = await runMcp(messages.slice(0, 2), { ...process.env, PATH: "" }, "claude-code");
+    assert.deepEqual(claude[1].result.tools.map(({ name }) => name), [
+      "workspace_cli_status", "issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP server executes an exposed runtime tool through the shared core", async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX fixture");
+  const { root, bin, workspace } = fixture();
+  try {
+    fakeExecutable(bin, "linear", "printf '%s\\n' \"$*\"");
+    const messages = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "issue_tracker_linear_cli", arguments: { args: ["issue", "query"], cwd: workspace } } },
+    ];
+    const responses = await runMcp(messages, { ...process.env, PATH: bin }, "codex");
     assert.equal(responses[0].result.serverInfo.name, "oh-my-harness-cli-tools");
-    assert.equal(responses[1].result.tools.length, 14);
+    assert.equal(responses[1].result.tools.length, 4);
     assert.equal(responses[2].result.structuredContent.access, "read");
-    assert.match(responses[2].result.content[0].text, /issue list/);
+    assert.match(responses[2].result.content[0].text, /issue query/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
