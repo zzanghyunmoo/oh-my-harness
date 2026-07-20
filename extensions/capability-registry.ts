@@ -46,6 +46,35 @@ export const capabilityRegistry: readonly CapabilityCapsule[] = [
     ],
   },
   {
+    id: "litellm-provider",
+    name: "LiteLLM Provider",
+    extensionPath: "./extensions/litellm-provider",
+    toggleEnvVar: "ENABLE_LITELLM",
+    envVars: [
+      {
+        name: "LITELLM_BASE_URL",
+        requiredWhen: "ENABLE_LITELLM=true",
+        secret: false,
+        description: "Base URL for an OpenAI-compatible LiteLLM gateway.",
+      },
+      {
+        name: "LITELLM_API_KEY",
+        requiredWhen: "ENABLE_LITELLM=true",
+        secret: true,
+        description: "Virtual key used to authenticate with the LiteLLM gateway.",
+      },
+    ],
+    exposes: {
+      commands: ["litellm-status"],
+      providers: ["litellm"],
+    },
+    safetyClass: "external-provider",
+    diagnostics: [
+      "Checks required LiteLLM environment variables before registering the provider.",
+      "The /litellm-status command probes proxy connectivity without printing credentials.",
+    ],
+  },
+  {
     id: "quotio-provider",
     name: "Quotio Provider",
     extensionPath: "./extensions/quotio-provider",
@@ -72,6 +101,35 @@ export const capabilityRegistry: readonly CapabilityCapsule[] = [
     diagnostics: [
       "Checks required Quotio environment variables before registering the provider.",
       "The /quotio-status command probes proxy connectivity and lists available models.",
+    ],
+  },
+  {
+    id: "ccs-provider",
+    name: "CCS Provider",
+    extensionPath: "./extensions/ccs-provider",
+    toggleEnvVar: "ENABLE_CCS",
+    envVars: [
+      {
+        name: "CCS_BASE_URL",
+        requiredWhen: "ENABLE_CCS=true",
+        secret: false,
+        description: "Base URL for an Anthropic-compatible CCS local proxy endpoint.",
+      },
+      {
+        name: "CCS_API_KEY",
+        requiredWhen: "ENABLE_CCS=true",
+        secret: true,
+        description: "Token used to authenticate with the CCS/CLIProxy endpoint.",
+      },
+    ],
+    exposes: {
+      commands: ["ccs-status"],
+      providers: ["ccs"],
+    },
+    safetyClass: "external-provider",
+    diagnostics: [
+      "Checks required CCS environment variables before registering the provider.",
+      "The /ccs-status command probes proxy connectivity without printing credentials.",
     ],
   },
   {

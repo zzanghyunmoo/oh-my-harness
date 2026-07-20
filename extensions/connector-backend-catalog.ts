@@ -298,6 +298,25 @@ export const connectorBackendCatalog = [
     },
   },
   {
+    id: "litellm",
+    label: "LiteLLM",
+    backendKind: "provider",
+    adapterKind: "pi-provider",
+    description: "OpenAI-compatible LiteLLM gateway integration; deployment remains externally owned.",
+    authGuidance: "Set ENABLE_LITELLM=true plus LITELLM_BASE_URL and LITELLM_API_KEY in the CWD .env file.",
+    statusGuidance: "Run /litellm-status after enabling the LiteLLM provider extension.",
+    fallbackMessage: "If LiteLLM fails, verify LITELLM_BASE_URL, LITELLM_API_KEY, and gateway connectivity.",
+    exposes: {
+      commands: ["litellm-status"],
+      providers: ["litellm"],
+    },
+    provider: {
+      name: "litellm",
+      toggleEnvVar: "ENABLE_LITELLM",
+      requiredEnvVars: ["LITELLM_BASE_URL", "LITELLM_API_KEY"],
+    },
+  },
+  {
     id: "quotio",
     label: "Quotio",
     backendKind: "provider",
@@ -314,6 +333,25 @@ export const connectorBackendCatalog = [
       name: "quotio",
       toggleEnvVar: "ENABLE_QUOTIO",
       requiredEnvVars: ["QUOTIO_BASE_URL", "QUOTIO_API_KEY"],
+    },
+  },
+  {
+    id: "ccs",
+    label: "CCS",
+    backendKind: "provider",
+    adapterKind: "pi-provider",
+    description: "Provider integration for a user-managed Anthropic-compatible CCS local proxy endpoint.",
+    authGuidance: "Set ENABLE_CCS=true plus CCS_BASE_URL and CCS_API_KEY in the CWD .env file.",
+    statusGuidance: "Run /ccs-status after enabling the CCS provider extension.",
+    fallbackMessage: "If CCS fails, verify CCS_BASE_URL, CCS_API_KEY, and proxy connectivity.",
+    exposes: {
+      commands: ["ccs-status"],
+      providers: ["ccs"],
+    },
+    provider: {
+      name: "ccs",
+      toggleEnvVar: "ENABLE_CCS",
+      requiredEnvVars: ["CCS_BASE_URL", "CCS_API_KEY"],
     },
   },
 ] as const satisfies readonly ConnectorBackendDefinition[];

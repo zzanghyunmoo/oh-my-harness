@@ -14,8 +14,8 @@ These files may mention environment variable names and package install specs, bu
 Do not commit these files or values:
 
 - `.env` and `.env.*` — CWD environment files read by `extensions/env-loader`.
-- `QUOTIO_BASE_URL` values — local endpoint/private network configuration.
-- `QUOTIO_API_KEY` values — API keys for the configured Quotio/OpenAI-compatible proxy.
+- `LITELLM_BASE_URL`, `QUOTIO_BASE_URL`, `CCS_BASE_URL` values — local endpoint/private network configuration.
+- `LITELLM_API_KEY`, `QUOTIO_API_KEY`, `CCS_API_KEY` values — API keys for configured model proxies.
 - `.mcp-auth/` — remote MCP OAuth/cache state.
 - `.pi/` — local Pi session/OAuth state that can be generated while using connectors.
 - `~/.pi/agent/auth.json` — Pi agent authentication material outside this repository.
@@ -24,10 +24,14 @@ Do not commit these files or values:
 
 | Name | Capability | Boundary | Recreate locally |
 |---|---|---|---|
+| `ENABLE_LITELLM` | `extensions/litellm-provider` | Commit name/intent only | Set to `true` after the local LiteLLM endpoint/key pair is ready. |
 | `ENABLE_QUOTIO` | `extensions/quotio-provider` | Commit name/intent only | Set to `true` in local CWD `.env` when this machine should register Quotio. |
+| `ENABLE_CCS` | `extensions/ccs-provider` | Commit name/intent only | Set to `true` after the local CCS endpoint/key pair is ready. |
 | `ENABLE_WORKSPACE_CONNECTORS` | `extensions/workspace-connectors` | Commit name/intent only | Set to `true` in local CWD `.env` when this machine should expose Linear/Notion connector commands/tools. |
+| `LITELLM_BASE_URL` / `LITELLM_API_KEY` | `extensions/litellm-provider` | Never commit values | Supply both locally, then run `omh proxies configure --only litellm --apply`. |
 | `QUOTIO_BASE_URL` | `extensions/quotio-provider` | Never commit value | Add the local proxy endpoint to CWD `.env` or another local environment source. |
 | `QUOTIO_API_KEY` | `extensions/quotio-provider` | Never commit value | Add the local API key to CWD `.env` or another local environment source. |
+| `CCS_BASE_URL` / `CCS_API_KEY` | `extensions/ccs-provider` | Never commit values | Supply both locally, then run `omh proxies configure --only ccs --apply`. |
 
 The env-loader reads the current working directory's `.env` and overrides existing `process.env` values. Keep the real file next to the project or workspace where Pi is launched, not in the committed package.
 
@@ -77,10 +81,16 @@ The profile lock consumes this intent without adding or reordering Pi extensions
 3. Create a local CWD `.env` file with only the capabilities needed on that machine:
 
    ```bash
+   ENABLE_LITELLM=true
    ENABLE_QUOTIO=true
+   ENABLE_CCS=true
    ENABLE_WORKSPACE_CONNECTORS=true
+   LITELLM_BASE_URL=<litellm-openai-compatible-base-url>
+   LITELLM_API_KEY=<local-litellm-virtual-key>
    QUOTIO_BASE_URL=<local-quotio-openai-compatible-base-url>
    QUOTIO_API_KEY=<local-quotio-api-key>
+   CCS_BASE_URL=<ccs-anthropic-compatible-base-url>
+   CCS_API_KEY=<local-ccs-api-key>
    ```
 
 4. Start/reload Pi from that CWD.

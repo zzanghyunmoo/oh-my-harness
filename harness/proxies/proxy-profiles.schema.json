@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zzanghyunmoo/oh-my-harness/blob/main/harness/proxies/proxy-profiles.schema.json",
+  "title": "Oh My Harness proxy profiles",
+  "description": "Secret-free OpenAI-compatible proxy configuration and reviewed installer intent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "defaultInstallProfiles", "profiles"],
+  "properties": {
+    "$schema": { "const": "./proxy-profiles.schema.json" },
+    "schemaVersion": { "const": "1.0.0" },
+    "defaultInstallProfiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "uniqueItems": true
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/profile" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "adapter", "toggleEnvVar", "baseUrlEnvVar", "apiKeyEnvVar", "modelsPath", "install"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string", "minLength": 1 },
+        "adapter": { "enum": ["openai-compatible", "anthropic-compatible"] },
+        "toggleEnvVar": { "$ref": "#/$defs/env" },
+        "baseUrlEnvVar": { "$ref": "#/$defs/env" },
+        "apiKeyEnvVar": { "$ref": "#/$defs/env" },
+        "modelsPath": { "const": "/models" },
+        "install": {
+          "oneOf": [
+            { "$ref": "#/$defs/externalInstall" },
+            { "$ref": "#/$defs/npmInstall" },
+            { "$ref": "#/$defs/macosAppInstall" }
+          ]
+        }
+      }
+    },
+    "externalInstall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "guidance"],
+      "properties": {
+        "kind": { "const": "external" },
+        "guidance": { "type": "string", "minLength": 1 }
+      }
+    },
+    "npmInstall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "package", "version", "command", "integrity"],
+      "properties": {
+        "kind": { "const": "npm-global" },
+        "package": { "type": "string", "pattern": "^@[a-z0-9-]+/[a-z0-9-]+$" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "command": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "integrity": { "type": "string", "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$" }
+      }
+    },
+    "macosAppInstall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "version", "platforms", "archive", "appName", "executableRelativePath", "executableSha256"],
+      "properties": {
+        "kind": { "const": "verified-macos-app" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "platforms": {
+          "type": "array",
+          "const": ["darwin-arm64"]
+        },
+        "archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "repository", "tag", "assetId", "assetName", "url", "sha256"],
+          "properties": {
+            "owner": { "const": "nguyenphutrong" },
+            "repository": { "const": "quotio" },
+            "tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+            "assetId": { "type": "integer", "minimum": 1 },
+            "assetName": { "type": "string", "pattern": "^Quotio-[0-9]+\\.[0-9]+\\.[0-9]+\\.dmg$" },
+            "url": { "type": "string", "pattern": "^https://github\\.com/nguyenphutrong/quotio/releases/download/" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "appName": { "const": "Quotio.app" },
+        "executableRelativePath": { "const": "Contents/MacOS/Quotio" },
+        "executableSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

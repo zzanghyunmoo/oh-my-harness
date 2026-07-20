@@ -213,6 +213,41 @@ export const runtimeSafetyPolicyLedger = [
     ],
   },
   {
+    id: "provider.litellm",
+    targetKind: "provider",
+    targetName: "litellm",
+    safetyClass: "external-provider",
+    accessMode: "mixed",
+    allowlistHints: [
+      {
+        kind: "operation-intent",
+        values: ["model discovery", "status check", "user-requested inference"],
+        guidance: "Provider discovery/status checks are safe when secrets are redacted.",
+      },
+    ],
+    blocklistHints: [
+      {
+        kind: "secret-field",
+        values: ["LITELLM_API_KEY", "Authorization", "api_key"],
+        guidance: "Provider credentials must never be included in user-visible output or diagnostics.",
+      },
+    ],
+    redactionGuidance: [
+      "Redact LITELLM_API_KEY and Authorization headers from errors, logs, and status output.",
+      "Treat prompts and model responses as potentially sensitive external-provider traffic.",
+    ],
+    auditGuidance: [
+      "Record provider name, model id, status/discovery outcome, and error class without credentials.",
+    ],
+    approval: {
+      expectation: "no-confirmation-for-safe-reads",
+      guidance: "No extra confirmation is required for status/model discovery or user-requested model calls.",
+    },
+    promptGuidelines: [
+      "Never expose LiteLLM credentials in prompts, tool details, or notifications.",
+    ],
+  },
+  {
     id: "provider.quotio",
     targetKind: "provider",
     targetName: "quotio",
@@ -245,6 +280,41 @@ export const runtimeSafetyPolicyLedger = [
     },
     promptGuidelines: [
       "Never expose Quotio credentials in prompts, tool details, or notifications.",
+    ],
+  },
+  {
+    id: "provider.ccs",
+    targetKind: "provider",
+    targetName: "ccs",
+    safetyClass: "external-provider",
+    accessMode: "mixed",
+    allowlistHints: [
+      {
+        kind: "operation-intent",
+        values: ["model discovery", "status check", "user-requested inference"],
+        guidance: "Provider discovery/status checks are safe when secrets are redacted.",
+      },
+    ],
+    blocklistHints: [
+      {
+        kind: "secret-field",
+        values: ["CCS_API_KEY", "Authorization", "api_key"],
+        guidance: "Provider credentials must never be included in user-visible output or diagnostics.",
+      },
+    ],
+    redactionGuidance: [
+      "Redact CCS_API_KEY and Authorization headers from errors, logs, and status output.",
+      "Treat prompts and model responses as potentially sensitive external-provider traffic.",
+    ],
+    auditGuidance: [
+      "Record provider name, model id, status/discovery outcome, and error class without credentials.",
+    ],
+    approval: {
+      expectation: "no-confirmation-for-safe-reads",
+      guidance: "No extra confirmation is required for status/model discovery or user-requested model calls.",
+    },
+    promptGuidelines: [
+      "Never expose CCS credentials in prompts, tool details, or notifications.",
     ],
   },
 

@@ -51,8 +51,11 @@ import {
   withMcpClient,
 } from "../workspace-connectors/index.js";
 
-const QUOTIO_TIMEOUT_MS = 5000;
+const PROXY_TIMEOUT_MS = 5000;
+const LITELLM_PROVIDER_ROUTE = routeProviderConnector("litellm");
 const QUOTIO_PROVIDER_ROUTE = routeProviderConnector("quotio");
+const CCS_PROVIDER_ROUTE = routeProviderConnector("ccs");
+const PROXY_PROVIDER_ROUTES = [LITELLM_PROVIDER_ROUTE, QUOTIO_PROVIDER_ROUTE, CCS_PROVIDER_ROUTE] as const;
 const LINEAR_CONNECTOR_ROUTE = routeWorkspaceMcpConnector("linear");
 const NOTION_CONNECTOR_ROUTE = routeWorkspaceMcpConnector("notion");
 const GITHUB_CLI_ROUTE = routeGitHubCliConnector();
@@ -68,7 +71,9 @@ type OmpCommandTarget =
   | "connector-tools"
   | "profile-verify"
   | "profile-apply"
+  | "litellm-status"
   | "quotio-status"
+  | "ccs-status"
   | "github-auth"
   | "gitlab-auth";
 
@@ -112,8 +117,12 @@ const OMP_COMMAND_ALIASES: Readonly<Record<string, OmpCommandTarget>> = {
   verify: "profile-verify",
   "profile-apply": "profile-apply",
   apply: "profile-apply",
+  litellm: "litellm-status",
+  "litellm-status": "litellm-status",
   quotio: "quotio-status",
   "quotio-status": "quotio-status",
+  ccs: "ccs-status",
+  "ccs-status": "ccs-status",
   github: "github-auth",
   "github-auth": "github-auth",
   "gh-auth": "github-auth",
@@ -251,7 +260,9 @@ function formatRuntimeSafetySummary(): string {
     "tool.workspace_mcp_call_tool",
     "tool.github_gh_cli",
     "tool.gitlab_glab_cli",
+    "provider.litellm",
     "provider.quotio",
+    "provider.ccs",
   ] as const;
   return policyIds
     .map((id) => {
@@ -265,60 +276,62 @@ function cliAuthLineFromReadiness(label: string, provenance: string, ready: bool
   return line(ready ? "ok" : "warn", `${label} CLI auth`, provenance);
 }
 
-async function checkQuotioConnectivity(): Promise<string> {
-  if (process.env[QUOTIO_PROVIDER_ROUTE.toggleEnvVar] !== "true") {
-    return line("info", "Quotio connectivity", `skipped because ${QUOTIO_PROVIDER_ROUTE.toggleEnvVar} is not true`);
+async function checkProxyConnectivity(route: (typeof PROXY_PROVIDER_ROUTES)[number]): Promise<string> {
+  if (process.env[route.toggleEnvVar] !== "true") {
+    return line("info", `${route.label} connectivity`, `skipped because ${route.toggleEnvVar} is not true`);
   }
 
-  const missing = QUOTIO_PROVIDER_ROUTE.requiredEnvVars.filter((key) => !isSet(key));
+  const missing = route.requiredEnvVars.filter((key) => !isSet(key));
   if (missing.length > 0) {
-    return line("warn", "Quotio connectivity", `skipped because missing ${missing.join(", ")}`);
+    return line("warn", `${route.label} connectivity`, `skipped because missing ${missing.join(", ")}`);
   }
 
   try {
+    const [baseUrlEnvVar, apiKeyEnvVar] = route.requiredEnvVars;
     const discovery = await discoverOpenAICompatibleModels({
-      baseUrl: getEnvValue("QUOTIO_BASE_URL"),
-      apiKey: getEnvValue("QUOTIO_API_KEY"),
-      timeoutMs: QUOTIO_TIMEOUT_MS,
+      baseUrl: getEnvValue(baseUrlEnvVar),
+      apiKey: getEnvValue(apiKeyEnvVar),
+      timeoutMs: PROXY_TIMEOUT_MS,
     });
 
     return line(
       "ok",
-      "Quotio connectivity",
+      `${route.label} connectivity`,
       `connected in ${discovery.elapsedMs}ms; models=${discovery.models.length}`,
     );
   } catch (error: unknown) {
     if (error instanceof ProviderAdapterError) {
       if (error.kind === "timeout") {
-        return line("warn", "Quotio connectivity", `timed out after ${error.elapsedMs}ms`);
+        return line("warn", `${route.label} connectivity`, `timed out after ${error.elapsedMs}ms`);
       }
-      const authHint = error.kind === "auth" ? " (check QUOTIO_API_KEY)" : "";
-      return line("warn", "Quotio connectivity", `${error.kind}: ${error.message}${authHint}`);
+      const authHint = error.kind === "auth" ? ` (check ${route.requiredEnvVars[1]})` : "";
+      return line("warn", `${route.label} connectivity`, `${error.kind}: ${error.message}${authHint}`);
     }
     const message = error instanceof Error ? error.message : String(error);
-    return line("warn", "Quotio connectivity", `failed — ${message}`);
+    return line("warn", `${route.label} connectivity`, `failed — ${message}`);
   }
 }
 
-async function buildQuotioStatusReport(): Promise<string> {
-  const missing = QUOTIO_PROVIDER_ROUTE.requiredEnvVars.filter((key) => !isSet(key));
-  if (missing.length > 0) return `Cannot check Quotio status — missing: ${missing.join(", ")}`;
+async function buildProxyStatusReport(route: (typeof PROXY_PROVIDER_ROUTES)[number]): Promise<string> {
+  const missing = route.requiredEnvVars.filter((key) => !isSet(key));
+  if (missing.length > 0) return `Cannot check ${route.label} status — missing: ${missing.join(", ")}`;
 
   try {
+    const [baseUrlEnvVar, apiKeyEnvVar] = route.requiredEnvVars;
     const discovery = await discoverOpenAICompatibleModels({
-      baseUrl: getEnvValue("QUOTIO_BASE_URL"),
-      apiKey: getEnvValue("QUOTIO_API_KEY"),
-      timeoutMs: QUOTIO_TIMEOUT_MS,
+      baseUrl: getEnvValue(baseUrlEnvVar),
+      apiKey: getEnvValue(apiKeyEnvVar),
+      timeoutMs: PROXY_TIMEOUT_MS,
     });
     const modelList = discovery.models.map((model) => `  - ${model.id}`).join("\n");
-    return `Quotio: Connected (${discovery.elapsedMs}ms), ${discovery.models.length} models:\n${modelList}`;
+    return `${route.label}: Connected (${discovery.elapsedMs}ms), ${discovery.models.length} models:\n${modelList}`;
   } catch (error: unknown) {
     if (error instanceof ProviderAdapterError && error.kind === "timeout") {
-      return `Quotio: Timed out after ${error.elapsedMs}ms. Check QUOTIO_BASE_URL.`;
+      return `${route.label}: Timed out after ${error.elapsedMs}ms. Check ${route.requiredEnvVars[0]}.`;
     }
-    if (error instanceof ProviderAdapterError && error.kind === "auth") return "Quotio: Auth failed. Check QUOTIO_API_KEY.";
+    if (error instanceof ProviderAdapterError && error.kind === "auth") return `${route.label}: Auth failed. Check ${route.requiredEnvVars[1]}.`;
     const message = error instanceof Error ? error.message : String(error);
-    return `Quotio: Connection failed — ${message}`;
+    return `${route.label}: Connection failed — ${message}`;
   }
 }
 
@@ -351,8 +364,8 @@ export function buildOmpNamespaceReport(): string {
     "Use `omp: <skill-or-command> [args]` as the user-facing entry point.",
     "Skills expand to Pi skill commands, e.g. `omp: ce-plan docs/foo.md` → `/skill:ce-plan docs/foo.md`.",
     `Convenience skill aliases: ${skillAliases}`,
-    "Command aliases: omp: doctor, omp: palette, omp: setup full, omp: status, omp: quotio-status, omp: connector-login linear|notion, omp: connector-tools linear|notion, omp: github-auth, omp: gitlab-auth, omp: profile-verify, omp: profile-apply.",
-    "Toggle-controlled aliases still respect ENABLE_QUOTIO and ENABLE_WORKSPACE_CONNECTORS.",
+    "Command aliases: omp: doctor, omp: palette, omp: setup full, omp: status, omp: litellm-status, omp: quotio-status, omp: ccs-status, omp: connector-login linear|notion, omp: connector-tools linear|notion, omp: github-auth, omp: gitlab-auth, omp: profile-verify, omp: profile-apply.",
+    "Toggle-controlled aliases still respect ENABLE_LITELLM, ENABLE_QUOTIO, ENABLE_CCS, and ENABLE_WORKSPACE_CONNECTORS.",
     "Source package names remain visible in doctor/profile output for debugging; users do not need to remember them during normal use.",
   ].join("\n");
 }
@@ -393,13 +406,15 @@ async function handleOmpCommand(target: OmpCommandTarget, args: string, ctx: Ext
     await ctx.ui.notify("OMP profile apply: run `npm run profile:apply -- --profile full` from the oh-my-harness repo. It is dry-run only by default.", "info");
     return;
   }
-  if (target === "quotio-status") {
-    if (process.env[QUOTIO_PROVIDER_ROUTE.toggleEnvVar] !== "true") {
-      await ctx.ui.notify(`OMP Quotio alias disabled — set ${QUOTIO_PROVIDER_ROUTE.toggleEnvVar}=true in the CWD .env and reload.`, "error");
+  if (["litellm-status", "quotio-status", "ccs-status"].includes(target)) {
+    const providerId = target.replace(/-status$/, "") as "litellm" | "quotio" | "ccs";
+    const route = routeProviderConnector(providerId);
+    if (process.env[route.toggleEnvVar] !== "true") {
+      await ctx.ui.notify(`OMP ${route.label} alias disabled — set ${route.toggleEnvVar}=true in the CWD .env and reload.`, "error");
       return;
     }
-    const report = await buildQuotioStatusReport();
-    await ctx.ui.notify(report, report.startsWith("Quotio: Connected") ? "info" : "error");
+    const report = await buildProxyStatusReport(route);
+    await ctx.ui.notify(report, report.startsWith(`${route.label}: Connected`) ? "info" : "error");
     return;
   }
   if (target === "github-auth") {
@@ -465,7 +480,10 @@ async function handleOmpInput(event: InputEvent, ctx: ExtensionContext): Promise
 async function buildDoctorReport(): Promise<string> {
   const cwd = process.cwd();
   const envPath = resolve(cwd, ".env");
-  const quotioEnvSummary = QUOTIO_PROVIDER_ROUTE.requiredEnvVars.map(envPresenceLine).join(", ");
+  const proxyEnvSummaries = PROXY_PROVIDER_ROUTES.map((route) => ({
+    route,
+    summary: route.requiredEnvVars.map(envPresenceLine).join(", "),
+  }));
   const localOnlyPaths = [
     resolve(cwd, ".env"),
     resolve(cwd, ".mcp-auth"),
@@ -477,10 +495,10 @@ async function buildDoctorReport(): Promise<string> {
     getConnectorSetupPath(),
   ];
 
-  const [quotioConnectivity, readinessResult] = await Promise.all([
-    checkQuotioConnectivity(),
+  const [proxyConnectivity, readinessResult] = await Promise.all([
+    Promise.all(PROXY_PROVIDER_ROUTES.map(checkProxyConnectivity)),
     evaluateConnectorReadiness().catch((error: unknown): Error => error instanceof Error ? error : new Error(String(error))),
-  ]) as [string, ConnectorReadinessReport | Error];
+  ]) as [string[], ConnectorReadinessReport | Error];
   const connectorReadiness = readinessResult instanceof Error
     ? line("warn", "Connector readiness", readinessResult.message)
     : formatConnectorReadinessReport(readinessResult);
@@ -502,8 +520,10 @@ async function buildDoctorReport(): Promise<string> {
     line("info", "Connector backend catalog", formatConnectorBackendSummary(connectorBackendCatalog)),
     line("info", "Runtime safety ledger", formatRuntimeSafetySummary()),
     line("info", "OMP namespace", "use `omp: <skill-or-command> [args]`; run `omp: help` for aliases"),
-    line(QUOTIO_PROVIDER_ROUTE.requiredEnvVars.every((key) => isSet(key)) ? "ok" : "warn", "Quotio env", quotioEnvSummary),
-    quotioConnectivity,
+    ...proxyEnvSummaries.flatMap(({ route, summary }, index) => [
+      line(route.requiredEnvVars.every((key) => isSet(key)) ? "ok" : "warn", `${route.label} env`, summary),
+      proxyConnectivity[index],
+    ]),
     ghAuth,
     glabAuth,
     line("info", "Connector readiness", connectorReadiness.replace(/\n/g, " | ")),
@@ -528,7 +548,7 @@ function buildPaletteReport(): string {
     "- /oh-my-pi-doctor and /oh-my-pi — legacy-compatible aliases for the commands above.",
     "- omh setup — resolve every selected agent's declared tool profile and preview the deduplicated automatic install; add --apply only after reviewing the plan.",
     "- omh doctor — inspect managed agent runtimes and shared external CLI availability with next actions.",
-    "- /quotio-status — check Quotio models when ENABLE_QUOTIO=true and Quotio env is configured.",
+    "- /litellm-status, /quotio-status, /ccs-status — check configured proxy models without printing credentials.",
     "- /connector-login linear|notion — start direct browser OAuth when ENABLE_WORKSPACE_CONNECTORS=true; OAuth tokens are stored locally outside the repo.",
     "- /connector-status [service] — show connector setup readiness plus OAuth/access-key status.",
     "- /connector-logout <service|tenant:personal|tenant:company|capability:git> [--confirm] — preview first; clears only Pi-managed OAuth state when confirmed.",
@@ -540,8 +560,10 @@ function buildPaletteReport(): string {
     `- Access-key fallback — set ${LINEAR_CONNECTOR_ROUTE.accessKeyEnvVars.join("/")} for Linear or ${NOTION_CONNECTOR_ROUTE.accessKeyEnvVars.join("/")} for Notion in the CWD .env when browser OAuth is unavailable.`,
     `- Legacy external OAuth debug only — ${LINEAR_CONNECTOR_ROUTE.legacyMcpRemoteLoginShellCommand} or ${NOTION_CONNECTOR_ROUTE.legacyMcpRemoteLoginShellCommand}.`,
     "- omh profiles verify — verify commit-safe profile pack and deterministic lock receipt.",
-    "- Profile choices: default (base), workspace (Linear/Notion/GitHub), proxy-provider (Quotio), full (workspace + Quotio).",
-    "- omh profiles apply --profile proxy-provider — print the optional Quotio provider setup plan.",
+    "- Profile choices: default (base), workspace (Linear/Notion/GitHub), proxy-provider (LiteLLM/Quotio/CCS), full (workspace + proxies).",
+    "- omh proxies install — preview reviewed Quotio and CCS installation; add --apply after review.",
+    "- omh proxies configure — detect issued endpoint/key pairs and preview CWD .env activation.",
+    "- omh profiles apply --profile proxy-provider — print the optional proxy provider setup plan.",
     "- omh profiles apply --profile full — print a non-destructive full setup plan.",
     "",
     "Tip: CWD .env is loaded by env-loader before other oh-my-harness extensions. /connector-setup is available even before ENABLE_WORKSPACE_CONNECTORS=true.",

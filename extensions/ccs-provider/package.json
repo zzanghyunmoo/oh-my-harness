@@ -1,0 +1,7 @@
+{
+  "name": "@oh-my-harness/ccs-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in CCS Anthropic-compatible proxy provider for Pi"
+}

@@ -13,6 +13,10 @@
     "extensions/workspace-connectors/**/*.ts",
     "extensions/workspace-cli-tools/**/*.ts",
     "extensions/setup-doctor/**/*.ts",
+    "extensions/provider-adapter-kit/**/*.ts",
+    "extensions/litellm-provider/**/*.ts",
+    "extensions/quotio-provider/**/*.ts",
+    "extensions/ccs-provider/**/*.ts",
     "plugins/oh-my-harness/mcp/cli-tools-core.mjs"
   ]
 }
