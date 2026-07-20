@@ -81,11 +81,14 @@ Use `omh` for human-facing installation and machine diagnostics. A separate
 skill is unnecessary because this executable owns argument parsing, preview,
 status, and help while the role skills own agent tool usage.
 
-- `omh setup` previews combined agent/plugin and external CLI installation.
+- `omh setup` resolves declared runtime profiles and previews their combined,
+  deduplicated agent/plugin and external CLI installation.
 - `omh agents install --only codex,pi` selects agent runtimes and plugins.
 - `omh tools install --only github,coderabbit` selects machine-shared CLIs.
 - `omh status` and `omh doctor` are read-only.
 
 Do not add `--apply` unless the user explicitly asked to perform the displayed
-installation. Never describe an external CLI as installed per agent: those
-executables are installed once and shared through the machine `PATH`.
+installation. Never ask the user to select each runtime's role tools manually.
+Runtime profile assignments own that selection. External executables are
+installed once and shared through the machine `PATH`, while adapters expose
+them per profile.

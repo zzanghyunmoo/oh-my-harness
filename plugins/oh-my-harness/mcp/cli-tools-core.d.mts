@@ -33,8 +33,22 @@ export interface RuntimeToolProfile {
   readonly wiki: "confluence" | "notion";
   readonly git: "github" | "gitlab";
 }
+export interface RuntimeToolProfileAssignment {
+  readonly runtimeId: "pi" | "codex" | "claude-code" | "opencode";
+  readonly profileId: string;
+  readonly bindings: RuntimeToolProfile;
+}
+export interface RuntimeToolProfileManifest {
+  readonly $schema: "./runtime-tools.schema.json";
+  readonly schemaVersion: "1.0.0";
+  readonly profiles: readonly { readonly id: string; readonly bindings: RuntimeToolProfile }[];
+  readonly runtimes: readonly { readonly runtimeId: RuntimeToolProfileAssignment["runtimeId"]; readonly profileId: string }[];
+}
+export const RUNTIME_TOOL_PROFILE_MANIFEST: RuntimeToolProfileManifest;
 export const RUNTIME_TOOL_PROFILES: Readonly<Record<"pi" | "codex" | "claude-code" | "opencode", RuntimeToolProfile>>;
+export function validateRuntimeToolProfileManifest(value: unknown): RuntimeToolProfileManifest;
 export function getRuntimeToolProfile(runtimeId: string): RuntimeToolProfile;
+export function getRuntimeToolProfileAssignment(runtimeId: string): RuntimeToolProfileAssignment;
 export function cliToolDefinitionsForRuntime(runtimeId: string): readonly CliToolDefinition[];
 export function cliToolServiceIdsForRuntime(runtimeId: string): readonly string[];
 export function cliToolServiceIdsForRuntimes(runtimeIds: readonly string[]): readonly string[];

@@ -6,13 +6,14 @@ import {
   cliToolServiceIdsForRuntime,
   executeCliTool,
   formatCliToolResult,
-  getRuntimeToolProfile,
+  getRuntimeToolProfileAssignment,
   listCliToolStatus,
   redactCliOutput,
 } from "./cli-tools-core.mjs";
 
 const RUNTIME_ID = process.env.OH_MY_HARNESS_RUNTIME;
-const RUNTIME_PROFILE = getRuntimeToolProfile(RUNTIME_ID);
+const RUNTIME_ASSIGNMENT = getRuntimeToolProfileAssignment(RUNTIME_ID);
+const RUNTIME_PROFILE = RUNTIME_ASSIGNMENT.bindings;
 const TOOL_DEFINITIONS = cliToolDefinitionsForRuntime(RUNTIME_ID);
 const SERVICE_IDS = cliToolServiceIdsForRuntime(RUNTIME_ID);
 const TOOL_NAMES = new Set(TOOL_DEFINITIONS.map(({ name }) => name));
@@ -109,7 +110,7 @@ async function handle(message) {
       protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
       capabilities: { tools: { listChanged: false } },
       serverInfo: SERVER_INFO,
-      instructions: `Runtime profile ${RUNTIME_ID}: issue-tracker=${RUNTIME_PROFILE["issue-tracker"]}, wiki=${RUNTIME_PROFILE.wiki}, git=${RUNTIME_PROFILE.git}. Use these role-specific CLI tools only from an absolute coding workspace. Reads are allowlisted. Set confirmedWrite=true only after explicit user intent for the exact state change. Credentials must be configured in each CLI outside these tools.`,
+      instructions: `Runtime ${RUNTIME_ID} uses tool profile ${RUNTIME_ASSIGNMENT.profileId}: issue-tracker=${RUNTIME_PROFILE["issue-tracker"]}, wiki=${RUNTIME_PROFILE.wiki}, git=${RUNTIME_PROFILE.git}. Use these role-specific CLI tools only from an absolute coding workspace. Reads are allowlisted. Set confirmedWrite=true only after explicit user intent for the exact state change. Credentials must be configured in each CLI outside these tools.`,
     });
     return;
   }

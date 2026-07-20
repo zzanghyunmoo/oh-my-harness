@@ -19,7 +19,7 @@ import {
 } from "../scripts/tools/manage.mjs";
 import {
   cliToolServiceIdsForRuntimes,
-  getRuntimeToolProfile,
+  getRuntimeToolProfileAssignment,
 } from "../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
@@ -192,11 +192,14 @@ function formatToolRow(tool) {
 }
 
 function runtimeToolProfiles(runtimeIds) {
-  return runtimeIds.map((runtimeId) => ({ runtimeId, ...getRuntimeToolProfile(runtimeId) }));
+  return runtimeIds.map((runtimeId) => {
+    const assignment = getRuntimeToolProfileAssignment(runtimeId);
+    return { runtimeId, profileId: assignment.profileId, ...assignment.bindings };
+  });
 }
 
 function formatToolProfile(profile) {
-  return `- ${profile.runtimeId}: issue-tracker=${profile["issue-tracker"]}, wiki=${profile.wiki}, git=${profile.git}`;
+  return `- ${profile.runtimeId} [${profile.profileId}]: issue-tracker=${profile["issue-tracker"]}, wiki=${profile.wiki}, git=${profile.git}`;
 }
 
 export function formatOmhResult(result) {
@@ -217,7 +220,7 @@ export function formatOmhResult(result) {
   }
   if (result.toolProfiles) {
     if (result.agents) lines.push("");
-    lines.push("Runtime role bindings (only these role tools are exposed):");
+    lines.push("Runtime tool profiles (resolved automatically; only these role tools are exposed):");
     lines.push(...result.toolProfiles.map(formatToolProfile));
   }
   if (result.tools) {
@@ -242,7 +245,7 @@ function helpText(topic) {
     "Usage:",
     "  omh setup [--agents ids] [--tools ids] [--root path] [--apply] [--json]",
     "",
-    "Previews or applies agent runtime/plugin installation and the selected runtimes' shared CLI union.",
+    "Resolves declarative runtime tool profiles and applies their shared CLI union automatically.",
     "Explicit --tools overrides installation selection but does not change runtime role bindings.",
   ].join("\n") + "\n";
   if (topic === "agents") return [
@@ -315,7 +318,7 @@ export async function runOmh(argv, { env = process.env, dependencies = {} } = {}
   const needsTools = options.command !== "agents";
   const toolProfiles = needsAgents ? runtimeToolProfiles(options.agents) : undefined;
   const agentPlan = needsAgents ? await deps.buildAgentPlan({ installRoot, runtimeIds: options.agents }) : undefined;
-  const toolPlan = needsTools ? deps.buildTools({ env, toolIds: options.tools }) : undefined;
+  const toolPlan = needsTools ? deps.buildTools({ env, installRoot, toolIds: options.tools }) : undefined;
   if (options.command === "setup") {
     if (options.apply) assertToolPreflight(toolPlan);
     const agents = options.apply ? await deps.applyAgentPlan(agentPlan, { register: options.register }) : publicAgentPlan(agentPlan);
