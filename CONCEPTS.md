@@ -64,7 +64,13 @@ This keeps minimal setup from advertising excluded issue-tracker, wiki, or git t
 
 A runtime-neutral set of external CLI affordances named by capability and backend, such as `issue_tracker_jira_cli`, `wiki_notion_cli`, or `code_review_gitlab_cli`.
 
-The same policy core is exposed through a plugin MCP server in Codex and Claude Code, native custom tools in OpenCode, and an opt-in extension in Pi. Each runtime must preserve the same 13 role/backend mappings, argument allowlists, write-confirmation boundary, trusted executable resolution, timeout, and output redaction.
+The shared catalog preserves all 13 reviewed role/backend mappings and one execution policy. Runtime adapters select from that catalog while retaining the same argument allowlists, write-confirmation boundary, trusted executable resolution, timeout, and output redaction.
+
+### Runtime Tool Profile
+
+The exact issue-tracker, wiki, and git backend bindings exposed by one coding-agent runtime.
+
+Pi and Codex bind Linear, Notion, and GitHub. Claude Code and OpenCode bind Jira, Confluence, and GitLab. Adapters expose exactly one catalog tool per role and reject direct calls to hidden backends. External CLI executables remain machine-shared, so installing an extra executable does not mutate a runtime's profile.
 
 ### CLI-owned Authentication
 
@@ -128,4 +134,4 @@ For Pi, migration replaces only known mutable or unpinned sources with exact loc
 
 The human-facing `omh` executable that unifies runtime/plugin installation, machine-shared external CLI installation, status, diagnostics, and Pi profile planning without merging their ownership boundaries.
 
-`omh setup` composes agent and tool plans for onboarding, while `omh agents` and `omh tools` retain precise control. Every install command is preview-only without `--apply`. Agent selection controls which runtime receives the harness plugin; external CLI selection controls executables installed once on the machine and shared through `PATH`.
+`omh setup` composes agent and tool plans for onboarding, while `omh agents` and `omh tools` retain precise control. Every install command is preview-only without `--apply`. Agent selection controls which runtime receives the harness plugin and derives the default union of required CLI executables. Explicit CLI selection controls only executables installed once on the machine and shared through `PATH`; it does not change Runtime Tool Profiles.

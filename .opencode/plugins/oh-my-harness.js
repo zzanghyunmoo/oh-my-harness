@@ -2,13 +2,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import {
-  CLI_TOOL_DEFINITIONS,
+  cliToolDefinitionsForRuntime,
   executeCliTool,
   formatCliToolResult,
 } from "../../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url));
 const skillsDir = path.resolve(pluginDir, "../../plugins/oh-my-harness/skills");
+const TOOL_DEFINITIONS = cliToolDefinitionsForRuntime("opencode");
 
 function cliTool(definition) {
   return tool({
@@ -50,7 +51,7 @@ export const OhMyHarnessPlugin = async () => ({
     config.skills.paths = config.skills.paths || [];
     if (!config.skills.paths.includes(skillsDir)) config.skills.paths.push(skillsDir);
   },
-  tool: Object.fromEntries(CLI_TOOL_DEFINITIONS.map((definition) => [definition.name, cliTool(definition)])),
+  tool: Object.fromEntries(TOOL_DEFINITIONS.map((definition) => [definition.name, cliTool(definition)])),
 });
 
 export default OhMyHarnessPlugin;

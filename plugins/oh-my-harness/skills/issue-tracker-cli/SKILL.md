@@ -5,7 +5,9 @@ description: "Use installed role-scoped CLI tools to inspect or update Jira, Lin
 
 # Issue Tracker CLI
 
-Choose the backend the user or repository already uses:
+Use the one backend exposed by the current runtime profile. Pi/Codex expose
+Linear; Claude Code/OpenCode expose Jira. Do not try to call a hidden catalog
+tool or silently switch backend.
 
 | Backend | Tool | CLI |
 | --- | --- | --- |
@@ -24,6 +26,5 @@ transition, assignment, comment, close, reopen, or delete action. Authenticate
 the CLI outside the tool and never put a token, password, cookie, or auth header
 in tool arguments.
 
-If a backend is unavailable, use `workspace_cli_status` (or Pi's
-`/workspace-cli-status`) and follow its install guidance. Do not silently switch
-to another issue tracker.
+If the selected backend executable is unavailable, use `workspace_cli_status`
+(or Pi's `/workspace-cli-status`) and follow its install guidance.
