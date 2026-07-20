@@ -244,7 +244,7 @@ function trustedGitCandidates() {
   return ["/usr/bin/git", "/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
 }
 
-function resolveGitExecutable() {
+export function resolveGitExecutable() {
   if (cachedGitExecutable) return cachedGitExecutable;
   for (const candidate of trustedGitCandidates()) {
     try {
@@ -267,7 +267,7 @@ function resolveGitExecutable() {
   return fail("trusted Git executable was not found; set OH_MY_HARNESS_GIT_EXECUTABLE to an absolute path");
 }
 
-function isolatedGitEnvironment(gitExecutable) {
+export function isolatedGitEnvironment(gitExecutable) {
   const env = {
     PATH: dirname(gitExecutable),
     HOME: process.platform === "win32" ? process.env.USERPROFILE ?? "" : "/dev/null",

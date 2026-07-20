@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki CLI"
+  short_description: "Find and maintain project wiki documentation"
+  default_prompt: "Use $wiki-cli to find the project documentation relevant to this task."

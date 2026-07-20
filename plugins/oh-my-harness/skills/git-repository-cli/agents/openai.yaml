@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Repository CLI"
+  short_description: "Manage GitHub and GitLab repositories safely"
+  default_prompt: "Use $git-repository-cli to inspect the repository hosting context."

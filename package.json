@@ -1,13 +1,22 @@
 {
   "name": "oh-my-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Cross-runtime coding-agent harness with Pi compatibility surfaces.",
+  "description": "Cross-runtime coding-agent harness with a preview-first management CLI.",
   "keywords": [
     "agent-harness",
+    "cli",
+    "codex-plugin",
+    "omh",
+    "opencode-plugin",
     "pi-package"
   ],
   "type": "module",
+  "main": ".opencode/plugins/oh-my-harness.js",
+  "bin": {
+    "oh-my-harness": "./omh",
+    "omh": "./omh"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
@@ -15,22 +24,27 @@
     "profile:verify": "node scripts/profile-pack.mjs verify",
     "profile:lock": "node scripts/profile-pack.mjs lock --write",
     "profile:apply": "node scripts/profile-pack.mjs apply",
+    "omh": "node bin/omh.mjs",
     "test:harness": "node --test tests/harness/*.test.mjs",
     "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
+    "harness:install": "node scripts/harness/install.mjs",
+    "tools:install": "node scripts/tools/manage.mjs",
+    "tools:doctor": "node scripts/tools/manage.mjs doctor",
     "harness:upstream:generate": "node scripts/harness/upstream.mjs generate",
     "harness:upstream:verify": "node scripts/harness/upstream.mjs verify",
-    "test:workspace-connectors": "node -e \"require('node:fs').rmSync('.tmp/workspace-connectors-test',{recursive:true,force:true})\" && tsc -p tsconfig.workspace-connectors-tests.json && node --test .tmp/workspace-connectors-test/extensions/workspace-connectors/*.test.js .tmp/workspace-connectors-test/extensions/setup-doctor/*.test.js"
+    "test:workspace-connectors": "node -e \"require('node:fs').rmSync('.tmp/workspace-connectors-test',{recursive:true,force:true})\" && tsc -p tsconfig.workspace-connectors-tests.json && node --test .tmp/workspace-connectors-test/extensions/workspace-connectors/*.test.js .tmp/workspace-connectors-test/extensions/workspace-cli-tools/*.test.js .tmp/workspace-connectors-test/extensions/setup-doctor/*.test.js"
   },
   "dependencies": {
+    "@opencode-ai/plugin": "1.18.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "typebox": "^1.1.38"
+    "tar-stream": "3.2.0",
+    "typebox": "^1.1.38",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",
     "@types/node": "^25.8.0",
-    "tar-stream": "3.2.0",
-    "typescript": "^6.0.3",
-    "yauzl": "3.4.0"
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -40,10 +54,11 @@
       "./extensions/env-loader",
       "./extensions/quotio-provider",
       "./extensions/workspace-connectors",
+      "./extensions/workspace-cli-tools",
       "./extensions/setup-doctor"
     ],
     "skills": [
-      "./skills"
+      "./plugins/oh-my-harness/skills"
     ],
     "prompts": [
       "./prompts"

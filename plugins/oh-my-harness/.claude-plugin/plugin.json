@@ -1,0 +1,19 @@
+{
+  "name": "oh-my-harness",
+  "version": "0.2.0",
+  "description": "Cross-runtime engineering harness with role-scoped workspace CLI tools",
+  "author": {
+    "name": "zzanghyunmoo"
+  },
+  "homepage": "https://github.com/zzanghyunmoo/oh-my-harness",
+  "repository": "https://github.com/zzanghyunmoo/oh-my-harness",
+  "license": "MIT",
+  "keywords": [
+    "agent-harness",
+    "issue-tracker",
+    "wiki",
+    "git",
+    "code-review"
+  ],
+  "mcpServers": "./.mcp.json"
+}
