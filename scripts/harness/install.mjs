@@ -40,6 +40,7 @@ import {
   isolatedGitEnvironment,
   resolveGitExecutable,
 } from "./upstream.mjs";
+import { resolveTrustedCommand, resolveTrustedFile } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode", "pi"]);
@@ -55,6 +56,10 @@ const PACKAGE_LIMITS = Object.freeze({ entries: 8192, bytes: 256 * 1024 * 1024 }
 
 function fail(message) {
   throw new Error(message);
+}
+
+function escapesRoot(rel) {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }
 
 function errorText(error) {
@@ -115,12 +120,30 @@ function assertSafeRoot(value, repoRoot = REPO_ROOT) {
   const root = resolve(value);
   const filesystemRoot = parse(root).root;
   const userHome = resolve(homedir());
-  if (root === filesystemRoot || root === userHome || root === resolve(repoRoot)) fail("install root is too broad");
+  if (root === filesystemRoot || root === userHome) fail("install root is too broad");
+  if (isPathWithin(repoRoot, root)) fail("install root must be outside the source repository");
   return root;
 }
 
+function prospectiveRealPath(value) {
+  let cursor = resolve(value);
+  const missing = [];
+  while (!existsSync(cursor)) {
+    missing.unshift(basename(cursor));
+    const parent = dirname(cursor);
+    if (parent === cursor) fail("install root has no existing directory ancestor");
+    cursor = parent;
+  }
+  const canonicalAncestor = realpathSync(cursor);
+  if (!lstatSync(canonicalAncestor).isDirectory()) fail("install root ancestor must be a directory");
+  return resolve(canonicalAncestor, ...missing);
+}
+
 function ensureInstallRoot(value, repoRoot = REPO_ROOT) {
-  const root = assertSafeRoot(value, repoRoot);
+  const requested = assertSafeRoot(value, repoRoot);
+  if (existsSync(requested) && lstatSync(requested).isSymbolicLink()) fail("install root must be a real directory");
+  const root = prospectiveRealPath(requested);
+  assertSafeRoot(root, realpathSync(repoRoot));
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const stat = lstatSync(root);
   if (stat.isSymbolicLink() || !stat.isDirectory()) fail("install root must be a real directory");
@@ -148,7 +171,7 @@ function safeRelativePath(value, { stripPackagePrefix = false } = {}) {
 function containedPath(root, relativePath) {
   const target = resolve(root, relativePath);
   const rel = relative(resolve(root), target);
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) fail("output path escapes its root");
+  if (!rel || escapesRoot(rel)) fail("output path escapes its root");
   return target;
 }
 
@@ -196,7 +219,7 @@ function walkFiles(root, current = root, entries = []) {
       if (isAbsolute(link)) fail(`payload contains an absolute dependency link: ${rel}`);
       const target = resolve(dirname(path), link);
       const targetRel = relative(root, target);
-      if (targetRel.startsWith("..") || isAbsolute(targetRel) || !existsSync(target) || !lstatSync(target).isFile()) {
+      if (escapesRoot(targetRel) || !existsSync(target) || !lstatSync(target).isFile()) {
         fail(`payload dependency link escapes or misses its target: ${rel}`);
       }
       entries.push({ path: rel, symlink: link });
@@ -223,12 +246,14 @@ function validateInstalledPayload(root, expected) {
   return receipt;
 }
 
-function npmInvocation(args, env = process.env) {
-  const npmExecPath = env.npm_execpath;
-  if (npmExecPath && isAbsolute(npmExecPath) && existsSync(npmExecPath)) {
+function npmInvocation(args, env = process.env, workspace = REPO_ROOT) {
+  const npmExecPath = resolveTrustedFile(env.npm_execpath, { workspace });
+  if (npmExecPath) {
     return { command: process.execPath, args: [npmExecPath, ...args] };
   }
-  return { command: process.platform === "win32" ? "npm.cmd" : "npm", args };
+  const command = resolveTrustedCommand(["npm"], { env, workspace });
+  if (!command) fail("npm is not available on a trusted PATH outside the source repository");
+  return { command, args };
 }
 
 export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, runner = DEFAULT_RUNNER } = {}) {
@@ -238,7 +263,7 @@ export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, 
   try {
     const packRoot = join(stage, "pack");
     mkdirSync(packRoot, { mode: 0o700 });
-    const invocation = npmInvocation(["pack", "--json", "--ignore-scripts", "--pack-destination", packRoot]);
+    const invocation = npmInvocation(["pack", "--json", "--ignore-scripts", "--pack-destination", packRoot], process.env, repoRoot);
     const output = runner.run(invocation.command, invocation.args, { cwd: repoRoot });
     let packed;
     try {
@@ -260,7 +285,7 @@ export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, 
     await extractNpmPackage(archivePath, payloadRoot);
     const extracted = readJson(join(payloadRoot, "package.json"), "packed oh-my-harness manifest");
     if (extracted.name !== HARNESS_PACKAGE.name || extracted.version !== HARNESS_PACKAGE.version) fail("packed oh-my-harness identity drift");
-    const installInvocation = npmInvocation(["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"]);
+    const installInvocation = npmInvocation(["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"], process.env, repoRoot);
     runner.run(installInvocation.command, installInvocation.args, { cwd: payloadRoot });
     const identity = `${HARNESS_PACKAGE.name}@${HARNESS_PACKAGE.version}+${archiveSha256}`;
     const receipt = {
@@ -462,7 +487,7 @@ function parseMarketplaceRows(output) {
 
 function isPathWithin(root, candidate) {
   const rel = relative(resolve(root), resolve(candidate));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || !escapesRoot(rel);
 }
 
 function codexPluginIsInstalled(output, selector) {

@@ -10,6 +10,7 @@ import {
   buildInstallPlan,
   parseInstallArguments,
   registerRuntimePackages,
+  resolveInstallRoot,
 } from "../../scripts/harness/install.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -26,6 +27,17 @@ test("installer preview closes macOS arm64 to the four exact runtime versions", 
   assert.equal(plan.compoundEngineering.version, "3.19.0");
   assert.equal(plan.compoundEngineering.commit, "1756c0b9f3cf94493f287ea29ae766ad668fb7cf");
   assert.equal(existsSync(root), false);
+});
+
+test("installer refuses to place managed payloads inside the source repository", () => {
+  assert.throws(
+    () => resolveInstallRoot(join(REPO_ROOT, ".managed-payloads")),
+    /outside the source repository/i,
+  );
+  assert.throws(
+    () => resolveInstallRoot(join(REPO_ROOT, "..managed-payloads")),
+    /outside the source repository/i,
+  );
 });
 
 test("Claude registration installs exact local marketplaces and plugins idempotently", () => {

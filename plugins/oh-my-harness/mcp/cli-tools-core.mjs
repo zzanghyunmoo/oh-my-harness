@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, parse, resolve, sep } from "node:path";
+import { statSync } from "node:fs";
+import { isAbsolute, parse, resolve } from "node:path";
+
+import { resolveTrustedCommand } from "./trusted-command.mjs";
 
 const MAX_ARGS = 64;
 const MAX_ARG_CHARS = 4_096;
@@ -280,36 +282,11 @@ export function classifyCliInvocation(toolName, args) {
   return classifyCodeReview(definition.service, args);
 }
 
-function inside(parent, child) {
-  const rel = resolve(child).slice(resolve(parent).length);
-  return resolve(child) === resolve(parent) || rel.startsWith(sep);
-}
-
-function executable(path) {
-  try {
-    const stat = statSync(path);
-    return stat.isFile() && (process.platform === "win32" || (stat.mode & 0o111) !== 0);
-  } catch {
-    return false;
-  }
-}
-
 export function resolveCliExecutable(serviceId, { env = process.env, workspace = process.cwd() } = {}) {
   const service = SERVICE_DEFINITIONS[serviceId];
   if (!service) fail(`unknown CLI service: ${serviceId}`);
-  const canonicalWorkspace = realpathSync(resolve(workspace));
-  for (const rawEntry of String(env.PATH ?? "").split(delimiter)) {
-    if (!rawEntry || rawEntry === ".") continue;
-    const directory = isAbsolute(rawEntry) ? rawEntry : resolve(canonicalWorkspace, rawEntry);
-    if (inside(canonicalWorkspace, directory)) continue;
-    for (const command of service.commands) {
-      const path = resolve(directory, process.platform === "win32" ? `${command}.exe` : command);
-      if (!executable(path)) continue;
-      const realPath = realpathSync(path);
-      if (inside(canonicalWorkspace, realPath)) continue;
-      return realPath;
-    }
-  }
+  const executablePath = resolveTrustedCommand(service.commands, { env, workspace });
+  if (executablePath) return executablePath;
   fail(`${service.label} CLI (${service.commands.join("/")}) is not available on a trusted PATH outside the workspace. Install it with: ${service.install}`);
 }
 

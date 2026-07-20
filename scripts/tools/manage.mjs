@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveTrustedCommand, resolveTrustedFile } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
 
 const TOOL_SPECS = Object.freeze([
   Object.freeze({ id: "jira", label: "Jira", commands: ["jira"], installer: { command: "brew", args: ["install", "ankitpokhrel/tap/jira-cli"] }, setup: "jira init" }),
@@ -21,42 +22,24 @@ function fail(message) {
   throw new Error(message);
 }
 
-function executable(path) {
-  try {
-    const stat = statSync(path);
-    return stat.isFile() && (process.platform === "win32" || (stat.mode & 0o111) !== 0);
-  } catch {
-    return false;
-  }
+function findCommand(commands, env = process.env, workspace = process.cwd()) {
+  return resolveTrustedCommand(commands, { env, workspace });
 }
 
-function findCommand(commands, env = process.env) {
-  for (const rawDirectory of String(env.PATH ?? "").split(delimiter)) {
-    if (!rawDirectory) continue;
-    const directory = isAbsolute(rawDirectory) ? rawDirectory : resolve(rawDirectory);
-    for (const command of commands) {
-      for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
-        const candidate = resolve(directory, `${command}${suffix}`);
-        if (executable(candidate)) return candidate;
-      }
-    }
+function npmInvocation(args, env = process.env, workspace = process.cwd()) {
+  const npmExecPath = resolveTrustedFile(env.npm_execpath, { workspace });
+  if (npmExecPath) {
+    return { command: process.execPath, args: [npmExecPath, ...args], displayCommand: "npm" };
   }
-  return undefined;
+  const command = findCommand(["npm"], env, workspace);
+  return command ? { command, args, displayCommand: "npm" } : undefined;
 }
 
-function npmInvocation(args, env = process.env) {
-  if (env.npm_execpath && isAbsolute(env.npm_execpath) && existsSync(env.npm_execpath)) {
-    return { command: process.execPath, args: [env.npm_execpath, ...args], displayCommand: "npm" };
-  }
-  return { command: process.platform === "win32" ? "npm.cmd" : "npm", args, displayCommand: "npm" };
-}
-
-function managerInvocation(installer, env = process.env) {
+function managerInvocation(installer, env = process.env, workspace = process.cwd()) {
   if (installer.command === "npm") {
-    if (!findCommand([process.platform === "win32" ? "npm.cmd" : "npm"], env) && !env.npm_execpath) return undefined;
-    return npmInvocation(installer.args, env);
+    return npmInvocation(installer.args, env, workspace);
   }
-  const command = findCommand([installer.command], env);
+  const command = findCommand([installer.command], env, workspace);
   return command ? { command, args: installer.args, displayCommand: installer.command } : undefined;
 }
 
@@ -81,12 +64,12 @@ export function parseToolArguments(argv) {
   return options;
 }
 
-export function buildToolInstallPlan({ env = process.env, toolIds = [...TOOL_IDS] } = {}) {
+export function buildToolInstallPlan({ env = process.env, toolIds = [...TOOL_IDS], workspace = process.cwd() } = {}) {
   return toolIds.map((id) => {
     const spec = TOOL_SPECS.find((entry) => entry.id === id);
     if (!spec) fail(`unknown tool id: ${id}`);
-    const installedPath = findCommand(spec.commands, env);
-    const invocation = managerInvocation(spec.installer, env);
+    const installedPath = findCommand(spec.commands, env, workspace);
+    const invocation = managerInvocation(spec.installer, env, workspace);
     return Object.freeze({
       id: spec.id,
       label: spec.label,
@@ -104,7 +87,7 @@ export function buildToolInstallPlan({ env = process.env, toolIds = [...TOOL_IDS
   });
 }
 
-export function applyToolInstallPlan(plan, { env = process.env, run = execFileSync } = {}) {
+export function applyToolInstallPlan(plan, { env = process.env, run = execFileSync, workspace = process.cwd() } = {}) {
   const blocked = plan.filter(({ status }) => status === "manager-missing");
   if (blocked.length > 0) {
     fail(`required package manager is missing for: ${blocked.map(({ id, installer }) => `${id} (${installer.command})`).join(", ")}`);
@@ -115,11 +98,11 @@ export function applyToolInstallPlan(plan, { env = process.env, run = execFileSy
       results.push({ ...entry, applied: false });
       continue;
     }
-    const invocation = managerInvocation(entry.installer, env);
+    const invocation = managerInvocation(entry.installer, env, workspace);
     if (!invocation) fail(`package manager disappeared before installing ${entry.id}`);
     run(invocation.command, invocation.args, { env, stdio: "inherit", windowsHide: true });
     const spec = TOOL_SPECS.find(({ id }) => id === entry.id);
-    const installedPath = findCommand(spec.commands, env);
+    const installedPath = findCommand(spec.commands, env, workspace);
     if (!installedPath) fail(`${entry.label} installer completed but ${spec.commands.join("/")} is still not on PATH`);
     results.push({ ...entry, status: "installed", installedPath, applied: true });
   }

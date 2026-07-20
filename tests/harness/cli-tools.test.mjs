@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -150,6 +150,20 @@ test("external PATH symlinks cannot hide a workspace-local executable", (t) => {
   }
 });
 
+test("relative PATH entries are not trusted even when they resolve outside the workspace", (t) => {
+  if (process.platform === "win32") return t.skip("POSIX fixture");
+  const { root, bin, workspace } = fixture();
+  try {
+    fakeExecutable(bin, "gh", "echo unsafe-relative-path");
+    assert.throws(
+      () => resolveCliExecutable("github", { env: { PATH: relative(workspace, bin) }, workspace }),
+      /not available on a trusted PATH/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("MCP server lists 13 role tools plus status and executes through the shared core", async (t) => {
   if (process.platform === "win32") return t.skip("POSIX fixture");
   const { root, bin, workspace } = fixture();
@@ -185,6 +199,26 @@ test("tool installer is preview-first and plans exact npm packages without mutat
     assert.deepEqual(plan[1].installer.args, ["install", "--global", "ntn@0.19.0"]);
     assert.throws(() => parseToolArguments(["doctor", "--apply"]), /read-only/);
     assert.throws(() => parseToolArguments(["--tool", "unknown"]), /Tool ids|tool ids|must contain/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tool installer rejects package managers and installed-tool shims from the workspace", (t) => {
+  if (process.platform === "win32") return t.skip("POSIX fixture");
+  const { root, workspace } = fixture();
+  try {
+    const npmExecPath = fakeExecutable(workspace, "npm-cli.js");
+    fakeExecutable(workspace, "npm");
+    fakeExecutable(workspace, "brew");
+    fakeExecutable(workspace, "gh");
+    const env = { PATH: workspace, npm_execpath: npmExecPath };
+    const plan = buildToolInstallPlan({ env, toolIds: ["linear", "github"], workspace });
+    assert.deepEqual(plan.map(({ id, status }) => [id, status]), [
+      ["linear", "manager-missing"],
+      ["github", "manager-missing"],
+    ]);
+    assert.equal(plan.every(({ installedPath }) => installedPath === undefined), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
