@@ -108,10 +108,13 @@ test("omh status and doctor combine managed-agent and shared-tool state", async 
 });
 
 test("root launcher and package bin metadata expose omh", () => {
-  const launched = spawnSync(join(REPO_ROOT, "omh"), ["--version"], { cwd: REPO_ROOT, encoding: "utf8" });
+  const launched = process.platform === "win32"
+    ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `"${join(REPO_ROOT, "omh.cmd")}" --version`], { cwd: REPO_ROOT, encoding: "utf8" })
+    : spawnSync(join(REPO_ROOT, "omh"), ["--version"], { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(launched.status, 0, launched.stderr);
   assert.match(launched.stdout, /^omh 0\.2\.0/m);
   assert.notEqual(statSync(join(REPO_ROOT, "omh")).mode & 0o111, 0);
+  assert.equal(existsSync(join(REPO_ROOT, "omh.cmd")), true);
   const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
   assert.equal(manifest.bin.omh, "./omh");
   assert.equal(manifest.bin["oh-my-harness"], "./omh");

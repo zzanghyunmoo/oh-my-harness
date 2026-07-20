@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { isAbsolute, parse, resolve } from "node:path";
 
-import { resolveTrustedCommand } from "./trusted-command.mjs";
+import { resolveTrustedInvocation } from "./trusted-command.mjs";
 
 const MAX_ARGS = 64;
 const MAX_ARG_CHARS = 4_096;
@@ -14,25 +14,25 @@ const SERVICE_DEFINITIONS = Object.freeze({
     label: "Jira",
     commands: Object.freeze(["jira"]),
     env: Object.freeze(["JIRA_API_TOKEN", "JIRA_AUTH_TYPE", "JIRA_CONFIG_FILE"]),
-    install: "brew install ankitpokhrel/tap/jira-cli; then run jira init",
+    install: "Run omh tools install --only jira; then run jira init",
   }),
   linear: Object.freeze({
     label: "Linear",
     commands: Object.freeze(["linear"]),
     env: Object.freeze(["LINEAR_API_KEY", "LINEAR_TEAM_ID", "LINEAR_WORKSPACE", "LINEAR_VCS"]),
-    install: "npm install --global @schpet/linear-cli@2.0.0; then run linear auth login and linear config",
+    install: "Run omh tools install --only linear; then run linear auth login and linear config",
   }),
   github: Object.freeze({
     label: "GitHub",
     commands: Object.freeze(["gh"]),
     env: Object.freeze(["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR"]),
-    install: "brew install gh; then run gh auth login",
+    install: "Run omh tools install --only github; then run gh auth login",
   }),
   gitlab: Object.freeze({
     label: "GitLab",
     commands: Object.freeze(["glab"]),
     env: Object.freeze(["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "GITLAB_HOST", "GITLAB_CONFIG_DIR", "GL_HOST"]),
-    install: "brew install glab; then run glab auth login",
+    install: "Run omh tools install --only gitlab; then run glab auth login",
   }),
   confluence: Object.freeze({
     label: "Confluence",
@@ -41,19 +41,19 @@ const SERVICE_DEFINITIONS = Object.freeze({
       "CONFLUENCE_API_TOKEN", "CONFLUENCE_TOKEN", "CONFLUENCE_DOMAIN", "CONFLUENCE_EMAIL",
       "CONFLUENCE_READ_ONLY", "CONFLUENCE_CLI_ANALYTICS",
     ]),
-    install: "npm install --global confluence-cli@2.18.0; then run confluence init --read-only (recommended for agents)",
+    install: "Run omh tools install --only confluence; then run confluence init --read-only (recommended for agents)",
   }),
   notion: Object.freeze({
     label: "Notion",
     commands: Object.freeze(["ntn"]),
     env: Object.freeze(["NOTION_API_TOKEN", "NOTION_WORKSPACE_ID", "NOTION_KEYRING", "NOTION_HOME", "NOTION_ENV"]),
-    install: "npm install --global ntn@0.19.0; then run ntn login",
+    install: "Run omh tools install --only notion; then run ntn login",
   }),
   coderabbit: Object.freeze({
     label: "CodeRabbit",
     commands: Object.freeze(["cr", "coderabbit"]),
     env: Object.freeze(["CODERABBIT_API_KEY", "CODERABBIT_HOME"]),
-    install: "brew install coderabbit; then run cr auth login",
+    install: "Run omh tools install --only coderabbit (WSL is required on Windows); then run cr auth login",
   }),
 });
 
@@ -285,8 +285,8 @@ export function classifyCliInvocation(toolName, args) {
 export function resolveCliExecutable(serviceId, { env = process.env, workspace = process.cwd() } = {}) {
   const service = SERVICE_DEFINITIONS[serviceId];
   if (!service) fail(`unknown CLI service: ${serviceId}`);
-  const executablePath = resolveTrustedCommand(service.commands, { env, workspace });
-  if (executablePath) return executablePath;
+  const invocation = resolveTrustedInvocation(service.commands, { env, workspace });
+  if (invocation) return invocation.executablePath;
   fail(`${service.label} CLI (${service.commands.join("/")}) is not available on a trusted PATH outside the workspace. Install it with: ${service.install}`);
 }
 
@@ -312,9 +312,9 @@ function sanitizedEnvironment(serviceId, input) {
   return env;
 }
 
-function spawnCli(executablePath, args, { cwd, env, signal, timeoutMs }) {
+function spawnCli(invocation, args, { cwd, env, signal, timeoutMs }) {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(executablePath, args, { cwd, env, shell: false, signal, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(invocation.command, [...invocation.argsPrefix, ...args], { cwd, env, shell: false, signal, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -357,8 +357,9 @@ export async function executeCliTool(toolName, input, options = {}) {
     fail(`${toolName} classified this invocation as a state-changing write; retry with confirmedWrite=true only after the user explicitly requests or confirms that exact mutation`);
   }
   const cwd = safeCwd(input.cwd ?? options.cwd ?? process.cwd());
-  const executablePath = resolveCliExecutable(definition.service, { env: options.env ?? process.env, workspace: cwd });
-  const result = await spawnCli(executablePath, args, {
+  const invocation = resolveTrustedInvocation(SERVICE_DEFINITIONS[definition.service].commands, { env: options.env ?? process.env, workspace: cwd });
+  if (!invocation) fail(`${SERVICE_DEFINITIONS[definition.service].label} CLI (${SERVICE_DEFINITIONS[definition.service].commands.join("/")}) is not available on a trusted PATH outside the workspace. Install it with: ${SERVICE_DEFINITIONS[definition.service].install}`);
+  const result = await spawnCli(invocation, args, {
     cwd,
     env: sanitizedEnvironment(definition.service, options.env ?? process.env),
     signal: options.signal,
@@ -371,7 +372,7 @@ export async function executeCliTool(toolName, input, options = {}) {
     access,
     args: Object.freeze([...args]),
     cwd,
-    executablePath,
+    executablePath: invocation.executablePath,
     code: result.code,
     stdout: result.stdout,
     stderr: result.stderr,

@@ -16,7 +16,8 @@
     "ownership": { "$ref": "#/$defs/ownership" },
     "platforms": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 5,
+      "maxItems": 5,
       "items": { "$ref": "#/$defs/platform" },
       "uniqueItems": true
     },
@@ -72,7 +73,7 @@
       "required": ["id", "os", "architecture", "lane"],
       "properties": {
         "id": { "$ref": "#/$defs/stableId" },
-        "os": { "type": "string", "enum": ["linux", "darwin"] },
+        "os": { "type": "string", "enum": ["linux", "darwin", "win32"] },
         "architecture": { "type": "string", "enum": ["x64", "arm64"] },
         "lane": { "type": "string", "enum": ["hermetic-release", "personal-certification"] }
       }
@@ -109,7 +110,8 @@
         "descriptorRef": { "type": "string", "pattern": "^\\.\\./adapters/[a-z][a-z0-9-]*\\.json$" },
         "platformRefs": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 5,
+          "maxItems": 5,
           "items": { "$ref": "#/$defs/stableId" },
           "uniqueItems": true
         },

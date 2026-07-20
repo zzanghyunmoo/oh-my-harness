@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { crc32, gzipSync } from "node:zlib";
 import tar from "tar-stream";
 
 import { downloadReleaseArchive, extractArchiveExecutable, inspectArchive, validateReleaseUrl } from "../../scripts/harness/acquisition.mjs";
@@ -36,11 +36,51 @@ async function withArchive(entries, callback) {
   }
 }
 
-test("U3 commits exactly four valid descriptors and resolves eight tuples", async () => {
+function storedZip(name, body) {
+  const filename = Buffer.from(name);
+  const checksum = crc32(body);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(body.length, 18);
+  local.writeUInt32LE(body.length, 22);
+  local.writeUInt16LE(filename.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(0x0314, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(body.length, 20);
+  central.writeUInt32LE(body.length, 24);
+  central.writeUInt16LE(filename.length, 28);
+  central.writeUInt32LE((0o100755 << 16) >>> 0, 38);
+  const centralOffset = local.length + filename.length + body.length;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + filename.length, 12);
+  end.writeUInt32LE(centralOffset, 16);
+  return Buffer.concat([local, filename, body, central, filename, end]);
+}
+
+async function withZip(name, body, callback) {
+  const root = mkdtempSync(join(tmpdir(), "oh-my-harness-zip-"));
+  const path = join(root, "fixture.zip");
+  try {
+    writeFileSync(path, storedZip(name, body));
+    return await callback(path);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("runtime descriptors cover macOS, Linux, and Windows with twenty reviewed tuples", async () => {
   assert.deepEqual(readdirSync(ADAPTER_ROOT).sort(), ["claude-code.json", "codex.json", "opencode.json", "pi.json"]);
   const resolved = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
   assert.deepEqual(resolved.runtimes.map(({ id }) => id), ["claude-code", "codex", "opencode", "pi"]);
-  assert.equal(resolved.tuples.length, 8);
+  assert.equal(resolved.tuples.length, 20);
   for (const runtime of resolved.runtimes) {
     assert.equal(existsSync(join(ADAPTER_ROOT, `${runtime.id}.json`)), true);
     assert.doesNotThrow(() => validateDescriptor(runtime.descriptor));
@@ -123,6 +163,27 @@ test("offline tar derivation is deterministic and rejects unsafe members", async
   }), /ratio/i));
 });
 
+test("offline Windows zip derivation verifies and extracts one executable", async () => {
+  const executable = Buffer.from("MZ codex fixture\n");
+  await withZip("bin/codex.exe", executable, async (path) => {
+    const inspected = await inspectArchive(path, { format: "zip", expectedBasename: "codex.exe" });
+    assert.equal(inspected.memberPath, "bin/codex.exe");
+    const destinationPath = join(dirname(path), "codex.exe");
+    await extractArchiveExecutable(path, {
+      destinationPath,
+      expectedArchiveSha256: inspected.archiveSha256,
+      expectedBasename: "codex.exe",
+      expectedExecutableSha256: inspected.executableSha256,
+      expectedMemberPath: inspected.memberPath,
+      format: "zip",
+    });
+    assert.deepEqual(readFileSync(destinationPath), executable);
+  });
+  await withZip("../codex.exe", executable, async (path) => {
+    await assert.rejects(inspectArchive(path, { format: "zip", expectedBasename: "codex.exe" }), /invalid relative path|unsafe archive member path/i);
+  });
+});
+
 test("loader rejects extra adapter files and duplicate profile platforms", async () => {
   const root = mkdtempSync(join(tmpdir(), "oh-my-harness-repo-"));
   try {
@@ -132,7 +193,7 @@ test("loader rejects extra adapter files and duplicate profile platforms", async
     rmSync(join(root, "harness", "adapters", "extra.json"));
     const profilePath = join(root, "harness", "profiles", "personal-v1.profile.json");
     const profile = JSON.parse(readFileSync(profilePath, "utf8"));
-    profile.platforms.push(structuredClone(profile.platforms[0]));
+    profile.platforms.at(-1).id = profile.platforms[0].id;
     writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /duplicate/i);
     renameSync(profilePath, `${profilePath}.missing`);

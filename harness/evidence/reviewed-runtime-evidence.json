@@ -2,7 +2,7 @@
   "claimBoundary": "Provider metadata and executable digests derived from the exact downloaded archives; native source anchors are declarations pending U16 characterization.",
   "runtimes": {
     "claude-code": {
-      "descriptorCanonicalSha256": "1c0f70f60a2b32935048e79b0b1cb1ec18f0be0a313eb1fe43fd1d2be0307f39",
+      "descriptorCanonicalSha256": "c6bfee8288f4a251f2a7e3411263441cb3a33fd875b574a74c389dc61667f6c8",
       "gateSource": {
         "commit": "67f390c9a0b1440d369aebe2ff6a5023db35bf8e",
         "locations": [
@@ -23,6 +23,16 @@
           "os": "darwin",
           "variant": "darwin"
         },
+        "darwin-x64-release": {
+          "architecture": "x64",
+          "archive": "cb720c25d0eb355c333f9d69e37180a18cee1aef5e47a119d5f95853a1104bb0",
+          "asset": "claude-darwin-x64.tar.gz",
+          "assetId": 477083762,
+          "exe": "892f2c878050d8829e67119328dd9768345fba18a58c169212b70597c9175c40",
+          "member": "claude",
+          "os": "darwin",
+          "variant": "darwin"
+        },
         "linux-x64-release": {
           "architecture": "x64",
           "archive": "3db32c13a1e16b2d867d096a9808f42d8678c5597d10799a1904fd897e043beb",
@@ -32,12 +42,32 @@
           "member": "claude",
           "os": "linux",
           "variant": "glibc"
+        },
+        "win32-arm64-release": {
+          "architecture": "arm64",
+          "archive": "8a223f544b1bedf11b99dd6cb0b7901f6b55a50aa27e5f47b2f41d580da14566",
+          "asset": "claude-win32-arm64.zip",
+          "assetId": 477083812,
+          "exe": "4a603da0a33d49478e55938898ddd06c4ec5d1ec7f443d92dd4352665faaef05",
+          "member": "claude.exe",
+          "os": "win32",
+          "variant": "windows"
+        },
+        "win32-x64-release": {
+          "architecture": "x64",
+          "archive": "c11829a1ca6beb6e705a5859820392830f64f9c3708c16e8eac5104e4182e327",
+          "asset": "claude-win32-x64.zip",
+          "assetId": 477083813,
+          "exe": "29aa99c436f0d4125780691123b756176d83b59cc7d492304cd4694292d3f04f",
+          "member": "claude.exe",
+          "os": "win32",
+          "variant": "windows"
         }
       },
       "version": "2.1.210"
     },
     "codex": {
-      "descriptorCanonicalSha256": "a5cc7e30526254e06090aa32067050a3a652a30cfb71edb63bcc846313ad3851",
+      "descriptorCanonicalSha256": "5c1eef484745357b4a5a3bd58c7b109c9e5aebe5efd9b68be19b41a702406ec3",
       "gateSource": {
         "commit": "315195492c80fdade38e917c18f9584efd599304",
         "locations": [
@@ -58,6 +88,16 @@
           "os": "darwin",
           "variant": "darwin"
         },
+        "darwin-x64-release": {
+          "architecture": "x64",
+          "archive": "274ea4931246621d477ad61d61ea3303527878e77fa910087df52153f5e6188e",
+          "asset": "codex-x86_64-apple-darwin.tar.gz",
+          "assetId": 476297007,
+          "exe": "1c87c8df60f80a2b08d78bbb9b381fbe0829dc6bbf66b6fa1974cd21e37a5da1",
+          "member": "codex-x86_64-apple-darwin",
+          "os": "darwin",
+          "variant": "darwin"
+        },
         "linux-x64-release": {
           "architecture": "x64",
           "archive": "37c985be9d89e8c4f43b3aa0594c1213eac212d30ae2b95221f08fec807515d1",
@@ -67,12 +107,32 @@
           "member": "codex-x86_64-unknown-linux-musl",
           "os": "linux",
           "variant": "musl"
+        },
+        "win32-arm64-release": {
+          "architecture": "arm64",
+          "archive": "42a3aaa271626dc479aef5000a5632d017d25d8b483304070903b73b11aba11d",
+          "asset": "codex-aarch64-pc-windows-msvc.exe.zip",
+          "assetId": 476297088,
+          "exe": "84406bf7cb8c689e46ebd31244f0458fce3eeed781ec1030399a96baab062932",
+          "member": "codex-aarch64-pc-windows-msvc.exe",
+          "os": "win32",
+          "variant": "msvc"
+        },
+        "win32-x64-release": {
+          "architecture": "x64",
+          "archive": "d731eee110fe287fcb8e201e9bdf39920e863bfc3c97f21e2d697a35d38c63c5",
+          "asset": "codex-x86_64-pc-windows-msvc.exe.zip",
+          "assetId": 476296956,
+          "exe": "51398051c2332b6afe08dc3b9dbb4056085c197f35ca57a307ee303d450cada5",
+          "member": "codex-x86_64-pc-windows-msvc.exe",
+          "os": "win32",
+          "variant": "msvc"
         }
       },
       "version": "0.144.4"
     },
     "opencode": {
-      "descriptorCanonicalSha256": "526a6c7dcc8faa93698848c87d62b5374120e7e8279e4ed048bcd0b8354b131e",
+      "descriptorCanonicalSha256": "cce446785fc165c6f1c9bbf663ecfccf999f0e60d81db617fe864fe3cd8fe806",
       "gateSource": {
         "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
         "locations": [
@@ -93,6 +153,16 @@
           "os": "darwin",
           "variant": "darwin"
         },
+        "darwin-x64-release": {
+          "architecture": "x64",
+          "archive": "6b157acf606906e953c58c9d3b7c101dbe6f5e7eb4e8a12e4e45b4134f3e269c",
+          "asset": "opencode-darwin-x64-baseline.zip",
+          "assetId": 477106216,
+          "exe": "57d1872102ced94f4755ae5eb85e96c7b2579b5b2a92b621c47929efccf82239",
+          "member": "opencode",
+          "os": "darwin",
+          "variant": "darwin"
+        },
         "linux-x64-release": {
           "architecture": "x64",
           "archive": "83216f77d9fb7f6aaa2642074905814f7aca52483dd2f0678f1ade5c4dc84eb9",
@@ -102,12 +172,32 @@
           "member": "opencode",
           "os": "linux",
           "variant": "baseline-glibc"
+        },
+        "win32-arm64-release": {
+          "architecture": "arm64",
+          "archive": "e76bb2bbcbbd982fcbbbdc0cd812018920b577e9e2bbe229a11d7190bbf0b467",
+          "asset": "opencode-windows-arm64.zip",
+          "assetId": 477109558,
+          "exe": "f698132b366d3d4d5345cec0e3148ea5f50a0c41ddbf73c6c59bbe992095a776",
+          "member": "opencode.exe",
+          "os": "win32",
+          "variant": "windows"
+        },
+        "win32-x64-release": {
+          "architecture": "x64",
+          "archive": "cb08eeece06127b8034d4b0acadcb4b6fb0192fe98ba8fa582cd6530c0ee3438",
+          "asset": "opencode-windows-x64-baseline.zip",
+          "assetId": 477109560,
+          "exe": "06f5e20813ed50aefcbb0c2d120e89ffca9d5f35826990f1bafa39af1ce2707e",
+          "member": "opencode.exe",
+          "os": "win32",
+          "variant": "windows"
         }
       },
       "version": "1.18.0"
     },
     "pi": {
-      "descriptorCanonicalSha256": "87979c625f4484bb0477a95de2e146ef14191214feef569faffcf633711ed5d1",
+      "descriptorCanonicalSha256": "fcd26429ac03175371da163431cb8d0f7dec3647b6b6cb69745e54c827592202",
       "gateSource": {
         "commit": "216e672e7c9fc65682553394b74e483c0c9e47f7",
         "locations": [
@@ -128,6 +218,16 @@
           "os": "darwin",
           "variant": "standalone"
         },
+        "darwin-x64-release": {
+          "architecture": "x64",
+          "archive": "3e71ac3aa4ba6cd92f7f8c704e06282b4413842877e7670b2dce3b1bf422318d",
+          "asset": "pi-darwin-x64.tar.gz",
+          "assetId": 476916186,
+          "exe": "a9a552889cbbbe20efa4e6b0ab29bf780d13ea6715ded1a78691aeb4fb8d85a2",
+          "member": "pi/pi",
+          "os": "darwin",
+          "variant": "standalone"
+        },
         "linux-x64-release": {
           "architecture": "x64",
           "archive": "c5f5a9a77a38e68fcb089dd4e3505abb64c98d19595b55818c961be779889719",
@@ -136,6 +236,26 @@
           "exe": "a4a5a1bbef2a52a48b5033ded1841b79ce8b00362a95294f5c459ebe790d0982",
           "member": "pi/pi",
           "os": "linux",
+          "variant": "standalone"
+        },
+        "win32-arm64-release": {
+          "architecture": "arm64",
+          "archive": "702c0e81453a291c894d6a3cae3812f9b2c2b2b4cad4489ead7dd2e5f113062e",
+          "asset": "pi-windows-arm64.zip",
+          "assetId": 476916212,
+          "exe": "0e6a11fb5f2b68d009234627d09057380681f56ed78d95a2a1f0890a47923b8d",
+          "member": "pi.exe",
+          "os": "win32",
+          "variant": "standalone"
+        },
+        "win32-x64-release": {
+          "architecture": "x64",
+          "archive": "38afe9451d4bc8b2465d6123a452abb4713eb0b28c70e7917fc7060a8908a3dd",
+          "asset": "pi-windows-x64.zip",
+          "assetId": 476916188,
+          "exe": "48e367a602515f86c60c93b2f2af5e49fff4192c949a9c2713b22a73f7dff4fd",
+          "member": "pi.exe",
+          "os": "win32",
           "variant": "standalone"
         }
       },

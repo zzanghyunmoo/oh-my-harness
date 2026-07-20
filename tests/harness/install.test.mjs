@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   assertExactRuntimeVersion,
   buildInstallPlan,
+  installRuntimeBinary,
   parseInstallArguments,
   registerRuntimePackages,
   resolveInstallRoot,
@@ -27,6 +29,57 @@ test("installer preview closes macOS arm64 to the four exact runtime versions", 
   assert.equal(plan.compoundEngineering.version, "3.19.0");
   assert.equal(plan.compoundEngineering.commit, "1756c0b9f3cf94493f287ea29ae766ad668fb7cf");
   assert.equal(existsSync(root), false);
+});
+
+test("installer resolves Intel macOS and both Windows architectures to reviewed native archives", async () => {
+  const root = join(tmpdir(), "oh-my-harness-cross-platform-root");
+  const cases = [
+    { os: "darwin", architecture: "x64", platformId: "darwin-x64-release", suffix: "", asset: "claude-darwin-x64.tar.gz" },
+    { os: "win32", architecture: "x64", platformId: "win32-x64-release", suffix: ".exe", asset: "claude-win32-x64.zip" },
+    { os: "win32", architecture: "arm64", platformId: "win32-arm64-release", suffix: ".exe", asset: "claude-win32-arm64.zip" },
+  ];
+  for (const expected of cases) {
+    const plan = await buildInstallPlan({ installRoot: root, os: expected.os, architecture: expected.architecture });
+    assert.equal(plan.runtimes.length, 4);
+    assert.equal(plan.runtimes.every(({ platformId }) => platformId === expected.platformId), true);
+    assert.equal(plan.runtimes.every(({ executable }) => executable.path.endsWith(".exe")), expected.suffix === ".exe");
+    assert.equal(plan.runtimes.find(({ id }) => id === "claude-code").archive.name, expected.asset);
+    for (const runtime of plan.runtimes) {
+      assert.match(runtime.archive.sha256, /^[0-9a-f]{64}$/);
+      assert.match(runtime.executable.sha256, /^[0-9a-f]{64}$/);
+      if (expected.suffix) assert.equal(runtime.executable.path.endsWith(`${runtime.id}${expected.suffix}`), true);
+    }
+  }
+});
+
+test("Windows reuses verified runtime payloads through managed hardlinks", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows hardlink fixture");
+  const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-windows-hardlink-"));
+  const executablePath = join(installRoot, "runtimes", "codex", "0.144.4", "win32-x64-release", "bin", "codex.exe");
+  try {
+    mkdirSync(join(executablePath, ".."), { recursive: true });
+    const body = Buffer.from("MZ codex fixture\n");
+    writeFileSync(executablePath, body);
+    const result = await installRuntimeBinary({
+      installRoot,
+      runtime: { id: "codex", version: "0.144.4" },
+      tuple: {
+        os: "win32",
+        platformId: "win32-x64-release",
+        executable: { sha256: createHash("sha256").update(body).digest("hex") },
+      },
+      runner: { run: () => "codex-cli 0.144.4\n" },
+    });
+    const payload = statSync(executablePath);
+    const managed = statSync(result.linkPath);
+    assert.equal(result.reused, true);
+    assert.equal(result.linkPath.endsWith("codex.exe"), true);
+    assert.equal(managed.dev, payload.dev);
+    assert.equal(managed.ino, payload.ino);
+    assert.equal(managed.nlink >= 2, true);
+  } finally {
+    rmSync(installRoot, { recursive: true, force: true });
+  }
 });
 
 test("installer refuses to place managed payloads inside the source repository", () => {

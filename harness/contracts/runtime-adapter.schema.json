@@ -11,7 +11,7 @@
     "schemaVersion": { "const": "1.1.0" },
     "id": { "type": "string", "enum": ["claude-code", "codex", "opencode", "pi"] },
     "runtime": { "$ref": "#/$defs/runtime" },
-    "platforms": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/platformReceipt" }, "uniqueItems": true },
+    "platforms": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "$ref": "#/$defs/platformReceipt" }, "uniqueItems": true },
     "native": { "$ref": "#/$defs/native" },
     "companions": { "type": "array", "items": { "$ref": "#/$defs/companion" }, "uniqueItems": true },
     "optionalExtensions": { "type": "array", "items": { "$ref": "#/$defs/optionalExtension" }, "uniqueItems": true }
@@ -65,9 +65,9 @@
       "required": ["id", "os", "architecture", "variant", "executable", "acquisition"],
       "properties": {
         "id": { "$ref": "#/$defs/stableId" },
-        "os": { "type": "string", "enum": ["linux", "darwin"] },
+        "os": { "type": "string", "enum": ["linux", "darwin", "win32"] },
         "architecture": { "type": "string", "enum": ["x64", "arm64"] },
-        "variant": { "type": "string", "enum": ["musl", "baseline-glibc", "glibc", "darwin", "standalone"] },
+        "variant": { "type": "string", "enum": ["musl", "baseline-glibc", "glibc", "darwin", "standalone", "windows", "msvc"] },
         "executable": { "$ref": "#/$defs/executable" },
         "acquisition": { "$ref": "#/$defs/acquisition" }
       }

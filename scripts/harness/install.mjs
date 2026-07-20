@@ -8,6 +8,7 @@ import {
   createReadStream,
   createWriteStream,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -18,6 +19,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -40,7 +42,7 @@ import {
   isolatedGitEnvironment,
   resolveGitExecutable,
 } from "./upstream.mjs";
-import { resolveTrustedCommand, resolveTrustedFile } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
+import { resolveTrustedFile, resolveTrustedInvocation } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode", "pi"]);
@@ -251,9 +253,9 @@ function npmInvocation(args, env = process.env, workspace = REPO_ROOT) {
   if (npmExecPath) {
     return { command: process.execPath, args: [npmExecPath, ...args] };
   }
-  const command = resolveTrustedCommand(["npm"], { env, workspace });
-  if (!command) fail("npm is not available on a trusted PATH outside the source repository");
-  return { command, args };
+  const invocation = resolveTrustedInvocation(["npm"], { env, workspace });
+  if (!invocation) fail("npm is not available on a trusted PATH outside the source repository");
+  return { command: invocation.command, args: [...invocation.argsPrefix, ...args] };
 }
 
 export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, runner = DEFAULT_RUNNER } = {}) {
@@ -398,10 +400,40 @@ function runtimeVersionOutput(binaryPath, runtimeId, runner) {
   return output.trim();
 }
 
-function ensureManagedLink(installRoot, runtimeId, executablePath) {
+function runtimeExecutableName(runtimeId, os) {
+  return os === "win32" ? `${runtimeId}.exe` : runtimeId;
+}
+
+function sameFile(firstPath, secondPath) {
+  try {
+    const first = statSync(firstPath);
+    const second = statSync(secondPath);
+    return first.dev === second.dev && first.ino === second.ino;
+  } catch {
+    return false;
+  }
+}
+
+function ensureManagedLink(installRoot, runtimeId, executablePath, os) {
   const binRoot = join(installRoot, "bin");
   mkdirSync(binRoot, { recursive: true, mode: 0o700 });
-  const target = join(binRoot, runtimeId);
+  const target = join(binRoot, runtimeExecutableName(runtimeId, os));
+  if (os === "win32") {
+    if (existsSync(target)) {
+      const current = lstatSync(target);
+      if (current.isSymbolicLink() || !current.isFile() || current.nlink < 2) fail(`managed runtime hardlink target is occupied: ${target}`);
+    }
+    const temporary = join(binRoot, `.${runtimeId}.${process.pid}.${Date.now()}.tmp.exe`);
+    try {
+      linkSync(executablePath, temporary);
+      rmSync(target, { force: true });
+      renameSync(temporary, target);
+    } finally {
+      rmSync(temporary, { force: true });
+    }
+    if (!sameFile(target, executablePath)) fail(`managed runtime hardlink drift: ${runtimeId}`);
+    return target;
+  }
   if (existsSync(target) && !lstatSync(target).isSymbolicLink()) fail(`managed runtime link target is occupied: ${target}`);
   const temporary = join(binRoot, `.${runtimeId}.${process.pid}.${Date.now()}.tmp`);
   try {
@@ -416,14 +448,14 @@ function ensureManagedLink(installRoot, runtimeId, executablePath) {
 
 export async function installRuntimeBinary({ installRoot, runtime, tuple, runner = DEFAULT_RUNNER }) {
   const finalRoot = join(installRoot, "runtimes", runtime.id, runtime.version, tuple.platformId);
-  const executablePath = join(finalRoot, "bin", runtime.id);
+  const executablePath = join(finalRoot, "bin", runtimeExecutableName(runtime.id, tuple.os));
   const expectedSha256 = tuple.executable.sha256;
   if (existsSync(finalRoot)) {
     if (!existsSync(executablePath) || lstatSync(executablePath).isSymbolicLink() || !lstatSync(executablePath).isFile()) fail(`${runtime.id} installed executable is unsafe`);
     if (await sha256File(executablePath) !== expectedSha256) fail(`${runtime.id} installed executable digest drift`);
     const versionOutput = runtimeVersionOutput(executablePath, runtime.id, runner);
     const versionEvidence = assertExactRuntimeVersion(runtime.id, runtime.version, versionOutput);
-    const linkPath = ensureManagedLink(installRoot, runtime.id, executablePath);
+    const linkPath = ensureManagedLink(installRoot, runtime.id, executablePath, tuple.os);
     return { executablePath, linkPath, reused: true, versionEvidence, versionOutput };
   }
   const stage = mkdtempSync(join(installRoot, `.${runtime.id}-`));
@@ -431,7 +463,7 @@ export async function installRuntimeBinary({ installRoot, runtime, tuple, runner
   try {
     const binRoot = join(stage, "payload", "bin");
     mkdirSync(binRoot, { recursive: true, mode: 0o700 });
-    const stagedExecutable = join(binRoot, runtime.id);
+    const stagedExecutable = join(binRoot, runtimeExecutableName(runtime.id, tuple.os));
     const acquisition = tuple.acquisition;
     const asset = acquisition.asset;
     const identity = {
@@ -468,7 +500,7 @@ export async function installRuntimeBinary({ installRoot, runtime, tuple, runner
     atomicWriteJson(join(stage, "payload", ".oh-my-harness-install.json"), receipt);
     mkdirSync(dirname(finalRoot), { recursive: true, mode: 0o700 });
     renameSync(join(stage, "payload"), finalRoot);
-    const linkPath = ensureManagedLink(installRoot, runtime.id, executablePath);
+    const linkPath = ensureManagedLink(installRoot, runtime.id, executablePath, tuple.os);
     return { executablePath, linkPath, reused: false, versionEvidence, versionOutput };
   } finally {
     download?.cleanup();
@@ -823,8 +855,8 @@ export async function buildInstallPlan({
       version: runtime.version,
       platformId: tuple.platformId,
       archive: { name: tuple.acquisition.asset.name, sha256: tuple.acquisition.asset.sha256 },
-      executable: { path: join(installRoot, "runtimes", id, runtime.version, tuple.platformId, "bin", id), sha256: tuple.executable.sha256 },
-      managedCommand: join(installRoot, "bin", id),
+      executable: { path: join(installRoot, "runtimes", id, runtime.version, tuple.platformId, "bin", runtimeExecutableName(id, tuple.os)), sha256: tuple.executable.sha256 },
+      managedCommand: join(installRoot, "bin", runtimeExecutableName(id, tuple.os)),
       runtime,
       tuple,
     };
@@ -917,10 +949,14 @@ export async function inspectInstallPlan(plan, { runner = DEFAULT_RUNNER } = {})
         }
       }
     }
-    const linkPath = join(plan.installRoot, "bin", selected.id);
-    const managedLink = existsSync(linkPath) && lstatSync(linkPath).isSymbolicLink()
-      ? readlinkSync(linkPath)
-      : null;
+    const linkPath = join(plan.installRoot, "bin", runtimeExecutableName(selected.id, selected.tuple.os));
+    const managedLink = selected.tuple.os === "win32"
+      ? existsSync(executablePath) && existsSync(linkPath) && !lstatSync(linkPath).isSymbolicLink() && sameFile(linkPath, executablePath)
+        ? executablePath
+        : null
+      : existsSync(linkPath) && lstatSync(linkPath).isSymbolicLink()
+        ? readlinkSync(linkPath)
+        : null;
     runtimes.push({ id: selected.id, expectedVersion: selected.version, state, versionOutput, executablePath, managedLink });
   }
   return { installRoot: plan.installRoot, runtimes };
