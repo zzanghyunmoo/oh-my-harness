@@ -101,6 +101,31 @@
     {
       "acquisition": {
         "asset": {
+          "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083762",
+          "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-darwin-x64.tar.gz",
+          "id": 477083762,
+          "name": "claude-darwin-x64.tar.gz",
+          "sha256": "cb720c25d0eb355c333f9d69e37180a18cee1aef5e47a119d5f95853a1104bb0"
+        },
+        "kind": "release-archive",
+        "owner": "anthropics",
+        "provider": "github",
+        "repository": "claude-code",
+        "tag": "v2.1.210"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "claude",
+        "sha256": "892f2c878050d8829e67119328dd9768345fba18a58c169212b70597c9175c40"
+      },
+      "id": "darwin-x64-release",
+      "os": "darwin",
+      "variant": "darwin"
+    },
+    {
+      "acquisition": {
+        "asset": {
           "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083808",
           "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-linux-x64.tar.gz",
           "id": 477083808,
@@ -122,6 +147,56 @@
       "id": "linux-x64-release",
       "os": "linux",
       "variant": "glibc"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083812",
+          "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-win32-arm64.zip",
+          "id": 477083812,
+          "name": "claude-win32-arm64.zip",
+          "sha256": "8a223f544b1bedf11b99dd6cb0b7901f6b55a50aa27e5f47b2f41d580da14566"
+        },
+        "kind": "release-archive",
+        "owner": "anthropics",
+        "provider": "github",
+        "repository": "claude-code",
+        "tag": "v2.1.210"
+      },
+      "architecture": "arm64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "claude.exe",
+        "sha256": "4a603da0a33d49478e55938898ddd06c4ec5d1ec7f443d92dd4352665faaef05"
+      },
+      "id": "win32-arm64-release",
+      "os": "win32",
+      "variant": "windows"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anthropics/claude-code/releases/assets/477083813",
+          "downloadUrl": "https://github.com/anthropics/claude-code/releases/download/v2.1.210/claude-win32-x64.zip",
+          "id": 477083813,
+          "name": "claude-win32-x64.zip",
+          "sha256": "c11829a1ca6beb6e705a5859820392830f64f9c3708c16e8eac5104e4182e327"
+        },
+        "kind": "release-archive",
+        "owner": "anthropics",
+        "provider": "github",
+        "repository": "claude-code",
+        "tag": "v2.1.210"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "claude.exe",
+        "sha256": "29aa99c436f0d4125780691123b756176d83b59cc7d492304cd4694292d3f04f"
+      },
+      "id": "win32-x64-release",
+      "os": "win32",
+      "variant": "windows"
     }
   ],
   "runtime": {

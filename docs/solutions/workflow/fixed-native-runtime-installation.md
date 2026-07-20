@@ -32,7 +32,9 @@ Claude Code, Codex, OpenCode, and Pi do not share one package-registration proto
 
 Keep preview and mutation separate. `omh agents install` resolves the reviewed platform tuple without creating the install root; only `--apply` downloads and registers anything. `npm run harness:install` remains a compatibility wrapper.
 
-Verify both layers of every runtime release: the archive SHA-256 before extraction and the selected executable SHA-256 after safe extraction. Reject path traversal, extra executable ambiguity, digest drift, and version drift. Store the verified executable under `<root>/runtimes/<runtime>/<version>/<platform>` and expose it through an explicit managed `bin` symlink rather than overwriting another tool manager's command.
+Verify both layers of every runtime release: the archive SHA-256 before extraction and the selected executable SHA-256 after safe extraction. Reject path traversal, extra executable ambiguity, digest drift, and version drift. Store the verified executable under `<root>/runtimes/<runtime>/<version>/<platform>`. Expose it through a managed `bin` symlink on POSIX and an NTFS hardlink retaining the `.exe` suffix on Windows rather than overwriting another tool manager's command.
+
+Treat Windows script shims as an execution boundary. Native `.exe` files run directly. npm-style extensionless files are accepted only when their bounded first line is a Node shebang. Generated `.cmd` shims are accepted only when their fixed structure resolves to a trusted relative Node entrypoint with the same shebang proof. In both cases, run the JavaScript through the current trusted Node executable. Do not pass arbitrary `.cmd` or `.bat` tools through `cmd.exe`; doing so would reintroduce shell parsing into role-scoped CLI calls.
 
 Build the project package with `npm pack --ignore-scripts`, safely extract it, install production dependencies with lifecycle scripts disabled, and bind the resulting snapshot to the source archive digest and a full payload digest. Acquire Compound Engineering from its reviewed repository, check out the exact commit, re-derive the existing trust receipt, omit Git metadata and upstream symlinks, and then snapshot the verified tree.
 
@@ -56,6 +58,16 @@ omh agents install --root /absolute/temp/root --apply --skip-registration
 /absolute/temp/root/bin/claude --version
 /absolute/temp/root/bin/opencode --version
 /absolute/temp/root/bin/pi --version
+```
+
+On Windows, use the `.exe` managed commands and the checkout launcher:
+
+```powershell
+.\omh.cmd agents install --apply
+& "$HOME\.oh-my-harness\bin\codex.exe" --version
+& "$HOME\.oh-my-harness\bin\claude-code.exe" --version
+& "$HOME\.oh-my-harness\bin\opencode.exe" --version
+& "$HOME\.oh-my-harness\bin\pi.exe" --version
 ```
 
 Pi `0.80.7`'s reviewed standalone binary reports `0.0.0`; for that exact tuple only, the executable digest is the authoritative version evidence. This exception must not generalize to another version or digest.

@@ -224,6 +224,53 @@ test("tool installer rejects package managers and installed-tool shims from the 
   }
 });
 
+test("Windows tool planning uses WinGet, preserves npm installs, and exposes vendor limitations", () => {
+  const { root, bin, workspace } = fixture();
+  try {
+    writeFileSync(join(bin, "winget.exe"), "MZ fixture\n");
+    const npmExecPath = join(bin, "node_modules", "npm", "bin", "npm-cli.js");
+    mkdirSync(join(bin, "node_modules", "npm", "bin"), { recursive: true });
+    writeFileSync(npmExecPath, "#!/usr/bin/env node\n");
+    writeFileSync(join(bin, "npm.cmd"), ":: Created by npm, please don't edit manually.\r\n@ECHO OFF\r\nSETLOCAL\r\nSET \"NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js\"\r\n\"%NODE_EXE%\" \"%NPM_CLI_JS%\" %*\r\n");
+    const plan = buildToolInstallPlan({
+      env: { PATH: bin },
+      platform: "win32",
+      toolIds: ["jira", "linear", "github", "gitlab", "confluence", "notion", "coderabbit"],
+      workspace,
+    });
+    assert.deepEqual(plan.map(({ id, status }) => [id, status]), [
+      ["jira", "manual"],
+      ["linear", "installable"],
+      ["github", "installable"],
+      ["gitlab", "installable"],
+      ["confluence", "installable"],
+      ["notion", "installable"],
+      ["coderabbit", "unsupported"],
+    ]);
+    assert.deepEqual(plan.find(({ id }) => id === "github").installer.args.slice(0, 4), ["install", "--exact", "--id", "GitHub.cli"]);
+    assert.equal(plan.find(({ id }) => id === "linear").installer.command, "npm");
+    assert.match(plan.find(({ id }) => id === "coderabbit").guidance, /WSL/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows executes npm-style CLI shims through Node without a shell", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows execution fixture");
+  const { root, bin, workspace } = fixture();
+  try {
+    const target = join(bin, "node_modules", "gh-fixture", "cli.js");
+    mkdirSync(join(bin, "node_modules", "gh-fixture"), { recursive: true });
+    writeFileSync(target, "#!/usr/bin/env node\nprocess.stdout.write(process.argv.slice(2).join(' '));\n");
+    writeFileSync(join(bin, "gh.cmd"), "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\gh-fixture\\cli.js\" %*\r\n");
+    const result = await executeCliTool("issue_tracker_github_cli", { args: ["issue", "list"] }, { cwd: workspace, env: { ...process.env, PATH: bin } });
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "issue list");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("status checks are local-only and redaction covers every credential family", () => {
   const status = listCliToolStatus({ env: { PATH: "" }, workspace: REPO_ROOT });
   assert.equal(status.length, 7);

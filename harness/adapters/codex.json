@@ -93,6 +93,31 @@
     {
       "acquisition": {
         "asset": {
+          "apiUrl": "https://api.github.com/repos/openai/codex/releases/assets/476297007",
+          "downloadUrl": "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-x86_64-apple-darwin.tar.gz",
+          "id": 476297007,
+          "name": "codex-x86_64-apple-darwin.tar.gz",
+          "sha256": "274ea4931246621d477ad61d61ea3303527878e77fa910087df52153f5e6188e"
+        },
+        "kind": "release-archive",
+        "owner": "openai",
+        "provider": "github",
+        "repository": "codex",
+        "tag": "rust-v0.144.4"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "codex-x86_64-apple-darwin",
+        "sha256": "1c87c8df60f80a2b08d78bbb9b381fbe0829dc6bbf66b6fa1974cd21e37a5da1"
+      },
+      "id": "darwin-x64-release",
+      "os": "darwin",
+      "variant": "darwin"
+    },
+    {
+      "acquisition": {
+        "asset": {
           "apiUrl": "https://api.github.com/repos/openai/codex/releases/assets/476296992",
           "downloadUrl": "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-x86_64-unknown-linux-musl.tar.gz",
           "id": 476296992,
@@ -114,6 +139,56 @@
       "id": "linux-x64-release",
       "os": "linux",
       "variant": "musl"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/openai/codex/releases/assets/476297088",
+          "downloadUrl": "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-aarch64-pc-windows-msvc.exe.zip",
+          "id": 476297088,
+          "name": "codex-aarch64-pc-windows-msvc.exe.zip",
+          "sha256": "42a3aaa271626dc479aef5000a5632d017d25d8b483304070903b73b11aba11d"
+        },
+        "kind": "release-archive",
+        "owner": "openai",
+        "provider": "github",
+        "repository": "codex",
+        "tag": "rust-v0.144.4"
+      },
+      "architecture": "arm64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "codex-aarch64-pc-windows-msvc.exe",
+        "sha256": "84406bf7cb8c689e46ebd31244f0458fce3eeed781ec1030399a96baab062932"
+      },
+      "id": "win32-arm64-release",
+      "os": "win32",
+      "variant": "msvc"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/openai/codex/releases/assets/476296956",
+          "downloadUrl": "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-x86_64-pc-windows-msvc.exe.zip",
+          "id": 476296956,
+          "name": "codex-x86_64-pc-windows-msvc.exe.zip",
+          "sha256": "d731eee110fe287fcb8e201e9bdf39920e863bfc3c97f21e2d697a35d38c63c5"
+        },
+        "kind": "release-archive",
+        "owner": "openai",
+        "provider": "github",
+        "repository": "codex",
+        "tag": "rust-v0.144.4"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "codex-x86_64-pc-windows-msvc.exe",
+        "sha256": "51398051c2332b6afe08dc3b9dbb4056085c197f35ca57a307ee303d450cada5"
+      },
+      "id": "win32-x64-release",
+      "os": "win32",
+      "variant": "msvc"
     }
   ],
   "runtime": {

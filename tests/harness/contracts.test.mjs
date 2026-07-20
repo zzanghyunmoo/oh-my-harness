@@ -143,17 +143,28 @@ function adapterFixture() {
 		executableId: "harness-lifecycle",
 		tokens: [{ kind: "literal", value: operation }, { kind: "placeholder", id: "payload-root" }],
 	});
+	const platforms = [
+		{ id: "darwin-arm64-personal", os: "darwin", architecture: "arm64" },
+		{ id: "darwin-x64-release", os: "darwin", architecture: "x64" },
+		{ id: "linux-x64-release", os: "linux", architecture: "x64" },
+		{ id: "win32-arm64-release", os: "win32", architecture: "arm64" },
+		{ id: "win32-x64-release", os: "win32", architecture: "x64" },
+	];
 	return {
 		$schema: "../contracts/runtime-adapter.schema.json",
 		schemaVersion: "1.1.0",
 		id: "pi",
 		runtime: { name: "pi", version: "0.80.7" },
-		platforms: ["darwin-arm64-personal", "linux-x64-release"].map((id) => ({
+		platforms: platforms.map(({ id, os, architecture }) => ({
 			id,
-			os: id.startsWith("darwin") ? "darwin" : "linux",
-			architecture: id.startsWith("darwin") ? "arm64" : "x64",
+			os,
+			architecture,
 			variant: "standalone",
-			executable: { id: "runtime", memberPath: "pi", sha256: SHA256 },
+			executable: {
+				id: "runtime",
+				memberPath: os === "win32" ? "pi.exe" : "pi/pi",
+				sha256: SHA256,
+			},
 			acquisition: {
 				kind: "release-archive", provider: "github", owner: "earendil-works", repository: "pi", tag: "v0.80.7",
 				asset: { id: 1, name: `pi-${id}.tar.gz`, apiUrl: "https://api.github.com/repos/earendil-works/pi/releases/assets/1", downloadUrl: `https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-${id}.tar.gz`, sha256: "b".repeat(64) },
@@ -288,7 +299,10 @@ function validateProfileReferences(profile) {
 		Object.fromEntries(profile.platforms.map(({ id, os, architecture, lane }) => [id, { os, architecture, lane }])),
 		{
 			"darwin-arm64-personal": { os: "darwin", architecture: "arm64", lane: "personal-certification" },
+			"darwin-x64-release": { os: "darwin", architecture: "x64", lane: "hermetic-release" },
 			"linux-x64-release": { os: "linux", architecture: "x64", lane: "hermetic-release" },
+			"win32-arm64-release": { os: "win32", architecture: "arm64", lane: "hermetic-release" },
+			"win32-x64-release": { os: "win32", architecture: "x64", lane: "hermetic-release" },
 		},
 	);
 	assert.deepEqual(profile.tiers, {

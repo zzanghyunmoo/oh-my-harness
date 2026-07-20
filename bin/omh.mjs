@@ -165,8 +165,9 @@ function formatRuntimeRow(runtime) {
 
 function formatToolRow(tool) {
   const location = tool.installedPath ? ` — ${tool.installedPath}` : "";
+  const guidance = tool.guidance ? ` — ${tool.guidance}` : "";
   const applied = tool.applied ? " (installed now)" : "";
-  return `- ${tool.id}: ${tool.status}${applied}${location}`;
+  return `- ${tool.id}: ${tool.status}${applied}${location}${guidance}`;
 }
 
 export function formatOmhResult(result) {
@@ -308,10 +309,12 @@ export async function runOmh(argv, { env = process.env, dependencies = {} } = {}
   const result = { command: options.command, apply: false, agents, tools };
   if (options.command === "doctor") {
     const missingAgents = agents.runtimes.filter(({ state }) => state !== "installed").map(({ id }) => id);
-    const missingTools = tools.filter(({ status }) => status !== "installed").map(({ id }) => id);
+    const missingTools = tools.filter(({ status }) => ["installable", "manager-missing"].includes(status)).map(({ id }) => id);
+    const guidedTools = tools.filter(({ status, guidance }) => ["manual", "unsupported", "restart-required"].includes(status) && guidance);
     result.nextActions = [];
     if (missingAgents.length) result.nextActions.push(`omh agents install --only ${missingAgents.join(",")} --apply`);
     if (missingTools.length) result.nextActions.push(`omh tools install --only ${missingTools.join(",")} --apply`);
+    result.nextActions.push(...guidedTools.map(({ label, guidance }) => `${label}: ${guidance}`));
     result.nextActions.push("Authenticate each selected external CLI in a human-visible terminal; doctor does not inspect credentials.");
   }
   return result;

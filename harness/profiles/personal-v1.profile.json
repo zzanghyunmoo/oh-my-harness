@@ -31,8 +31,26 @@
       "lane": "personal-certification"
     },
     {
+      "id": "darwin-x64-release",
+      "os": "darwin",
+      "architecture": "x64",
+      "lane": "hermetic-release"
+    },
+    {
       "id": "linux-x64-release",
       "os": "linux",
+      "architecture": "x64",
+      "lane": "hermetic-release"
+    },
+    {
+      "id": "win32-arm64-release",
+      "os": "win32",
+      "architecture": "arm64",
+      "lane": "hermetic-release"
+    },
+    {
+      "id": "win32-x64-release",
+      "os": "win32",
       "architecture": "x64",
       "lane": "hermetic-release"
     }
@@ -42,28 +60,28 @@
       "id": "claude-code",
       "version": "2.1.210",
       "descriptorRef": "../adapters/claude-code.json",
-      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
       "companions": []
     },
     {
       "id": "codex",
       "version": "0.144.4",
       "descriptorRef": "../adapters/codex.json",
-      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
       "companions": []
     },
     {
       "id": "opencode",
       "version": "1.18.0",
       "descriptorRef": "../adapters/opencode.json",
-      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
       "companions": []
     },
     {
       "id": "pi",
       "version": "0.80.7",
       "descriptorRef": "../adapters/pi.json",
-      "platformRefs": ["darwin-arm64-personal", "linux-x64-release"],
+      "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
       "companions": [
         {
           "id": "pi-ask-user",

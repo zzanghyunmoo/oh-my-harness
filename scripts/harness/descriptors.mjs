@@ -11,7 +11,10 @@ const MODULE_REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const EXPECTED_VERSIONS = Object.freeze({ "claude-code": "2.1.210", codex: "0.144.4", opencode: "1.18.0", pi: "0.80.7" });
 const PLATFORM_IDENTITIES = Object.freeze({
   "darwin-arm64-personal": { os: "darwin", architecture: "arm64" },
+  "darwin-x64-release": { os: "darwin", architecture: "x64" },
   "linux-x64-release": { os: "linux", architecture: "x64" },
+  "win32-arm64-release": { os: "win32", architecture: "arm64" },
+  "win32-x64-release": { os: "win32", architecture: "x64" },
 });
 const EXPECTED_RUNTIME_IDS = Object.freeze(Object.keys(EXPECTED_VERSIONS).sort());
 const REVIEWED_EVIDENCE_PATH = "harness/evidence/reviewed-runtime-evidence.json";
@@ -105,7 +108,7 @@ export function validateDescriptor(descriptor, { schema, reviewedEvidence } = {}
   if (descriptor.runtime.version !== EXPECTED_VERSIONS[descriptor.id]) throw new Error(`descriptor version drift for ${descriptor.id}`);
   const platformIds = descriptor.platforms.map(({ id }) => id);
   assertUnique(platformIds, `${descriptor.id} platforms`);
-  if (platformIds.length !== 2 || !Object.keys(PLATFORM_IDENTITIES).every((id) => platformIds.includes(id))) throw new Error(`${descriptor.id} platform coverage drift`);
+  if (platformIds.length !== Object.keys(PLATFORM_IDENTITIES).length || !Object.keys(PLATFORM_IDENTITIES).every((id) => platformIds.includes(id))) throw new Error(`${descriptor.id} platform coverage drift`);
   for (const platform of descriptor.platforms) {
     const expected = PLATFORM_IDENTITIES[platform.id];
     if (!expected || platform.os !== expected.os || platform.architecture !== expected.architecture) throw new Error(`${descriptor.id}/${platform.id} platform identity drift`);

@@ -59,6 +59,8 @@ Fail-closed executable discovery still needs candidates that exist on every supp
 
 An explicit `OH_MY_HARNESS_GIT_EXECUTABLE` remains the escape hatch and must still be absolute. Platform awareness changes discovery, not the trust policy.
 
+Windows executable discovery must distinguish PE executables from shell shims. Prefer a reviewed `.exe`. An extensionless npm entrypoint may be invoked through `process.execPath` only after its first line proves it is a Node program. A `.cmd` candidate is accepted only when it matches npm's generated shim shape, resolves to a trusted relative Node entrypoint outside the workspace, and that target has the same bounded shebang proof. Execute the resolved JavaScript with Node; never pass the shim through `cmd.exe`. Reject every other `.cmd` and `.bat` candidate instead of enabling `shell: true`.
+
 ### Separate invariant coverage from fixture capability
 
 A Windows host may deny symlink creation without Developer Mode or elevation. Catch only the Windows `EPERM` capability failure, report a diagnostic skip, and keep every other error fatal. The final-target and ancestor-symlink tests implement that narrow boundary at `tests/harness/inventory.test.mjs:487` and `tests/harness/inventory.test.mjs:512`. Connector setup state follows the same rule at `extensions/workspace-connectors/setup-state.test.ts:82`.
@@ -85,11 +87,12 @@ Explicit operating-system boundaries preserve both goals. Windows users get a fu
 
 ## Examples
 
-Use a two-lane merge gate:
+Use a three-lane merge gate:
 
 ```text
 Windows: clone/install, descriptor checks, connector compilation, host-compatible tests
-Linux:   the same gates plus POSIX shell, signal, permission, and symlink assertions
+macOS:   the same gates plus POSIX shell, signal, permission, and symlink assertions
+Linux:   the same POSIX gates so existing Linux support cannot regress
 ```
 
 A platform skip should identify one unavailable capability and one known error code. Avoid broad forms such as `if (win32) return` around an entire security suite when only symlink creation is unavailable.

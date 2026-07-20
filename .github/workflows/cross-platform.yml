@@ -1,0 +1,28 @@
+name: Cross-platform verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:harness
+      - run: npm run test:workspace-connectors
+      - run: npm run profile:verify
+      - run: npm run harness:descriptors:verify

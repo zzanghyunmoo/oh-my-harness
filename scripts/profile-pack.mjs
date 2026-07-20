@@ -49,6 +49,10 @@ function canonicalString(value) {
   return JSON.stringify(canonicalize(value));
 }
 
+function normalizeLineEndings(value) {
+  return value.replaceAll("\r\n", "\n");
+}
+
 function sha256(value) {
   return createHash("sha256").update(canonicalString(value)).digest("hex");
 }
@@ -275,7 +279,7 @@ function verifyLock(expectedLock) {
   assert(existsSync(LOCK_PATH), `${repoPath(LOCK_PATH)} is missing; run npm run profile:lock`);
   const actualText = readFileSync(LOCK_PATH, "utf8");
   const expectedText = prettyJson(expectedLock);
-  assert(actualText === expectedText, `${repoPath(LOCK_PATH)} is stale; run npm run profile:lock`);
+  assert(normalizeLineEndings(actualText) === expectedText, `${repoPath(LOCK_PATH)} is stale; run npm run profile:lock`);
 }
 
 function commandVerify() {

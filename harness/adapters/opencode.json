@@ -97,6 +97,31 @@
     {
       "acquisition": {
         "asset": {
+          "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477106216",
+          "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-darwin-x64-baseline.zip",
+          "id": 477106216,
+          "name": "opencode-darwin-x64-baseline.zip",
+          "sha256": "6b157acf606906e953c58c9d3b7c101dbe6f5e7eb4e8a12e4e45b4134f3e269c"
+        },
+        "kind": "release-archive",
+        "owner": "anomalyco",
+        "provider": "github",
+        "repository": "opencode",
+        "tag": "v1.18.0"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "opencode",
+        "sha256": "57d1872102ced94f4755ae5eb85e96c7b2579b5b2a92b621c47929efccf82239"
+      },
+      "id": "darwin-x64-release",
+      "os": "darwin",
+      "variant": "darwin"
+    },
+    {
+      "acquisition": {
+        "asset": {
           "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477106395",
           "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-linux-x64-baseline.tar.gz",
           "id": 477106395,
@@ -118,6 +143,56 @@
       "id": "linux-x64-release",
       "os": "linux",
       "variant": "baseline-glibc"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477109558",
+          "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-windows-arm64.zip",
+          "id": 477109558,
+          "name": "opencode-windows-arm64.zip",
+          "sha256": "e76bb2bbcbbd982fcbbbdc0cd812018920b577e9e2bbe229a11d7190bbf0b467"
+        },
+        "kind": "release-archive",
+        "owner": "anomalyco",
+        "provider": "github",
+        "repository": "opencode",
+        "tag": "v1.18.0"
+      },
+      "architecture": "arm64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "opencode.exe",
+        "sha256": "f698132b366d3d4d5345cec0e3148ea5f50a0c41ddbf73c6c59bbe992095a776"
+      },
+      "id": "win32-arm64-release",
+      "os": "win32",
+      "variant": "windows"
+    },
+    {
+      "acquisition": {
+        "asset": {
+          "apiUrl": "https://api.github.com/repos/anomalyco/opencode/releases/assets/477109560",
+          "downloadUrl": "https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-windows-x64-baseline.zip",
+          "id": 477109560,
+          "name": "opencode-windows-x64-baseline.zip",
+          "sha256": "cb08eeece06127b8034d4b0acadcb4b6fb0192fe98ba8fa582cd6530c0ee3438"
+        },
+        "kind": "release-archive",
+        "owner": "anomalyco",
+        "provider": "github",
+        "repository": "opencode",
+        "tag": "v1.18.0"
+      },
+      "architecture": "x64",
+      "executable": {
+        "id": "runtime",
+        "memberPath": "opencode.exe",
+        "sha256": "06f5e20813ed50aefcbb0c2d120e89ffca9d5f35826990f1bafa39af1ce2707e"
+      },
+      "id": "win32-x64-release",
+      "os": "win32",
+      "variant": "windows"
     }
   ],
   "runtime": {
