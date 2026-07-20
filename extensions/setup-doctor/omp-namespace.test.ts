@@ -54,6 +54,14 @@ test("resolveOmpRoute maps command aliases to OMP command handlers", () => {
     kind: "command",
     target: "quotio-status",
   });
+  assert.deepEqual(resolveOmpRoute({ target: "litellm", args: "" }), {
+    kind: "command",
+    target: "litellm-status",
+  });
+  assert.deepEqual(resolveOmpRoute({ target: "ccs-status", args: "" }), {
+    kind: "command",
+    target: "ccs-status",
+  });
 });
 
 test("resolveOmpRoute rejects invalid skill target syntax", () => {
@@ -67,5 +75,7 @@ test("buildOmpNamespaceReport documents the user-facing namespace", () => {
   const report = buildOmpNamespaceReport();
   assert.match(report, /omp: <skill-or-command>/);
   assert.match(report, /plan→ce-plan/);
+  assert.match(report, /litellm-status/);
+  assert.match(report, /ccs-status/);
   assert.match(report, /connector-login linear\|notion/);
 });

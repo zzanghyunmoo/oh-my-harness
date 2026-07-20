@@ -30,6 +30,10 @@ test("omh exposes one preview-first command surface with friendly aliases", () =
   const tools = parseOmhArguments(["tools", "doctor", "--only", "ntn,glab"]);
   assert.deepEqual(tools.tools, ["notion", "gitlab"]);
   assert.equal(tools.apply, false);
+
+  const proxies = parseOmhArguments(["proxies", "configure", "--only", "litellm,ccs", "--apply"]);
+  assert.deepEqual(proxies.proxies, ["litellm", "ccs"]);
+  assert.equal(proxies.apply, true);
 });
 
 test("omh derives default CLI installs from the selected runtime profiles", () => {
@@ -78,6 +82,8 @@ test("omh setup preview is read-only and explains agent versus machine scope", a
     assert.match(output, /selected per agent/);
     assert.match(output, /codex \[personal\]: issue-tracker=linear, wiki=notion, git=github/);
     assert.match(output, /installed once per machine/);
+    assert.match(output, /Machine proxy applications and CLIs/);
+    assert.match(output, /secret values are never printed/);
     assert.match(output, /No changes were made/);
   } finally {
     rmSync(parent, { recursive: true, force: true });
@@ -122,13 +128,17 @@ test("omh setup apply composes the existing agent and tool installers", async ()
   const dependencies = {
     buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
     buildTools: () => [{ id: "github", status: "installed", installer: { command: "brew", args: [] } }],
+    buildProxyInstall: () => [{ id: "ccs", status: "installed", installer: { command: "npm", args: [] } }],
+    buildProxyConfiguration: () => [],
     applyAgentPlan: async (_plan, { register }) => { calls.push(["agents", register]); return { applied: true, runtimes: [] }; },
     applyTools: (_plan, { env, run }) => { calls.push(["tools", env.TEST_MARKER, typeof run]); return []; },
+    applyProxyInstall: async (_plan, { env, run }) => { calls.push(["proxies", env.TEST_MARKER, typeof run]); return []; },
+    applyProxyConfiguration: () => [],
   };
   const result = await runOmh([
     "setup", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed", "--apply", "--json",
   ], { env: { TEST_MARKER: "kept" }, dependencies });
-  assert.deepEqual(calls, [["agents", true], ["tools", "kept", "function"]]);
+  assert.deepEqual(calls, [["agents", true], ["tools", "kept", "function"], ["proxies", "kept", "function"]]);
   assert.equal(result.apply, true);
 });
 
@@ -137,11 +147,20 @@ test("omh status and doctor combine managed-agent and shared-tool state", async 
     buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
     inspectAgents: async () => ({ installRoot: "/tmp/managed", runtimes: [{ id: "codex", expectedVersion: "1.0.0", state: "missing" }] }),
     buildTools: () => [{ id: "github", status: "installable", installer: { command: "brew", args: ["install", "gh"] } }],
+    buildProxyInstall: () => [
+      { id: "ccs", status: "installed", installer: { command: "npm", args: [] } },
+      { id: "litellm", status: "external", installer: { kind: "external" } },
+    ],
+    buildProxyConfiguration: () => [
+      { id: "ccs", label: "CCS", status: "configured" },
+      { id: "litellm", label: "LiteLLM", status: "awaiting-credentials", missing: ["LITELLM_BASE_URL", "LITELLM_API_KEY"] },
+    ],
   };
   const result = await runOmh(["doctor", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed"], { dependencies });
   assert.deepEqual(result.nextActions, [
     "omh agents install --only codex --apply",
     "omh tools install --only github --apply",
+    "LiteLLM: provide LITELLM_BASE_URL and LITELLM_API_KEY through the CWD .env or process environment, then run omh proxies configure --only litellm --apply",
     "Authenticate each selected external CLI in a human-visible terminal; doctor does not inspect credentials.",
   ]);
 });

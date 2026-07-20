@@ -41,7 +41,7 @@
     {
       "id": "full",
       "source": "docs/profiles/full.profile.json",
-      "sha256": "27a3f28902c39432edbdd3ab868b5c1e9b550a491f899b5769a48ae70eb88f67",
+      "sha256": "f13a8c123ed90499afdd8f3f72e8cfefa3687ad2997621b7416684cedb1195df",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-web-access",
@@ -50,7 +50,9 @@
       ],
       "extensions": [
         "./extensions/env-loader",
+        "./extensions/litellm-provider",
         "./extensions/quotio-provider",
+        "./extensions/ccs-provider",
         "./extensions/workspace-connectors",
         "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
@@ -58,14 +60,22 @@
       "enabledToggles": [
         "ENABLE_WORKSPACE_CONNECTORS=true",
         "ENABLE_WORKSPACE_CLI_TOOLS=true",
-        "ENABLE_QUOTIO=true"
+        "ENABLE_LITELLM=true",
+        "ENABLE_QUOTIO=true",
+        "ENABLE_CCS=true"
       ],
       "secretRefNames": [
+        "ENABLE_LITELLM",
+        "LITELLM_BASE_URL",
+        "LITELLM_API_KEY",
         "ENABLE_WORKSPACE_CLI_TOOLS",
         "ENABLE_WORKSPACE_CONNECTORS",
         "ENABLE_QUOTIO",
         "QUOTIO_BASE_URL",
-        "QUOTIO_API_KEY"
+        "QUOTIO_API_KEY",
+        "ENABLE_CCS",
+        "CCS_BASE_URL",
+        "CCS_API_KEY"
       ],
       "connectors": [
         "linear",
@@ -76,7 +86,9 @@
         "confluence"
       ],
       "providers": [
-        "quotio"
+        "litellm",
+        "quotio",
+        "ccs"
       ],
       "skills": [
         "./plugins/oh-my-harness/skills"
@@ -91,29 +103,41 @@
     {
       "id": "proxy-provider",
       "source": "docs/profiles/proxy-provider.profile.json",
-      "sha256": "a53573338a19fbaf03f08d8f0495f16890eb23e9ac8da605c578a26419403e0a",
+      "sha256": "e484cfec20f8e47a643bce160e229bf1cd5d0c7a5b64add5048553c9503f9d7e",
       "packages": [
         "git:github.com/zzanghyunmoo/oh-my-harness",
         "npm:pi-clear"
       ],
       "extensions": [
         "./extensions/env-loader",
+        "./extensions/litellm-provider",
         "./extensions/quotio-provider",
+        "./extensions/ccs-provider",
         "./extensions/workspace-connectors",
         "./extensions/workspace-cli-tools",
         "./extensions/setup-doctor"
       ],
       "enabledToggles": [
-        "ENABLE_QUOTIO=true"
+        "ENABLE_LITELLM=true",
+        "ENABLE_QUOTIO=true",
+        "ENABLE_CCS=true"
       ],
       "secretRefNames": [
+        "ENABLE_LITELLM",
+        "LITELLM_BASE_URL",
+        "LITELLM_API_KEY",
         "ENABLE_QUOTIO",
         "QUOTIO_BASE_URL",
-        "QUOTIO_API_KEY"
+        "QUOTIO_API_KEY",
+        "ENABLE_CCS",
+        "CCS_BASE_URL",
+        "CCS_API_KEY"
       ],
       "connectors": [],
       "providers": [
-        "quotio"
+        "litellm",
+        "quotio",
+        "ccs"
       ],
       "skills": [
         "./plugins/oh-my-harness/skills"

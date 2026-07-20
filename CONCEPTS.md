@@ -78,6 +78,16 @@ An authentication boundary where Jira, Linear, GitHub, GitLab, Confluence, Notio
 
 The harness may pass a reviewed allowlist of existing environment variables to the child process, but it does not accept credential-bearing command arguments, persist those credentials, or launch an interactive login from a tool call. Missing authentication fails with CLI-owned setup guidance.
 
+### Proxy Profile
+
+A secret-free declaration of a model gateway, its wire protocol, endpoint/API-key environment references, model discovery path, and optional reviewed installer.
+
+LiteLLM is an externally deployed OpenAI-compatible gateway profile. Quotio is OpenAI-compatible, while the CCS local proxy exposes an Anthropic-compatible request surface. Quotio and CCS are machine-level proxy applications/CLIs installed independently from coding-agent runtimes. Endpoint and key values remain in the CWD `.env`; `omh proxies configure` may persist values already supplied through a local environment source, but never accepts or prints API keys as command arguments.
+
+### Proxy Installation
+
+A preview-first machine-level operation for the installable Proxy Profiles. Quotio uses an exact GitHub release asset and reviewed archive/executable SHA-256 on its officially supported macOS Apple Silicon platform. CCS uses an exact npm package version on macOS and Windows. Unsupported Quotio platforms remain a non-fatal guidance state so a remote endpoint can still be configured.
+
 ### Confirmed CLI Write
 
 A CLI invocation that the shared classifier identifies as changing local or remote state and therefore requires both explicit user intent for the exact operation and `confirmedWrite=true` in the tool input.
@@ -132,6 +142,6 @@ For Pi, migration replaces only known mutable or unpinned sources with exact loc
 
 ### OMH Management CLI
 
-The human-facing `omh` executable that unifies runtime/plugin installation, machine-shared external CLI installation, status, diagnostics, and Pi profile planning without merging their ownership boundaries.
+The human-facing `omh` executable that unifies runtime/plugin installation, machine-shared external CLI and proxy installation, local proxy activation, status, diagnostics, and Pi profile planning without merging their ownership boundaries.
 
 `omh setup` composes agent and tool plans for onboarding, while `omh agents` and `omh tools` retain precise control. Every install command is preview-only without `--apply`. Agent selection controls which runtime receives the harness plugin and derives the default union of required CLI executables. Explicit CLI selection controls only executables installed once on the machine and shared through `PATH`; it does not change Runtime Tool Profiles.

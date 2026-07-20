@@ -1,0 +1,67 @@
+{
+  "$schema": "./proxy-profiles.schema.json",
+  "schemaVersion": "1.0.0",
+  "defaultInstallProfiles": [
+    "quotio",
+    "ccs"
+  ],
+  "profiles": [
+    {
+      "id": "litellm",
+      "label": "LiteLLM",
+      "adapter": "openai-compatible",
+      "toggleEnvVar": "ENABLE_LITELLM",
+      "baseUrlEnvVar": "LITELLM_BASE_URL",
+      "apiKeyEnvVar": "LITELLM_API_KEY",
+      "modelsPath": "/models",
+      "install": {
+        "kind": "external",
+        "guidance": "Deploy LiteLLM separately, issue a virtual key, then set LITELLM_BASE_URL and LITELLM_API_KEY locally."
+      }
+    },
+    {
+      "id": "quotio",
+      "label": "Quotio",
+      "adapter": "openai-compatible",
+      "toggleEnvVar": "ENABLE_QUOTIO",
+      "baseUrlEnvVar": "QUOTIO_BASE_URL",
+      "apiKeyEnvVar": "QUOTIO_API_KEY",
+      "modelsPath": "/models",
+      "install": {
+        "kind": "verified-macos-app",
+        "version": "0.24.0",
+        "platforms": [
+          "darwin-arm64"
+        ],
+        "archive": {
+          "owner": "nguyenphutrong",
+          "repository": "quotio",
+          "tag": "v0.24.0",
+          "assetId": 481239231,
+          "assetName": "Quotio-0.24.0.dmg",
+          "url": "https://github.com/nguyenphutrong/quotio/releases/download/v0.24.0/Quotio-0.24.0.dmg",
+          "sha256": "1fc58c35bc0785ed018c0aa1d995f47e13a8c862ce5101815defd2c9ec30cb90"
+        },
+        "appName": "Quotio.app",
+        "executableRelativePath": "Contents/MacOS/Quotio",
+        "executableSha256": "f089fe38f7d87171d369eaff0efa299fff76ad85045da1a1447c3751b03aa1d1"
+      }
+    },
+    {
+      "id": "ccs",
+      "label": "CCS",
+      "adapter": "anthropic-compatible",
+      "toggleEnvVar": "ENABLE_CCS",
+      "baseUrlEnvVar": "CCS_BASE_URL",
+      "apiKeyEnvVar": "CCS_API_KEY",
+      "modelsPath": "/models",
+      "install": {
+        "kind": "npm-global",
+        "package": "@kaitranntt/ccs",
+        "version": "8.8.1",
+        "command": "ccs",
+        "integrity": "sha512-6x1yZpE+3XyCMiiI5uyszvZCw0jWM4RcbVqmEMjM866biS6C2fcqlgCkeEJFVym4pVzAr1ErwrJieLKsaPE+bQ=="
+      }
+    }
+  ]
+}

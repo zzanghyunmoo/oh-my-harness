@@ -1,0 +1,7 @@
+{
+  "name": "@oh-my-harness/litellm-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in LiteLLM OpenAI-compatible provider for Pi"
+}

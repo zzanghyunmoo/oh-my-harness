@@ -2,8 +2,8 @@
   "$schema": "./profile-pack.schema.json",
   "schemaVersion": "0.1.0",
   "id": "proxy-provider",
-  "displayName": "Quotio proxy provider",
-  "description": "Profile for machines that should register the Quotio LiteLLM/OpenAI-compatible provider while keeping endpoint and API key values local-only.",
+  "displayName": "OpenAI-compatible proxy providers",
+  "description": "Profile for machines that should register LiteLLM, Quotio, and CCS providers while keeping endpoint and API key values local-only.",
   "extends": [
     "default"
   ],
@@ -26,7 +26,9 @@
   "piPackage": {
     "extensions": [
       "./extensions/env-loader",
+      "./extensions/litellm-provider",
       "./extensions/quotio-provider",
+      "./extensions/ccs-provider",
       "./extensions/workspace-connectors",
       "./extensions/workspace-cli-tools",
       "./extensions/setup-doctor"
@@ -53,10 +55,24 @@
       "enabledByDefault": true
     },
     {
+      "extensionId": "litellm-provider",
+      "extensionPath": "./extensions/litellm-provider",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_LITELLM",
+      "requiredValue": "true"
+    },
+    {
       "extensionId": "quotio-provider",
       "extensionPath": "./extensions/quotio-provider",
       "enabledByDefault": true,
       "toggleEnvVar": "ENABLE_QUOTIO",
+      "requiredValue": "true"
+    },
+    {
+      "extensionId": "ccs-provider",
+      "extensionPath": "./extensions/ccs-provider",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_CCS",
       "requiredValue": "true"
     },
     {
@@ -75,6 +91,27 @@
     }
   ],
   "secretRefs": [
+    {
+      "name": "ENABLE_LITELLM",
+      "kind": "toggle",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Use this profile on a machine that should register the LiteLLM provider.",
+      "commitPolicy": "name-and-intent-only"
+    },
+    {
+      "name": "LITELLM_BASE_URL",
+      "kind": "endpoint",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Required when ENABLE_LITELLM is true.",
+      "commitPolicy": "never-commit-value"
+    },
+    {
+      "name": "LITELLM_API_KEY",
+      "kind": "api-key",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Required when ENABLE_LITELLM is true.",
+      "commitPolicy": "never-commit-value"
+    },
     {
       "name": "ENABLE_QUOTIO",
       "kind": "toggle",
@@ -95,10 +132,43 @@
       "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
       "requiredWhen": "Required when ENABLE_QUOTIO is true.",
       "commitPolicy": "never-commit-value"
+    },
+    {
+      "name": "ENABLE_CCS",
+      "kind": "toggle",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Use this profile on a machine that should register the CCS provider.",
+      "commitPolicy": "name-and-intent-only"
+    },
+    {
+      "name": "CCS_BASE_URL",
+      "kind": "endpoint",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Required when ENABLE_CCS is true.",
+      "commitPolicy": "never-commit-value"
+    },
+    {
+      "name": "CCS_API_KEY",
+      "kind": "api-key",
+      "source": "docs/blueprints/oh-my-harness.secret-blueprint.json",
+      "requiredWhen": "Required when ENABLE_CCS is true.",
+      "commitPolicy": "never-commit-value"
     }
   ],
   "connectors": [],
   "providers": [
+    {
+      "id": "litellm",
+      "adapter": "openai-compatible",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_LITELLM",
+      "requiredSecretRefs": [
+        "LITELLM_BASE_URL",
+        "LITELLM_API_KEY"
+      ],
+      "statusCommand": "/litellm-status",
+      "modelDiscovery": "GET /models through extensions/provider-adapter-kit/openai-compatible.ts"
+    },
     {
       "id": "quotio",
       "adapter": "openai-compatible",
@@ -109,6 +179,18 @@
         "QUOTIO_API_KEY"
       ],
       "statusCommand": "/quotio-status",
+      "modelDiscovery": "GET /models through extensions/provider-adapter-kit/openai-compatible.ts"
+    },
+    {
+      "id": "ccs",
+      "adapter": "anthropic-compatible",
+      "enabledByDefault": true,
+      "toggleEnvVar": "ENABLE_CCS",
+      "requiredSecretRefs": [
+        "CCS_BASE_URL",
+        "CCS_API_KEY"
+      ],
+      "statusCommand": "/ccs-status",
       "modelDiscovery": "GET /models through extensions/provider-adapter-kit/openai-compatible.ts"
     }
   ],
