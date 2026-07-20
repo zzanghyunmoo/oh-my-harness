@@ -217,7 +217,9 @@ endpoint와 API key가 발급되면 값 자체를 CLI 인자로 넘기지 않습
 # 예: 값은 CWD .env나 secret manager가 주입한 환경에만 둔다.
 LITELLM_BASE_URL=http://localhost:4000/v1
 LITELLM_API_KEY=<local-virtual-key>
+```
 
+```bash
 # 발급된 두 값이 감지되면 ENABLE_LITELLM=true까지 자동 반영
 ./omh proxies configure --only litellm --apply
 
