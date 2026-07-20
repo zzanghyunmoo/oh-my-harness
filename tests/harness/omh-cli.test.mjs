@@ -113,7 +113,7 @@ test("root launcher and package bin metadata expose omh", () => {
     : spawnSync(join(REPO_ROOT, "omh"), ["--version"], { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(launched.status, 0, launched.stderr);
   assert.match(launched.stdout, /^omh 0\.2\.0/m);
-  assert.notEqual(statSync(join(REPO_ROOT, "omh")).mode & 0o111, 0);
+  if (process.platform !== "win32") assert.notEqual(statSync(join(REPO_ROOT, "omh")).mode & 0o111, 0);
   assert.equal(existsSync(join(REPO_ROOT, "omh.cmd")), true);
   const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
   assert.equal(manifest.bin.omh, "./omh");
