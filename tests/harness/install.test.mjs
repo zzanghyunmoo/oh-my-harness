@@ -328,7 +328,9 @@ test("Codex status reports missing registration instead of trusting a stale rece
         run(_binary, args) {
           if (args.join(" ") === "--version") return "codex-cli 0.144.4\n";
           if (args.join(" ") === "plugin marketplace list") return "MARKETPLACE  ROOT\n";
-          if (args.join(" ") === "plugin list") return "PLUGIN  STATUS\n";
+          if (args.join(" ") === "plugin list") {
+            return "PLUGIN  STATUS\noh-my-harness@oh-my-harness-old  installed, enabled\ncompound-engineering@compound-engineering-plugin-old  installed, enabled\n";
+          }
           throw new Error(`unexpected command: ${args.join(" ")}`);
         },
       },
@@ -384,7 +386,6 @@ test("Codex registration under Orca repairs both the canonical and active homes"
     managedRoot: tmpdir(),
     environment: {
       HOME: homedir(),
-      CODEX_HOME: activeHome,
       ORCA_CODEX_HOME: activeHome,
     },
     runner,

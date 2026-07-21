@@ -540,9 +540,11 @@ function codexPluginIsInstalled(output, selector) {
 }
 
 function codexPluginStatus(output, selector) {
-  const line = String(output).split(/\r?\n/).find((entry) => entry.startsWith(selector));
-  if (!line) return { enabled: false, installed: false, status: "missing" };
-  const columns = line.trim().split(/\s{2,}/);
+  const columns = String(output)
+    .split(/\r?\n/)
+    .map((entry) => entry.trim().split(/\s{2,}/))
+    .find(([name]) => name === selector);
+  if (!columns) return { enabled: false, installed: false, status: "missing" };
   const status = columns[1] ?? "unknown";
   return {
     enabled: /(?:^|,\s*)enabled(?:,|$)/.test(status),
@@ -589,7 +591,8 @@ function ensureCodexPlugin(binaryPath, selector, runner, runOptions = {}) {
 function codexRegistrationScopes(environment = process.env) {
   const defaultHome = join(homedir(), ".codex");
   const activeHome = resolve(environment.CODEX_HOME || environment.ORCA_CODEX_HOME || defaultHome);
-  const active = { home: activeHome, runOptions: { env: environment }, scope: "active" };
+  const activeEnvironment = { ...environment, CODEX_HOME: activeHome };
+  const active = { home: activeHome, runOptions: { env: activeEnvironment }, scope: "active" };
   if (!environment.ORCA_CODEX_HOME || activeHome === resolve(defaultHome)) return [active];
   const systemEnvironment = { ...environment };
   delete systemEnvironment.CODEX_HOME;
