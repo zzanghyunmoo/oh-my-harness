@@ -288,7 +288,20 @@ export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, 
     const extracted = readJson(join(payloadRoot, "package.json"), "packed oh-my-harness manifest");
     if (extracted.name !== HARNESS_PACKAGE.name || extracted.version !== HARNESS_PACKAGE.version) fail("packed oh-my-harness identity drift");
     const installInvocation = npmInvocation(["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"], process.env, repoRoot);
-    runner.run(installInvocation.command, installInvocation.args, { cwd: payloadRoot });
+    const npmEnv = {
+      ...process.env,
+      npm_config_fetch_retries: "0",
+      npm_config_fetch_timeout: "10000",
+    };
+    try {
+      runner.run(installInvocation.command, installInvocation.args, { cwd: payloadRoot, env: npmEnv });
+    } catch (error) {
+      if (!/UNABLE_TO_GET_ISSUER_CERT_LOCALLY|certificate/i.test(String(error))) throw error;
+      runner.run(installInvocation.command, installInvocation.args, {
+        cwd: payloadRoot,
+        env: { ...npmEnv, npm_config_offline: "true" },
+      });
+    }
     const identity = `${HARNESS_PACKAGE.name}@${HARNESS_PACKAGE.version}+${archiveSha256}`;
     const receipt = {
       schemaVersion: INSTALL_SCHEMA_VERSION,
@@ -523,40 +536,129 @@ function isPathWithin(root, candidate) {
 }
 
 function codexPluginIsInstalled(output, selector) {
-  const line = String(output).split(/\r?\n/).find((entry) => entry.startsWith(selector));
-  return Boolean(line && /^\S+\s{2,}installed(?:,\s+\S+)?(?:\s{2,}|$)/.test(line));
+  return codexPluginStatus(output, selector).installed;
 }
 
-function ensureCodexMarketplace(binaryPath, name, root, pluginSelector, managedRoot, runner) {
-  const rows = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"]));
+function codexPluginStatus(output, selector) {
+  const line = String(output).split(/\r?\n/).find((entry) => entry.startsWith(selector));
+  if (!line) return { enabled: false, installed: false, status: "missing" };
+  const columns = line.trim().split(/\s{2,}/);
+  const status = columns[1] ?? "unknown";
+  return {
+    enabled: /(?:^|,\s*)enabled(?:,|$)/.test(status),
+    installed: /^installed(?:,|$)/.test(status),
+    status,
+  };
+}
+
+function ensureCodexMarketplace(binaryPath, name, root, pluginSelector, managedRoot, runner, runOptions = {}) {
+  const rows = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"], runOptions));
   if (rows.has(name)) {
     const observed = resolve(rows.get(name));
     if (observed === resolve(root)) return "reused";
     if (!managedRoot || !isPathWithin(join(managedRoot, "packages"), observed)) {
       fail(`Codex marketplace ${name} already points to another root`);
     }
-    if (codexPluginIsInstalled(runner.run(binaryPath, ["plugin", "list"]), pluginSelector)) {
-      runner.run(binaryPath, ["plugin", "remove", pluginSelector, "--json"]);
+    if (codexPluginIsInstalled(runner.run(binaryPath, ["plugin", "list"], runOptions), pluginSelector)) {
+      runner.run(binaryPath, ["plugin", "remove", pluginSelector, "--json"], runOptions);
     }
-    runner.run(binaryPath, ["plugin", "marketplace", "remove", name, "--json"]);
-    runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--json"]);
-    const updated = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"]));
+    runner.run(binaryPath, ["plugin", "marketplace", "remove", name, "--json"], runOptions);
+    runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--json"], runOptions);
+    const updated = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"], runOptions));
     if (!updated.has(name) || resolve(updated.get(name)) !== resolve(root)) fail(`Codex marketplace ${name} was not updated to the expected root`);
     return "updated";
   }
-  runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--json"]);
-  const updated = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"]));
+  runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--json"], runOptions);
+  const updated = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"], runOptions));
   if (!updated.has(name) || resolve(updated.get(name)) !== resolve(root)) fail(`Codex marketplace ${name} was not registered at the expected root`);
   return "installed";
 }
 
-function ensureCodexPlugin(binaryPath, selector, runner) {
-  const before = runner.run(binaryPath, ["plugin", "list"]);
-  if (codexPluginIsInstalled(before, selector)) return "reused";
-  runner.run(binaryPath, ["plugin", "add", selector, "--json"]);
-  const after = runner.run(binaryPath, ["plugin", "list"]);
-  if (!codexPluginIsInstalled(after, selector)) fail(`Codex plugin ${selector} was not installed`);
+function ensureCodexPlugin(binaryPath, selector, runner, runOptions = {}) {
+  const before = runner.run(binaryPath, ["plugin", "list"], runOptions);
+  const status = codexPluginStatus(before, selector);
+  if (status.installed && status.enabled) return "reused";
+  if (status.installed) runner.run(binaryPath, ["plugin", "remove", selector, "--json"], runOptions);
+  runner.run(binaryPath, ["plugin", "add", selector, "--json"], runOptions);
+  const after = runner.run(binaryPath, ["plugin", "list"], runOptions);
+  const installed = codexPluginStatus(after, selector);
+  if (!installed.installed || !installed.enabled) fail(`Codex plugin ${selector} was not installed and enabled`);
   return "installed";
+}
+
+function codexRegistrationScopes(environment = process.env) {
+  const defaultHome = join(homedir(), ".codex");
+  const activeHome = resolve(environment.CODEX_HOME || environment.ORCA_CODEX_HOME || defaultHome);
+  const active = { home: activeHome, runOptions: { env: environment }, scope: "active" };
+  if (!environment.ORCA_CODEX_HOME || activeHome === resolve(defaultHome)) return [active];
+  const systemEnvironment = { ...environment };
+  delete systemEnvironment.CODEX_HOME;
+  delete systemEnvironment.ORCA_CODEX_HOME;
+  return [
+    { home: defaultHome, runOptions: { env: systemEnvironment }, scope: "system-default" },
+    active,
+  ];
+}
+
+function inspectCodexRegistrationScope(binaryPath, installRoot, receipt, runner, runOptions) {
+  if (typeof receipt?.harnessPackageSha256 !== "string" || typeof receipt?.compoundEngineeringCommit !== "string") {
+    return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
+  }
+  const expectedMarketplaces = [
+    {
+      name: HARNESS_MARKETPLACE,
+      root: join(installRoot, "packages", HARNESS_PACKAGE.name, HARNESS_PACKAGE.version, receipt.harnessPackageSha256),
+    },
+    {
+      name: CE_MARKETPLACE,
+      root: join(installRoot, "packages", DEFAULT_POLICY.packageName, DEFAULT_POLICY.packageVersion, receipt.compoundEngineeringCommit),
+    },
+  ];
+  try {
+    const observedMarketplaces = parseMarketplaceRows(runner.run(binaryPath, ["plugin", "marketplace", "list"], runOptions));
+    const pluginOutput = runner.run(binaryPath, ["plugin", "list"], runOptions);
+    const marketplaces = expectedMarketplaces.map(({ name, root }) => {
+      const observedRoot = observedMarketplaces.get(name) ?? null;
+      const state = observedRoot === null ? "missing" : resolve(observedRoot) === resolve(root) ? "installed" : "drift";
+      return { name, expectedRoot: root, observedRoot, state };
+    });
+    const plugins = [
+      `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`,
+      `${CE_PLUGIN}@${CE_MARKETPLACE}`,
+    ].map((selector) => ({ selector, ...codexPluginStatus(pluginOutput, selector) }));
+    const missing = marketplaces.some(({ state }) => state === "missing") || plugins.some(({ installed }) => !installed);
+    const drift = marketplaces.some(({ state }) => state === "drift") || plugins.some(({ installed, enabled }) => installed && !enabled);
+    return {
+      state: missing ? "registration-missing" : drift ? "registration-drift" : "installed",
+      marketplaces,
+      plugins,
+    };
+  } catch (error) {
+    return { state: "registration-unverifiable", error: errorText(error) };
+  }
+}
+
+function inspectCodexRegistration(binaryPath, installRoot, receipt, runner, environment = process.env) {
+  const scopes = codexRegistrationScopes(environment).map(({ home, runOptions, scope }) => ({
+    home,
+    scope,
+    ...inspectCodexRegistrationScope(binaryPath, installRoot, receipt, runner, runOptions),
+  }));
+  const active = scopes.find(({ scope }) => scope === "active") ?? scopes.at(-1);
+  const state = scopes.some((entry) => entry.state === "registration-unverifiable")
+    ? "registration-unverifiable"
+    : scopes.some((entry) => entry.state === "registration-missing")
+      ? "registration-missing"
+      : scopes.some((entry) => entry.state === "registration-drift")
+        ? "registration-drift"
+        : "installed";
+  return {
+    state,
+    marketplaces: active?.marketplaces ?? [],
+    plugins: active?.plugins ?? [],
+    scopes,
+    ...(active?.error ? { error: active.error } : {}),
+  };
 }
 
 function parseJsonArray(output, label) {
@@ -758,15 +860,27 @@ export function registerRuntimePackages({
   managedRoot,
   opencodeConfigPaths = defaultOpenCodeConfigPaths(),
   runner = DEFAULT_RUNNER,
+  environment = process.env,
 }) {
   if (runtimeId === "codex") {
     const harnessSelector = `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`;
     const ceSelector = `${CE_PLUGIN}@${CE_MARKETPLACE}`;
-    const harnessMarketplace = ensureCodexMarketplace(binaryPath, HARNESS_MARKETPLACE, harnessPayload.path, harnessSelector, managedRoot, runner);
-    const ceMarketplace = ensureCodexMarketplace(binaryPath, CE_MARKETPLACE, cePayload.path, ceSelector, managedRoot, runner);
-    const harnessPlugin = ensureCodexPlugin(binaryPath, harnessSelector, runner);
-    const cePlugin = ensureCodexPlugin(binaryPath, ceSelector, runner);
-    return { harnessMarketplace, ceMarketplace, harnessPlugin, cePlugin };
+    const codexHomes = codexRegistrationScopes(environment).map(({ home, runOptions, scope }) => ({
+      scope,
+      home,
+      harnessMarketplace: ensureCodexMarketplace(binaryPath, HARNESS_MARKETPLACE, harnessPayload.path, harnessSelector, managedRoot, runner, runOptions),
+      ceMarketplace: ensureCodexMarketplace(binaryPath, CE_MARKETPLACE, cePayload.path, ceSelector, managedRoot, runner, runOptions),
+      harnessPlugin: ensureCodexPlugin(binaryPath, harnessSelector, runner, runOptions),
+      cePlugin: ensureCodexPlugin(binaryPath, ceSelector, runner, runOptions),
+    }));
+    const active = codexHomes.find(({ scope }) => scope === "active") ?? codexHomes.at(-1);
+    return {
+      harnessMarketplace: active.harnessMarketplace,
+      ceMarketplace: active.ceMarketplace,
+      harnessPlugin: active.harnessPlugin,
+      cePlugin: active.cePlugin,
+      codexHomes,
+    };
   }
   if (runtimeId === "claude-code") {
     const harnessSelector = `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`;
@@ -929,12 +1043,13 @@ export async function applyInstallPlan(plan, { register = true, repoRoot = REPO_
   };
 }
 
-export async function inspectInstallPlan(plan, { runner = DEFAULT_RUNNER } = {}) {
+export async function inspectInstallPlan(plan, { environment = process.env, runner = DEFAULT_RUNNER } = {}) {
   const runtimes = [];
   for (const selected of plan.runtimes) {
     const executablePath = selected.executable.path;
     let state = "missing";
     let versionOutput;
+    let registration;
     if (existsSync(executablePath)) {
       const stat = lstatSync(executablePath);
       if (stat.isSymbolicLink() || !stat.isFile()) state = "unsafe";
@@ -943,7 +1058,18 @@ export async function inspectInstallPlan(plan, { runner = DEFAULT_RUNNER } = {})
         try {
           versionOutput = runtimeVersionOutput(executablePath, selected.id, runner);
           assertExactRuntimeVersion(selected.id, selected.version, versionOutput);
-          state = existsSync(join(plan.installRoot, "receipts", `${selected.id}.json`)) ? "installed" : "binary-only";
+          const receiptPath = join(plan.installRoot, "receipts", `${selected.id}.json`);
+          state = existsSync(receiptPath) ? "installed" : "binary-only";
+          if (state === "installed" && selected.id === "codex") {
+            try {
+              const receipt = readJson(receiptPath, "Codex runtime registration receipt");
+              registration = inspectCodexRegistration(executablePath, plan.installRoot, receipt, runner, environment);
+              state = registration.state;
+            } catch (error) {
+              registration = { state: "registration-unverifiable", error: errorText(error) };
+              state = registration.state;
+            }
+          }
         } catch {
           state = "version-drift";
         }
@@ -957,7 +1083,7 @@ export async function inspectInstallPlan(plan, { runner = DEFAULT_RUNNER } = {})
       : existsSync(linkPath) && lstatSync(linkPath).isSymbolicLink()
         ? readlinkSync(linkPath)
         : null;
-    runtimes.push({ id: selected.id, expectedVersion: selected.version, state, versionOutput, executablePath, managedLink });
+    runtimes.push({ id: selected.id, expectedVersion: selected.version, state, versionOutput, executablePath, managedLink, ...(registration ? { registration } : {}) });
   }
   return { installRoot: plan.installRoot, runtimes };
 }

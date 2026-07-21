@@ -23,7 +23,7 @@
     "coderabbit"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.codex.json",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Oh My Harness",
     "shortDescription": "Engineering workflows and workspace CLI tools",
