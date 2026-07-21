@@ -78,7 +78,7 @@ closed_at:
 
 ## 외부 동기화
 
-- Linear: ZZA-96, `In Progress`, Bug/High. PR/merge 전이므로 Done으로 바꾸지 않는다.
+- Linear: ZZA-96, `In Review`, Bug/High. Merge·closeout 전이므로 Done으로 바꾸지 않는다.
 - Notion canonical 구현 문서:
   https://app.notion.com/p/3a4ef22ad4fc81a2bd74c1bf82937b10
 
