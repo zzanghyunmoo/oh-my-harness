@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   assertExactRuntimeVersion,
   buildInstallPlan,
+  inspectInstallPlan,
   installRuntimeBinary,
   parseInstallArguments,
   registerRuntimePackages,
@@ -230,6 +231,7 @@ test("Codex registration uses both local fixed marketplaces and is idempotent", 
     harnessPayload: { path: harnessRoot },
     cePayload: { path: ceRoot },
     managedRoot: tmpdir(),
+    environment: {},
     runner,
   };
   registerRuntimePackages(input);
@@ -246,6 +248,159 @@ test("Codex registration uses both local fixed marketplaces and is idempotent", 
   assert.equal(updated.harnessMarketplace, "updated");
   assert.equal(marketplaces.get("oh-my-harness"), nextHarnessRoot);
   assert.equal(plugins.has("oh-my-harness@oh-my-harness"), true);
+});
+
+test("Codex registration reinstalls plugins that are installed but disabled", () => {
+  const harnessRoot = join(tmpdir(), "packages", "oh-my-harness-disabled");
+  const ceRoot = join(tmpdir(), "packages", "compound-engineering-disabled");
+  const marketplaces = new Map([
+    ["oh-my-harness", harnessRoot],
+    ["compound-engineering-plugin", ceRoot],
+  ]);
+  const pluginStates = new Map([
+    ["oh-my-harness@oh-my-harness", "installed, disabled"],
+    ["compound-engineering@compound-engineering-plugin", "installed, enabled"],
+  ]);
+  const calls = [];
+  const runner = {
+    run(_binary, args) {
+      calls.push(args);
+      if (args.join(" ") === "plugin marketplace list") {
+        return `MARKETPLACE  ROOT\n${[...marketplaces].map(([name, root]) => `${name}  ${root}`).join("\n")}\n`;
+      }
+      if (args.join(" ") === "plugin list") {
+        return `PLUGIN  STATUS\n${[...pluginStates].map(([selector, status]) => `${selector}  ${status}`).join("\n")}\n`;
+      }
+      if (args[0] === "plugin" && args[1] === "remove") {
+        pluginStates.set(args[2], "not installed");
+        return "{}\n";
+      }
+      if (args[0] === "plugin" && args[1] === "add") {
+        pluginStates.set(args[2], "installed, enabled");
+        return "{}\n";
+      }
+      throw new Error(`unexpected command: ${args.join(" ")}`);
+    },
+  };
+
+  registerRuntimePackages({
+    runtimeId: "codex",
+    binaryPath: "/managed/codex",
+    harnessPayload: { path: harnessRoot },
+    cePayload: { path: ceRoot },
+    managedRoot: tmpdir(),
+    environment: {},
+    runner,
+  });
+
+  assert.equal(pluginStates.get("oh-my-harness@oh-my-harness"), "installed, enabled");
+  assert.equal(calls.some((args) => args.join(" ") === "plugin remove oh-my-harness@oh-my-harness --json"), true);
+  assert.equal(calls.some((args) => args.join(" ") === "plugin add oh-my-harness@oh-my-harness --json"), true);
+});
+
+test("Codex status reports missing registration instead of trusting a stale receipt", async () => {
+  const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-codex-status-"));
+  const executablePath = join(installRoot, "runtimes", "codex", "0.144.4", "darwin-arm64-personal", "bin", "codex");
+  const executable = Buffer.from("codex fixture\n");
+  try {
+    mkdirSync(join(executablePath, ".."), { recursive: true });
+    mkdirSync(join(installRoot, "receipts"), { recursive: true });
+    writeFileSync(executablePath, executable);
+    writeFileSync(join(installRoot, "receipts", "codex.json"), `${JSON.stringify({
+      harnessPackageSha256: "a".repeat(64),
+      compoundEngineeringCommit: "b".repeat(40),
+    })}\n`);
+    const plan = {
+      installRoot,
+      runtimes: [{
+        id: "codex",
+        version: "0.144.4",
+        executable: {
+          path: executablePath,
+          sha256: createHash("sha256").update(executable).digest("hex"),
+        },
+        tuple: { os: "darwin" },
+      }],
+    };
+    const result = await inspectInstallPlan(plan, {
+      environment: {},
+      runner: {
+        run(_binary, args) {
+          if (args.join(" ") === "--version") return "codex-cli 0.144.4\n";
+          if (args.join(" ") === "plugin marketplace list") return "MARKETPLACE  ROOT\n";
+          if (args.join(" ") === "plugin list") {
+            return "PLUGIN  STATUS\noh-my-harness@oh-my-harness-old  installed, enabled\ncompound-engineering@compound-engineering-plugin-old  installed, enabled\n";
+          }
+          throw new Error(`unexpected command: ${args.join(" ")}`);
+        },
+      },
+    });
+
+    assert.equal(result.runtimes[0].state, "registration-missing");
+    assert.equal(result.runtimes[0].registration.marketplaces.every(({ state }) => state === "missing"), true);
+    assert.equal(result.runtimes[0].registration.plugins.every(({ installed }) => installed === false), true);
+  } finally {
+    rmSync(installRoot, { recursive: true, force: true });
+  }
+});
+
+test("Codex registration under Orca repairs both the canonical and active homes", () => {
+  const harnessRoot = join(tmpdir(), "packages", "oh-my-harness-orca");
+  const ceRoot = join(tmpdir(), "packages", "compound-engineering-orca");
+  const activeHome = join(tmpdir(), "orca", "codex-home");
+  const registries = new Map();
+  const calls = [];
+  const registry = (options) => {
+    const home = options?.env?.CODEX_HOME ?? "system-default";
+    if (!registries.has(home)) registries.set(home, { marketplaces: new Map(), plugins: new Set() });
+    return registries.get(home);
+  };
+  const runner = {
+    run(_binary, args, options) {
+      calls.push({ args, home: options?.env?.CODEX_HOME ?? "system-default" });
+      const current = registry(options);
+      if (args.join(" ") === "plugin marketplace list") {
+        return `MARKETPLACE  ROOT\n${[...current.marketplaces].map(([name, root]) => `${name}  ${root}`).join("\n")}\n`;
+      }
+      if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add") {
+        const root = args[3];
+        current.marketplaces.set(root.includes("oh-my-harness") ? "oh-my-harness" : "compound-engineering-plugin", root);
+        return "{}\n";
+      }
+      if (args.join(" ") === "plugin list") {
+        return `PLUGIN  STATUS\noh-my-harness@oh-my-harness  ${current.plugins.has("oh-my-harness@oh-my-harness") ? "installed, enabled" : "not installed"}\ncompound-engineering@compound-engineering-plugin  ${current.plugins.has("compound-engineering@compound-engineering-plugin") ? "installed, enabled" : "not installed"}\n`;
+      }
+      if (args[0] === "plugin" && args[1] === "add") {
+        current.plugins.add(args[2]);
+        return "{}\n";
+      }
+      throw new Error(`unexpected command: ${args.join(" ")}`);
+    },
+  };
+
+  const result = registerRuntimePackages({
+    runtimeId: "codex",
+    binaryPath: "/managed/codex",
+    harnessPayload: { path: harnessRoot },
+    cePayload: { path: ceRoot },
+    managedRoot: tmpdir(),
+    environment: {
+      HOME: homedir(),
+      ORCA_CODEX_HOME: activeHome,
+    },
+    runner,
+  });
+
+  assert.deepEqual(result.codexHomes.map(({ scope }) => scope), ["system-default", "active"]);
+  assert.deepEqual([...registries.keys()], ["system-default", activeHome]);
+  for (const current of registries.values()) {
+    assert.deepEqual([...current.marketplaces.keys()].sort(), ["compound-engineering-plugin", "oh-my-harness"]);
+    assert.deepEqual([...current.plugins].sort(), [
+      "compound-engineering@compound-engineering-plugin",
+      "oh-my-harness@oh-my-harness",
+    ]);
+  }
+  assert.equal(calls.findIndex(({ home }) => home === "system-default") < calls.findIndex(({ home }) => home === activeHome), true);
 });
 
 test("OpenCode and Pi registration use fixed local payloads and pinned companions", () => {
@@ -340,7 +495,7 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   const claudeMarketplace = JSON.parse(readFileSync(join(REPO_ROOT, ".claude-plugin", "marketplace.json"), "utf8"));
   const plugin = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".codex-plugin", "plugin.json"), "utf8"));
   const claudePlugin = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".claude-plugin", "plugin.json"), "utf8"));
-  const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.codex.json"), "utf8"));
+  const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.json"), "utf8"));
   const claudeMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.claude.json"), "utf8"));
   const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
   const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
@@ -354,7 +509,7 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   assert.equal(plugin.version, packageJson.version);
   assert.equal(claudePlugin.version, packageJson.version);
   assert.equal(plugin.skills, "./skills/");
-  assert.equal(plugin.mcpServers, "./.mcp.codex.json");
+  assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.equal(claudePlugin.mcpServers, "./.mcp.claude.json");
   assert.match(codexMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'codex'/);
   assert.match(claudeMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'claude-code'/);
