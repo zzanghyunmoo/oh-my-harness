@@ -2,9 +2,9 @@
 workflow_schema: compound-work/v1
 ticket_id: ZZA-96
 ticket_url: https://linear.app/zzanghyunmoo/issue/ZZA-96/oh-my-harness-codex-플러그인-등록-유실-감지-및-복구
-ticket_status: In Review
-ticket_completion: pending
-remaining_prs: 1
+ticket_status: Done
+ticket_completion: complete
+remaining_prs:
 ideation_status: waived
 ideation_path:
 ideation_notion_url:
@@ -16,13 +16,13 @@ plan_waiver_reason: 수정 범위가 Codex 등록 상태 검사와 재설치 복
 work_status: complete
 work_notion_url: https://app.notion.com/p/3a4ef22ad4fc81a2bd74c1bf82937b10
 pr_url: https://github.com/zzanghyunmoo/oh-my-harness/pull/32
-closeout_status: pending
-merged_pr_url:
-merge_commit:
-kb_paths:
-notion_feature_status_url:
+closeout_status: complete
+merged_pr_url: https://github.com/zzanghyunmoo/oh-my-harness/pull/32
+merge_commit: ce56a38423a83cb5b4681d9fa792788bd869d945
+kb_paths: docs/kb/runtime/2026-07-21-ZZA-96-codex-plugin-registration-recovery.md
+notion_feature_status_url: https://app.notion.com/p/39eef22ad4fc819db113ce1029c899a4
 notion_ticket_url: https://app.notion.com/p/3a4ef22ad4fc81a2bd74c1bf82937b10
-closed_at:
+closed_at: 2026-07-21T13:56:15Z
 ---
 
 # ZZA-96 작업 기록
@@ -82,11 +82,17 @@ closed_at:
 
 ## 외부 동기화
 
-- Linear: ZZA-96, `In Review`, Bug/High. Merge·closeout 전이므로 Done으로 바꾸지 않는다.
+- Linear: ZZA-96, `Done`, Bug/High.
 - Notion canonical 구현 문서:
   https://app.notion.com/p/3a4ef22ad4fc81a2bd74c1bf82937b10
+- Notion canonical 기능 현황:
+  https://app.notion.com/p/39eef22ad4fc819db113ce1029c899a4
 
 ## Merge closeout
 
-Merge 후 KB 경로, Notion 기능 현황·티켓 문서, merge commit과 Linear 상태를
-기록한다.
+- PR #32를 squash merge했다.
+- Merge commit: `ce56a38423a83cb5b4681d9fa792788bd869d945`.
+- KB: `docs/kb/runtime/2026-07-21-ZZA-96-codex-plugin-registration-recovery.md`.
+- Notion `디자인 문서 > 기능 현황`과 `개발 문서 > 티켓`을 완료 상태로
+  동기화했다.
+- 후속 PR이 없어 Linear ZZA-96을 `Done`으로 마감했다.
