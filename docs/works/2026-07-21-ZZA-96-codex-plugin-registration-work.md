@@ -44,6 +44,8 @@ closed_at:
     현재 관리형 `CODEX_HOME`을 다음으로 등록·검사한다.
   - `ensureCodexPlugin`: 설치 여부뿐 아니라 enabled 상태를 확인하고 disabled
     플러그인을 재설치한다.
+  - `codexPluginStatus`: plugin 목록을 selector column 단위로 파싱해 접두사가
+    같은 다른 플러그인을 대상 등록으로 오인하지 않는다.
   - `inspectCodexRegistration`: receipt의 고정 package identity로 실제 marketplace
     경로와 plugin 상태를 두 홈에서 검사해 `registration-missing`,
     `registration-drift`, `registration-unverifiable`을 보고한다.
@@ -51,8 +53,8 @@ closed_at:
     이용한 offline 설치로 복구한다.
 - `plugins/oh-my-harness/.codex-plugin/plugin.json`,
   `plugins/oh-my-harness/.mcp.json`: Codex MCP manifest 경로를 플러그인 표준에 맞춘다.
-- `tests/harness/install.test.mjs`: stale receipt, disabled plugin, Orca dual-home
-  등록 회귀 fixture를 추가한다.
+- `tests/harness/install.test.mjs`: stale receipt, selector 접두사 충돌, disabled
+  plugin, Orca dual-home 등록 회귀 fixture를 추가한다.
 - 로컬 Codex 설정: 고정 payload를 canonical/managed 두 홈에 재등록했다.
 - 작업 브랜치: `ZZA-96/fix-codex-plugin-registration`.
 
@@ -66,7 +68,7 @@ closed_at:
 - `npm run harness:descriptors:verify`: 20 tuples/116 expected keys 검증 통과.
 - `node --test tests/harness/install.test.mjs`: 14 passed, 1 Windows-only skipped,
   0 failed.
-- `uv run --with pyyaml python .../validate_plugin.py plugins/oh-my-harness`:
+- `uv run --with pyyaml python <plugin-validator>/validate_plugin.py plugins/oh-my-harness`:
   plugin validation passed.
 - `NPM_CONFIG_OFFLINE=true ./omh agents install --only codex --apply --json`:
   canonical `~/.codex`와 Orca managed home 모두 등록 성공.
@@ -74,6 +76,8 @@ closed_at:
   `compound-engineering@compound-engineering-plugin` 3.19.0과
   `oh-my-harness@oh-my-harness` 0.2.0 모두 `installed, enabled`.
 - `./omh agents status --only codex --json`: 두 scope 모두 `installed`.
+- 미실행: 인증서 오류 감지 후 online 시도에서 offline cache 재시도로 전환되는
+  분기 자동 검증. 실제 offline cache 설치 성공만 확인했다.
 - 미실행: Windows 실제 설치 검증. Windows 전용 fixture는 현재 macOS라 스킵했다.
 
 ## 외부 동기화
