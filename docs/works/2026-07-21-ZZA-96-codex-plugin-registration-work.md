@@ -2,7 +2,7 @@
 workflow_schema: compound-work/v1
 ticket_id: ZZA-96
 ticket_url: https://linear.app/zzanghyunmoo/issue/ZZA-96/oh-my-harness-codex-플러그인-등록-유실-감지-및-복구
-ticket_status: In Progress
+ticket_status: In Review
 ticket_completion: pending
 remaining_prs: 1
 ideation_status: waived
@@ -13,9 +13,9 @@ plan_status: waived
 plan_path:
 plan_notion_url:
 plan_waiver_reason: 수정 범위가 Codex 등록 상태 검사와 재설치 복구로 한정되어 별도 계획 문서 없이 work evidence에서 추적한다.
-work_status: in_progress
+work_status: complete
 work_notion_url: https://app.notion.com/p/3a4ef22ad4fc81a2bd74c1bf82937b10
-pr_url:
+pr_url: https://github.com/zzanghyunmoo/oh-my-harness/pull/32
 closeout_status: pending
 merged_pr_url:
 merge_commit:
