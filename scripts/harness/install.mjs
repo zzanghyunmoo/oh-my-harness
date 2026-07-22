@@ -27,7 +27,14 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGunzip } from "node:zlib";
-import { applyEdits as applyJsoncEdits, modify as modifyJsonc, parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
+import {
+  applyEdits as applyJsoncEdits,
+  findNodeAtLocation as findJsoncNodeAtLocation,
+  modify as modifyJsonc,
+  parse as parseJsonc,
+  parseTree as parseJsoncTree,
+  printParseErrorCode,
+} from "jsonc-parser";
 import tar from "tar-stream";
 
 import {
@@ -758,8 +765,11 @@ function inspectClaudeRegistration(binaryPath, installRoot, receipt, runner, run
     ].map(({ name, expectedRoot }) => {
       const current = marketplaceList.find((entry) => entry?.name === name);
       const observedRoot = current ? claudeMarketplaceSourcePath(current) ?? null : null;
-      const state = !current ? "missing" : observedRoot === resolve(expectedRoot) ? "installed" : "drift";
-      return { name, expectedRoot, observedRoot, state };
+      const targetSafe = isSafeDirectory(expectedRoot);
+      let state = "missing";
+      if (current && observedRoot !== resolve(expectedRoot)) state = "drift";
+      else if (current && targetSafe) state = "installed";
+      return { name, expectedRoot, observedRoot, targetSafe, state };
     });
     const plugins = [
       { selector: `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`, expectedVersion: HARNESS_PACKAGE.version },
@@ -828,26 +838,60 @@ function readOpenCodePluginConfig(path) {
   return { config, original, plugins: config.plugin ?? [], stat };
 }
 
+function staleOpenCodePluginSpecs(plugins, managedRoot, expectedManagedPaths) {
+  const expected = new Set(expectedManagedPaths.map(realOrResolvedPath));
+  return plugins.filter((entry) => {
+    if (entry === "oh-my-openagent@latest") return true;
+    const observedPath = openCodePluginPath(entry);
+    return Boolean(observedPath
+      && managedRoot
+      && isPathWithin(join(managedRoot, "packages"), observedPath)
+      && !expected.has(observedPath));
+  });
+}
+
+function backupOpenCodeMigrationSources(configPaths, managedRoot, expectedManagedPaths) {
+  const backups = [];
+  for (const path of configPaths) {
+    const loaded = readOpenCodePluginConfig(path);
+    if (!loaded || staleOpenCodePluginSpecs(loaded.plugins, managedRoot, expectedManagedPaths).length === 0) continue;
+    const backup = `${path}.oh-my-harness.pre-fixed-install`;
+    if (existsSync(backup)) continue;
+    writeFileSync(backup, loaded.original, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    backups.push(backup);
+  }
+  return backups;
+}
+
+function removeLeadingJsoncComments(source, path) {
+  const node = findJsoncNodeAtLocation(parseJsoncTree(source), path);
+  if (!node) return source;
+  const valueLineStart = source.lastIndexOf("\n", node.offset - 1) + 1;
+  let commentStart = valueLineStart;
+  while (commentStart > 0) {
+    const previousLineEnd = commentStart - 1;
+    const previousLineStart = source.lastIndexOf("\n", previousLineEnd - 1) + 1;
+    if (!/^\s*\/\//.test(source.slice(previousLineStart, previousLineEnd))) break;
+    commentStart = previousLineStart;
+  }
+  return commentStart === valueLineStart
+    ? source
+    : `${source.slice(0, commentStart)}${source.slice(valueLineStart)}`;
+}
+
 function migrateOpenCodePluginSpecs(configPaths, managedRoot, expectedManagedPaths) {
   const backups = [];
   const removed = [];
-  const expected = new Set(expectedManagedPaths.map(realOrResolvedPath));
   for (const path of configPaths) {
     const loaded = readOpenCodePluginConfig(path);
     if (!loaded?.config || loaded.plugins.length === 0) continue;
     const { original, plugins, stat } = loaded;
-    const stale = plugins.filter((entry) => {
-      if (entry === "oh-my-openagent@latest") return true;
-      const observedPath = openCodePluginPath(entry);
-      return Boolean(observedPath
-        && managedRoot
-        && isPathWithin(join(managedRoot, "packages"), observedPath)
-        && !expected.has(observedPath));
-    });
+    const stale = staleOpenCodePluginSpecs(plugins, managedRoot, expectedManagedPaths);
     if (stale.length === 0) continue;
     const staleSet = new Set(stale);
     let migrated = original;
     for (const index of plugins.map((entry, index) => staleSet.has(entry) ? index : -1).filter((index) => index >= 0).reverse()) {
+      migrated = removeLeadingJsoncComments(migrated, ["plugin", index]);
       migrated = applyJsoncEdits(migrated, modifyJsonc(migrated, ["plugin", index], undefined, {
         formattingOptions: openCodeFormattingOptions(original),
       }));
@@ -933,12 +977,11 @@ function listedPiPackages(output) {
 }
 
 function piHasLocalPath(packages, expectedPath) {
-  let expected;
-  try { expected = realpathSync(expectedPath); }
-  catch { expected = resolve(expectedPath); }
+  if (!isSafeDirectory(expectedPath)) return false;
+  const expected = realpathSync(expectedPath);
   return [...packages.resolvedPaths].some((path) => {
     try { return realpathSync(path) === expected; }
-    catch { return resolve(path) === expected; }
+    catch { return false; }
   });
 }
 
@@ -1125,55 +1168,72 @@ export function registerRuntimePackages({
     const expectedPaths = [harnessPayload.path, cePayload.pluginPath];
     const resolvedConfigPaths = opencodeConfigPaths ?? defaultOpenCodeConfigPaths(environment);
     const before = inspectOpenCodePlugins(resolvedConfigPaths, managedRoot, expectedPaths);
-    const migration = migrateOpenCodePluginSpecs(resolvedConfigPaths, managedRoot, expectedPaths);
-    const skillsMigration = archiveOpenCodePredecessorSkills(resolvedConfigPaths);
+    const preparedBackups = backupOpenCodeMigrationSources(resolvedConfigPaths, managedRoot, expectedPaths);
     for (const plugin of before.plugins) {
       if (!plugin.installed) runner.run(binaryPath, ["plugin", plugin.expectedPath, "--global", "--force"], runOptions);
     }
     const pluginMutated = before.plugins.some(({ installed }) => !installed);
-    const after = pluginMutated || migration.removed.length > 0
+    const prepared = pluginMutated
       ? inspectOpenCodePlugins(resolvedConfigPaths, managedRoot, expectedPaths)
       : before;
+    if (prepared.plugins.some(({ installed }) => !installed)) {
+      fail(`OpenCode replacement registration did not converge: ${prepared.state}`);
+    }
+    const migration = migrateOpenCodePluginSpecs(resolvedConfigPaths, managedRoot, expectedPaths);
+    const skillsMigration = archiveOpenCodePredecessorSkills(resolvedConfigPaths);
+    const after = migration.removed.length > 0
+      ? inspectOpenCodePlugins(resolvedConfigPaths, managedRoot, expectedPaths)
+      : prepared;
     if (after.state !== "installed") fail(`OpenCode package registration did not converge: ${after.state}`);
     return {
       harnessPlugin: before.plugins[0]?.installed ? "reused" : "installed",
       cePlugin: before.plugins[1]?.installed ? "reused" : "installed",
       ...migration,
+      backups: [...preparedBackups, ...migration.backups],
       ...skillsMigration,
     };
   }
   if (runtimeId === "pi") {
     const piEnv = boundedNpmEnvironment(environment);
     const before = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
+    const sources = [
+      harnessPayload.path,
+      cePayload.pluginPath,
+      ...PI_COMPANION_SOURCES,
+    ];
+    let installedAny = false;
+    for (const source of sources) {
+      const installed = isAbsolute(source) ? piHasLocalPath(before, source) : before.sources.has(source);
+      if (!installed) {
+        runner.run(binaryPath, ["install", source, "--approve"], { env: piEnv });
+        installedAny = true;
+      }
+    }
+    const prepared = installedAny
+      ? listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }))
+      : before;
+    const preparedInspection = inspectPiPackages(prepared, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
+    if (preparedInspection.packages.some(({ installed }) => !installed)) {
+      fail(`Pi replacement registration did not converge: ${preparedInspection.state}`);
+    }
     const removed = [];
-    for (const source of before.sources) {
+    for (const source of prepared.sources) {
       if (!stalePiPackageSource(source)) continue;
       runner.run(binaryPath, ["remove", source, "--approve"], { env: piEnv });
       removed.push(source);
     }
     if (managedRoot) {
       const expectedLocalPaths = new Set([realOrResolvedPath(harnessPayload.path), realOrResolvedPath(cePayload.pluginPath)]);
-      for (const entry of before.entries) {
+      for (const entry of prepared.entries) {
         const resolvedLocalPath = entry.resolvedPaths.find((path) => isPathWithin(join(managedRoot, "packages"), path));
         if (!resolvedLocalPath || expectedLocalPaths.has(realOrResolvedPath(resolvedLocalPath))) continue;
         runner.run(binaryPath, ["remove", resolvedLocalPath, "--approve"], { env: piEnv });
         removed.push(entry.source);
       }
     }
-    const sources = [
-      harnessPayload.path,
-      cePayload.pluginPath,
-      ...PI_COMPANION_SOURCES,
-    ];
-    for (const source of sources) {
-      const installed = isAbsolute(source) ? piHasLocalPath(before, source) : before.sources.has(source);
-      if (!installed) runner.run(binaryPath, ["install", source, "--approve"], { env: piEnv });
-    }
-    const after = removed.length > 0 || sources.some((source) => (
-      isAbsolute(source) ? !piHasLocalPath(before, source) : !before.sources.has(source)
-    ))
+    const after = removed.length > 0
       ? listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }))
-      : before;
+      : prepared;
     const inspected = inspectPiPackages(after, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
     if (inspected.state !== "installed") fail(`Pi package registration did not converge: ${inspected.state}`);
     return { installed: sources, removed };
