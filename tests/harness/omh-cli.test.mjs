@@ -130,7 +130,7 @@ test("omh setup apply composes the existing agent and tool installers", async ()
     buildTools: () => [{ id: "github", status: "installed", installer: { command: "brew", args: [] } }],
     buildProxyInstall: () => [{ id: "ccs", status: "installed", installer: { command: "npm", args: [] } }],
     buildProxyConfiguration: () => [],
-    applyAgentPlan: async (_plan, { register }) => { calls.push(["agents", register]); return { applied: true, runtimes: [] }; },
+    applyAgentPlan: async (_plan, { environment, register }) => { calls.push(["agents", register, environment.TEST_MARKER]); return { applied: true, runtimes: [] }; },
     applyTools: (_plan, { env, run }) => { calls.push(["tools", env.TEST_MARKER, typeof run]); return []; },
     applyProxyInstall: async (_plan, { env, run }) => { calls.push(["proxies", env.TEST_MARKER, typeof run]); return []; },
     applyProxyConfiguration: () => [],
@@ -138,14 +138,17 @@ test("omh setup apply composes the existing agent and tool installers", async ()
   const result = await runOmh([
     "setup", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed", "--apply", "--json",
   ], { env: { TEST_MARKER: "kept" }, dependencies });
-  assert.deepEqual(calls, [["agents", true], ["tools", "kept", "function"], ["proxies", "kept", "function"]]);
+  assert.deepEqual(calls, [["agents", true, "kept"], ["tools", "kept", "function"], ["proxies", "kept", "function"]]);
   assert.equal(result.apply, true);
 });
 
 test("omh status and doctor combine managed-agent and shared-tool state", async () => {
   const dependencies = {
     buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
-    inspectAgents: async () => ({ installRoot: "/tmp/managed", runtimes: [{ id: "codex", expectedVersion: "1.0.0", state: "missing" }] }),
+    inspectAgents: async (_plan, { environment }) => {
+      assert.equal(environment.TEST_MARKER, "kept");
+      return { installRoot: "/tmp/managed", runtimes: [{ id: "codex", expectedVersion: "1.0.0", state: "missing" }] };
+    },
     buildTools: () => [{ id: "github", status: "installable", installer: { command: "brew", args: ["install", "gh"] } }],
     buildProxyInstall: () => [
       { id: "ccs", status: "installed", installer: { command: "npm", args: [] } },
@@ -156,7 +159,7 @@ test("omh status and doctor combine managed-agent and shared-tool state", async 
       { id: "litellm", label: "LiteLLM", status: "awaiting-credentials", missing: ["LITELLM_BASE_URL", "LITELLM_API_KEY"] },
     ],
   };
-  const result = await runOmh(["doctor", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed"], { dependencies });
+  const result = await runOmh(["doctor", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed"], { env: { TEST_MARKER: "kept" }, dependencies });
   assert.deepEqual(result.nextActions, [
     "omh agents install --only codex --apply",
     "omh tools install --only github --apply",

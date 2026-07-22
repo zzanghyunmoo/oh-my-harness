@@ -27,6 +27,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGunzip } from "node:zlib";
+import { applyEdits as applyJsoncEdits, modify as modifyJsonc, parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import tar from "tar-stream";
 
 import {
@@ -288,11 +289,7 @@ export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, 
     const extracted = readJson(join(payloadRoot, "package.json"), "packed oh-my-harness manifest");
     if (extracted.name !== HARNESS_PACKAGE.name || extracted.version !== HARNESS_PACKAGE.version) fail("packed oh-my-harness identity drift");
     const installInvocation = npmInvocation(["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"], process.env, repoRoot);
-    const npmEnv = {
-      ...process.env,
-      npm_config_fetch_retries: "0",
-      npm_config_fetch_timeout: "10000",
-    };
+    const npmEnv = boundedNpmEnvironment(process.env);
     try {
       runner.run(installInvocation.command, installInvocation.args, { cwd: payloadRoot, env: npmEnv });
     } catch (error) {
@@ -408,8 +405,8 @@ export function assertExactRuntimeVersion(runtimeId, expectedVersion, output) {
   return "native-version";
 }
 
-function runtimeVersionOutput(binaryPath, runtimeId, runner) {
-  const output = runner.run(binaryPath, ["--version"], { cwd: dirname(binaryPath), timeout: 10_000 });
+function runtimeVersionOutput(binaryPath, runner, runOptions = {}) {
+  const output = runner.run(binaryPath, ["--version"], { ...runOptions, cwd: dirname(binaryPath), timeout: 10_000 });
   return output.trim();
 }
 
@@ -466,7 +463,7 @@ export async function installRuntimeBinary({ installRoot, runtime, tuple, runner
   if (existsSync(finalRoot)) {
     if (!existsSync(executablePath) || lstatSync(executablePath).isSymbolicLink() || !lstatSync(executablePath).isFile()) fail(`${runtime.id} installed executable is unsafe`);
     if (await sha256File(executablePath) !== expectedSha256) fail(`${runtime.id} installed executable digest drift`);
-    const versionOutput = runtimeVersionOutput(executablePath, runtime.id, runner);
+    const versionOutput = runtimeVersionOutput(executablePath, runner);
     const versionEvidence = assertExactRuntimeVersion(runtime.id, runtime.version, versionOutput);
     const linkPath = ensureManagedLink(installRoot, runtime.id, executablePath, tuple.os);
     return { executablePath, linkPath, reused: true, versionEvidence, versionOutput };
@@ -495,7 +492,7 @@ export async function installRuntimeBinary({ installRoot, runtime, tuple, runner
       expectedMemberPath: tuple.executable.memberPath,
       format: archiveFormat(asset.name),
     });
-    const versionOutput = runtimeVersionOutput(stagedExecutable, runtime.id, runner);
+    const versionOutput = runtimeVersionOutput(stagedExecutable, runner);
     const versionEvidence = assertExactRuntimeVersion(runtime.id, runtime.version, versionOutput);
     const receipt = {
       schemaVersion: INSTALL_SCHEMA_VERSION,
@@ -603,18 +600,41 @@ function codexRegistrationScopes(environment = process.env) {
   ];
 }
 
+function expectedRegistrationPaths(installRoot, receipt) {
+  if (typeof receipt?.harnessPackageSha256 !== "string" || typeof receipt?.compoundEngineeringCommit !== "string") return undefined;
+  const compoundEngineeringRoot = join(
+    installRoot,
+    "packages",
+    DEFAULT_POLICY.packageName,
+    DEFAULT_POLICY.packageVersion,
+    receipt.compoundEngineeringCommit,
+  );
+  return {
+    harness: join(installRoot, "packages", HARNESS_PACKAGE.name, HARNESS_PACKAGE.version, receipt.harnessPackageSha256),
+    compoundEngineeringRoot,
+    compoundEngineeringPlugin: join(compoundEngineeringRoot, "plugins", CE_PLUGIN),
+  };
+}
+
+function registrationState(missing, drift) {
+  if (missing) return "registration-missing";
+  if (drift) return "registration-drift";
+  return "installed";
+}
+
 function inspectCodexRegistrationScope(binaryPath, installRoot, receipt, runner, runOptions) {
-  if (typeof receipt?.harnessPackageSha256 !== "string" || typeof receipt?.compoundEngineeringCommit !== "string") {
+  const expected = expectedRegistrationPaths(installRoot, receipt);
+  if (!expected) {
     return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
   }
   const expectedMarketplaces = [
     {
       name: HARNESS_MARKETPLACE,
-      root: join(installRoot, "packages", HARNESS_PACKAGE.name, HARNESS_PACKAGE.version, receipt.harnessPackageSha256),
+      root: expected.harness,
     },
     {
       name: CE_MARKETPLACE,
-      root: join(installRoot, "packages", DEFAULT_POLICY.packageName, DEFAULT_POLICY.packageVersion, receipt.compoundEngineeringCommit),
+      root: expected.compoundEngineeringRoot,
     },
   ];
   try {
@@ -632,7 +652,7 @@ function inspectCodexRegistrationScope(binaryPath, installRoot, receipt, runner,
     const missing = marketplaces.some(({ state }) => state === "missing") || plugins.some(({ installed }) => !installed);
     const drift = marketplaces.some(({ state }) => state === "drift") || plugins.some(({ installed, enabled }) => installed && !enabled);
     return {
-      state: missing ? "registration-missing" : drift ? "registration-drift" : "installed",
+      state: registrationState(missing, drift),
       marketplaces,
       plugins,
     };
@@ -650,11 +670,10 @@ function inspectCodexRegistration(binaryPath, installRoot, receipt, runner, envi
   const active = scopes.find(({ scope }) => scope === "active") ?? scopes.at(-1);
   const state = scopes.some((entry) => entry.state === "registration-unverifiable")
     ? "registration-unverifiable"
-    : scopes.some((entry) => entry.state === "registration-missing")
-      ? "registration-missing"
-      : scopes.some((entry) => entry.state === "registration-drift")
-        ? "registration-drift"
-        : "installed";
+    : registrationState(
+      scopes.some((entry) => entry.state === "registration-missing"),
+      scopes.some((entry) => entry.state === "registration-drift"),
+    );
   return {
     state,
     marketplaces: active?.marketplaces ?? [],
@@ -691,8 +710,8 @@ function knownClaudeUpstreamMarketplace(entry, name) {
   return source === "github" && repo === "EveryInc/compound-engineering-plugin";
 }
 
-function ensureClaudeMarketplace(binaryPath, name, root, managedRoot, runner) {
-  const list = () => parseJsonArray(runner.run(binaryPath, ["plugin", "marketplace", "list", "--json"]), "Claude marketplace list");
+function ensureClaudeMarketplace(binaryPath, name, root, managedRoot, runner, runOptions = {}) {
+  const list = () => parseJsonArray(runner.run(binaryPath, ["plugin", "marketplace", "list", "--json"], runOptions), "Claude marketplace list");
   const current = list().find((entry) => entry?.name === name);
   if (current) {
     const sourcePath = claudeMarketplaceSourcePath(current);
@@ -701,22 +720,22 @@ function ensureClaudeMarketplace(binaryPath, name, root, managedRoot, runner) {
     if (!managedLocal && !knownClaudeUpstreamMarketplace(current, name)) {
       fail(`Claude marketplace ${name} already points to another source`);
     }
-    runner.run(binaryPath, ["plugin", "marketplace", "remove", name, "--scope", "user"]);
-    runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--scope", "user"]);
+    runner.run(binaryPath, ["plugin", "marketplace", "remove", name, "--scope", "user"], runOptions);
+    runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--scope", "user"], runOptions);
     if (!list().some((entry) => entry?.name === name)) fail(`Claude marketplace ${name} was not updated`);
     return "updated";
   }
-  runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--scope", "user"]);
+  runner.run(binaryPath, ["plugin", "marketplace", "add", root, "--scope", "user"], runOptions);
   if (!list().some((entry) => entry?.name === name)) fail(`Claude marketplace ${name} was not installed`);
   return "installed";
 }
 
-function ensureClaudePlugin(binaryPath, selector, expectedVersion, runner) {
-  const list = () => parseJsonArray(runner.run(binaryPath, ["plugin", "list", "--json"]), "Claude plugin list");
+function ensureClaudePlugin(binaryPath, selector, expectedVersion, runner, runOptions = {}) {
+  const list = () => parseJsonArray(runner.run(binaryPath, ["plugin", "list", "--json"], runOptions), "Claude plugin list");
   const current = list().find((entry) => entry?.id === selector && entry?.scope === "user");
   if (current?.version === expectedVersion && current?.enabled === true) return "reused";
-  if (current) runner.run(binaryPath, ["plugin", "uninstall", selector, "--scope", "user"]);
-  runner.run(binaryPath, ["plugin", "install", selector, "--scope", "user"]);
+  if (current) runner.run(binaryPath, ["plugin", "uninstall", selector, "--scope", "user"], runOptions);
+  runner.run(binaryPath, ["plugin", "install", selector, "--scope", "user"], runOptions);
   const installed = list().find((entry) => entry?.id === selector && entry?.scope === "user");
   if (!installed || installed.version !== expectedVersion || installed.enabled !== true) {
     fail(`Claude plugin ${selector} was not installed at exact version ${expectedVersion}`);
@@ -724,10 +743,89 @@ function ensureClaudePlugin(binaryPath, selector, expectedVersion, runner) {
   return current ? "updated" : "installed";
 }
 
-export function defaultOpenCodeConfigPaths(env = process.env) {
-  const configBase = env.XDG_CONFIG_HOME ? resolve(env.XDG_CONFIG_HOME) : join(homedir(), ".config");
-  const configRoot = join(configBase, "opencode");
-  return ["config.json", "opencode.json", "opencode.jsonc"].map((name) => join(configRoot, name));
+function inspectClaudeRegistration(binaryPath, installRoot, receipt, runner, runOptions = {}) {
+  const expected = expectedRegistrationPaths(installRoot, receipt);
+  if (!expected) return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
+  try {
+    const marketplaceList = parseJsonArray(
+      runner.run(binaryPath, ["plugin", "marketplace", "list", "--json"], runOptions),
+      "Claude marketplace list",
+    );
+    const pluginList = parseJsonArray(runner.run(binaryPath, ["plugin", "list", "--json"], runOptions), "Claude plugin list");
+    const marketplaces = [
+      { name: HARNESS_MARKETPLACE, expectedRoot: expected.harness },
+      { name: CE_MARKETPLACE, expectedRoot: expected.compoundEngineeringPlugin },
+    ].map(({ name, expectedRoot }) => {
+      const current = marketplaceList.find((entry) => entry?.name === name);
+      const observedRoot = current ? claudeMarketplaceSourcePath(current) ?? null : null;
+      const state = !current ? "missing" : observedRoot === resolve(expectedRoot) ? "installed" : "drift";
+      return { name, expectedRoot, observedRoot, state };
+    });
+    const plugins = [
+      { selector: `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`, expectedVersion: HARNESS_PACKAGE.version },
+      { selector: `${CE_PLUGIN}@${CE_MARKETPLACE}`, expectedVersion: DEFAULT_POLICY.packageVersion },
+    ].map(({ selector, expectedVersion }) => {
+      const observed = pluginList.find((entry) => entry?.id === selector);
+      const current = pluginList.find((entry) => entry?.id === selector && entry?.scope === "user");
+      let state = "missing";
+      if (observed) state = current?.version === expectedVersion && current?.enabled === true ? "installed" : "drift";
+      return {
+        selector,
+        expectedVersion,
+        installed: Boolean(current),
+        observedVersion: current?.version ?? observed?.version ?? null,
+        enabled: current?.enabled === true,
+        scope: current?.scope ?? observed?.scope ?? null,
+        state,
+      };
+    });
+    const missing = marketplaces.some(({ state }) => state === "missing") || plugins.some(({ state }) => state === "missing");
+    const drift = marketplaces.some(({ state }) => state === "drift") || plugins.some(({ state }) => state === "drift");
+    return {
+      state: registrationState(missing, drift),
+      marketplaces,
+      plugins,
+    };
+  } catch (error) {
+    return { state: "registration-unverifiable", error: errorText(error) };
+  }
+}
+
+const OPENCODE_CONFIG_NAMES = Object.freeze(["config.json", "opencode.json", "opencode.jsonc"]);
+
+function openCodeConfigPaths(configRoot) {
+  return OPENCODE_CONFIG_NAMES.map((name) => join(configRoot, name));
+}
+
+export function defaultOpenCodeConfigPaths(environment = process.env) {
+  const configBase = environment.XDG_CONFIG_HOME ? resolve(environment.XDG_CONFIG_HOME) : join(homedir(), ".config");
+  const canonicalRoot = join(configBase, "opencode");
+  return openCodeConfigPaths(canonicalRoot);
+}
+
+function openCodeFormattingOptions(source) {
+  const indent = /^([ \t]+)["}]/m.exec(source)?.[1] ?? "  ";
+  return {
+    eol: source.includes("\r\n") ? "\r\n" : "\n",
+    insertSpaces: !indent.includes("\t"),
+    tabSize: indent.includes("\t") ? 1 : Math.max(1, indent.length),
+  };
+}
+
+function readOpenCodePluginConfig(path) {
+  if (!existsSync(path)) return undefined;
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink() || !stat.isFile()) fail(`OpenCode config is not a regular file: ${path}`);
+  const original = readFileSync(path, "utf8");
+  const errors = [];
+  const config = parseJsonc(original, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length > 0) {
+    const details = errors.map(({ error, offset }) => `${printParseErrorCode(error)} at offset ${offset}`).join(", ");
+    fail(`OpenCode config ${path} is not valid JSON/JSONC: ${details}`);
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) fail(`OpenCode config ${path} did not contain an object`);
+  if (config.plugin !== undefined && !Array.isArray(config.plugin)) fail(`OpenCode config plugin field is not an array: ${path}`);
+  return { config, original, plugins: config.plugin ?? [], stat };
 }
 
 function migrateOpenCodePluginSpecs(configPaths, managedRoot, expectedManagedPaths) {
@@ -735,31 +833,25 @@ function migrateOpenCodePluginSpecs(configPaths, managedRoot, expectedManagedPat
   const removed = [];
   const expected = new Set(expectedManagedPaths.map(realOrResolvedPath));
   for (const path of configPaths) {
-    if (!existsSync(path)) continue;
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink() || !stat.isFile()) fail(`OpenCode config is not a regular file: ${path}`);
-    const original = readFileSync(path, "utf8");
-    let config;
-    try {
-      config = JSON.parse(original);
-    } catch {
-      if (original.includes("oh-my-openagent@latest") || (managedRoot && original.includes(join(managedRoot, "packages")))) {
-        fail(`OpenCode config contains a mutable harness source but cannot be migrated safely as JSON: ${path}`);
-      }
-      continue;
-    }
-    if (!Array.isArray(config.plugin)) continue;
-    const stale = config.plugin.filter((entry) => {
+    const loaded = readOpenCodePluginConfig(path);
+    if (!loaded?.config || loaded.plugins.length === 0) continue;
+    const { original, plugins, stat } = loaded;
+    const stale = plugins.filter((entry) => {
       if (entry === "oh-my-openagent@latest") return true;
-      return typeof entry === "string"
+      const observedPath = openCodePluginPath(entry);
+      return Boolean(observedPath
         && managedRoot
-        && isAbsolute(entry)
-        && isPathWithin(join(managedRoot, "packages"), entry)
-        && !expected.has(realOrResolvedPath(entry));
+        && isPathWithin(join(managedRoot, "packages"), observedPath)
+        && !expected.has(observedPath));
     });
     if (stale.length === 0) continue;
     const staleSet = new Set(stale);
-    config.plugin = config.plugin.filter((entry) => !staleSet.has(entry));
+    let migrated = original;
+    for (const index of plugins.map((entry, index) => staleSet.has(entry) ? index : -1).filter((index) => index >= 0).reverse()) {
+      migrated = applyJsoncEdits(migrated, modifyJsonc(migrated, ["plugin", index], undefined, {
+        formattingOptions: openCodeFormattingOptions(original),
+      }));
+    }
     const backup = `${path}.oh-my-harness.pre-fixed-install`;
     if (!existsSync(backup)) {
       writeFileSync(backup, original, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -767,13 +859,13 @@ function migrateOpenCodePluginSpecs(configPaths, managedRoot, expectedManagedPat
     }
     const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
     try {
-      writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: stat.mode & 0o777 });
+      writeFileSync(temporary, migrated, { encoding: "utf8", flag: "wx", mode: stat.mode & 0o777 });
       renameSync(temporary, path);
     } finally {
       rmSync(temporary, { force: true });
     }
-    const verified = readJson(path, "migrated OpenCode config");
-    if (Array.isArray(verified.plugin) && verified.plugin.some((entry) => staleSet.has(entry))) fail("OpenCode plugin migration did not remove every stale source");
+    const verified = readOpenCodePluginConfig(path);
+    if (verified.plugins.some((entry) => staleSet.has(entry))) fail("OpenCode plugin migration did not remove every stale source");
     removed.push(...stale);
   }
   return { backups, removed };
@@ -855,13 +947,146 @@ function realOrResolvedPath(path) {
   catch { return resolve(path); }
 }
 
+function openCodePluginPath(source) {
+  if (typeof source !== "string") return undefined;
+  if (source.startsWith("file:")) return realOrResolvedPath(fileURLToPath(source));
+  if (isAbsolute(source)) return realOrResolvedPath(source);
+  return undefined;
+}
+
+function isSafeDirectory(path) {
+  try {
+    const stat = lstatSync(path);
+    return !stat.isSymbolicLink() && stat.isDirectory();
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function inspectOpenCodePlugins(configPaths, installRoot, expectedPaths, { verifyTargets = false } = {}) {
+  const pluginSources = [];
+  for (const path of configPaths) {
+    const loaded = readOpenCodePluginConfig(path);
+    if (loaded) pluginSources.push(...loaded.plugins);
+  }
+  const expected = new Set(expectedPaths.map(realOrResolvedPath));
+  const observedPaths = new Set(pluginSources.map(openCodePluginPath).filter(Boolean));
+  const plugins = [
+    { id: HARNESS_PACKAGE.name, expectedPath: expectedPaths[0] },
+    { id: CE_PLUGIN, expectedPath: expectedPaths[1] },
+  ].map((entry) => {
+    const registered = observedPaths.has(realOrResolvedPath(entry.expectedPath));
+    const targetSafe = !verifyTargets || isSafeDirectory(entry.expectedPath);
+    return { ...entry, installed: registered && targetSafe, registered, targetSafe };
+  });
+  const stalePlugins = pluginSources.filter((source) => {
+    if (source === "oh-my-openagent@latest") return true;
+    const path = openCodePluginPath(source);
+    return Boolean(path && installRoot && isPathWithin(join(installRoot, "packages"), path) && !expected.has(path));
+  });
+  const missing = plugins.some(({ installed }) => !installed);
+  return {
+    state: registrationState(missing, stalePlugins.length > 0),
+    plugins,
+    stalePlugins,
+  };
+}
+
+function inspectOpenCodeRegistration(installRoot, receipt, environment) {
+  const expected = expectedRegistrationPaths(installRoot, receipt);
+  if (!expected) return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
+  try {
+    return inspectOpenCodePlugins(
+      defaultOpenCodeConfigPaths(environment),
+      installRoot,
+      [expected.harness, expected.compoundEngineeringPlugin],
+      { verifyTargets: true },
+    );
+  } catch (error) {
+    return { state: "registration-unverifiable", error: errorText(error) };
+  }
+}
+
+const PI_MUTABLE_SOURCES = Object.freeze([
+  "git:github.com/zzanghyunmoo/oh-my-pi",
+  "git:github.com/zzanghyunmoo/oh-my-harness",
+  "git:github.com/EveryInc/compound-engineering-plugin",
+]);
+const PI_COMPANION_SOURCES = Object.freeze(["npm:pi-subagents@0.34.0", "npm:pi-ask-user@0.13.0"]);
+const PI_COMPANION_NAMES = Object.freeze(["pi-subagents", "pi-ask-user"]);
+
+function stalePiPackageSource(source) {
+  if (PI_MUTABLE_SOURCES.includes(source)) return true;
+  const match = /^npm:([^@]+)(?:@.+)?$/.exec(source);
+  if (!match || !PI_COMPANION_NAMES.includes(match[1])) return false;
+  return !PI_COMPANION_SOURCES.includes(source);
+}
+
+function inspectPiPackages(packages, installRoot, expectedLocalPaths) {
+  const expected = new Set(expectedLocalPaths.map(realOrResolvedPath));
+  const registered = [
+    ...expectedLocalPaths.map((expectedPath, index) => ({
+      source: expectedPath,
+      kind: "local",
+      id: index === 0 ? HARNESS_PACKAGE.name : CE_PLUGIN,
+      installed: piHasLocalPath(packages, expectedPath),
+    })),
+    ...PI_COMPANION_SOURCES.map((source) => ({
+      source,
+      kind: "npm",
+      id: source.slice(4).split("@")[0],
+      installed: packages.sources.has(source),
+    })),
+  ];
+  const stalePackages = [];
+  for (const source of packages.sources) if (stalePiPackageSource(source)) stalePackages.push(source);
+  for (const entry of packages.entries) {
+    const staleManagedPath = entry.resolvedPaths.find((path) => {
+      const resolvedPath = realOrResolvedPath(path);
+      return isPathWithin(join(installRoot, "packages"), resolvedPath) && !expected.has(resolvedPath);
+    });
+    if (staleManagedPath && !stalePackages.includes(entry.source)) stalePackages.push(entry.source);
+  }
+  const missing = registered.some(({ installed }) => !installed);
+  return {
+    state: stalePackages.length > 0 ? "registration-drift" : registrationState(missing, false),
+    packages: registered,
+    stalePackages,
+  };
+}
+
+function boundedNpmEnvironment(environment) {
+  return { ...environment, npm_config_fetch_retries: "0", npm_config_fetch_timeout: "10000" };
+}
+
+function inspectPiRegistration(binaryPath, installRoot, receipt, runner, environment = process.env) {
+  const expected = expectedRegistrationPaths(installRoot, receipt);
+  if (!expected) return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
+  try {
+    const piEnv = boundedNpmEnvironment(environment);
+    const packages = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
+    return inspectPiPackages(packages, installRoot, [expected.harness, expected.compoundEngineeringPlugin]);
+  } catch (error) {
+    return { state: "registration-unverifiable", error: errorText(error) };
+  }
+}
+
+function inspectRuntimeRegistration(runtimeId, binaryPath, installRoot, receipt, runner, environment) {
+  if (runtimeId === "codex") return inspectCodexRegistration(binaryPath, installRoot, receipt, runner, environment);
+  if (runtimeId === "claude-code") return inspectClaudeRegistration(binaryPath, installRoot, receipt, runner, { env: environment });
+  if (runtimeId === "opencode") return inspectOpenCodeRegistration(installRoot, receipt, environment);
+  if (runtimeId === "pi") return inspectPiRegistration(binaryPath, installRoot, receipt, runner, environment);
+  return { state: "registration-unverifiable", error: `unsupported runtime registration inspection: ${runtimeId}` };
+}
+
 export function registerRuntimePackages({
   runtimeId,
   binaryPath,
   harnessPayload,
   cePayload,
   managedRoot,
-  opencodeConfigPaths = defaultOpenCodeConfigPaths(),
+  opencodeConfigPaths,
   runner = DEFAULT_RUNNER,
   environment = process.env,
 }) {
@@ -888,32 +1113,41 @@ export function registerRuntimePackages({
   if (runtimeId === "claude-code") {
     const harnessSelector = `${HARNESS_PACKAGE.name}@${HARNESS_MARKETPLACE}`;
     const ceSelector = `${CE_PLUGIN}@${CE_MARKETPLACE}`;
-    const harnessMarketplace = ensureClaudeMarketplace(binaryPath, HARNESS_MARKETPLACE, harnessPayload.path, managedRoot, runner);
-    const ceMarketplace = ensureClaudeMarketplace(binaryPath, CE_MARKETPLACE, cePayload.pluginPath, managedRoot, runner);
-    const harnessPlugin = ensureClaudePlugin(binaryPath, harnessSelector, harnessPayload.version, runner);
-    const cePlugin = ensureClaudePlugin(binaryPath, ceSelector, cePayload.version, runner);
+    const runOptions = { env: environment };
+    const harnessMarketplace = ensureClaudeMarketplace(binaryPath, HARNESS_MARKETPLACE, harnessPayload.path, managedRoot, runner, runOptions);
+    const ceMarketplace = ensureClaudeMarketplace(binaryPath, CE_MARKETPLACE, cePayload.pluginPath, managedRoot, runner, runOptions);
+    const harnessPlugin = ensureClaudePlugin(binaryPath, harnessSelector, harnessPayload.version, runner, runOptions);
+    const cePlugin = ensureClaudePlugin(binaryPath, ceSelector, cePayload.version, runner, runOptions);
     return { harnessMarketplace, ceMarketplace, harnessPlugin, cePlugin };
   }
   if (runtimeId === "opencode") {
-    runner.run(binaryPath, ["plugin", harnessPayload.path, "--global", "--force"]);
-    runner.run(binaryPath, ["plugin", cePayload.pluginPath, "--global", "--force"]);
-    const migration = migrateOpenCodePluginSpecs(opencodeConfigPaths, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
-    const skillsMigration = archiveOpenCodePredecessorSkills(opencodeConfigPaths);
-    return { harnessPlugin: "installed", cePlugin: "installed", ...migration, ...skillsMigration };
+    const runOptions = { env: environment };
+    const expectedPaths = [harnessPayload.path, cePayload.pluginPath];
+    const resolvedConfigPaths = opencodeConfigPaths ?? defaultOpenCodeConfigPaths(environment);
+    const before = inspectOpenCodePlugins(resolvedConfigPaths, managedRoot, expectedPaths);
+    const migration = migrateOpenCodePluginSpecs(resolvedConfigPaths, managedRoot, expectedPaths);
+    const skillsMigration = archiveOpenCodePredecessorSkills(resolvedConfigPaths);
+    for (const plugin of before.plugins) {
+      if (!plugin.installed) runner.run(binaryPath, ["plugin", plugin.expectedPath, "--global", "--force"], runOptions);
+    }
+    const pluginMutated = before.plugins.some(({ installed }) => !installed);
+    const after = pluginMutated || migration.removed.length > 0
+      ? inspectOpenCodePlugins(resolvedConfigPaths, managedRoot, expectedPaths)
+      : before;
+    if (after.state !== "installed") fail(`OpenCode package registration did not converge: ${after.state}`);
+    return {
+      harnessPlugin: before.plugins[0]?.installed ? "reused" : "installed",
+      cePlugin: before.plugins[1]?.installed ? "reused" : "installed",
+      ...migration,
+      ...skillsMigration,
+    };
   }
   if (runtimeId === "pi") {
-    const piEnv = { ...process.env, npm_config_fetch_retries: "0", npm_config_fetch_timeout: "10000" };
+    const piEnv = boundedNpmEnvironment(environment);
     const before = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
-    const mutableSources = [
-      "git:github.com/zzanghyunmoo/oh-my-pi",
-      "git:github.com/zzanghyunmoo/oh-my-harness",
-      "git:github.com/EveryInc/compound-engineering-plugin",
-      "npm:pi-subagents",
-      "npm:pi-ask-user",
-    ];
     const removed = [];
-    for (const source of mutableSources) {
-      if (!before.sources.has(source)) continue;
+    for (const source of before.sources) {
+      if (!stalePiPackageSource(source)) continue;
       runner.run(binaryPath, ["remove", source, "--approve"], { env: piEnv });
       removed.push(source);
     }
@@ -929,16 +1163,19 @@ export function registerRuntimePackages({
     const sources = [
       harnessPayload.path,
       cePayload.pluginPath,
-      "npm:pi-subagents@0.34.0",
-      "npm:pi-ask-user@0.13.0",
+      ...PI_COMPANION_SOURCES,
     ];
-    for (const source of sources) runner.run(binaryPath, ["install", source, "--approve"], { env: piEnv });
-    const after = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
-    if (!piHasLocalPath(after, harnessPayload.path)) fail(`Pi package source was not pinned: ${harnessPayload.path}`);
-    if (!piHasLocalPath(after, cePayload.pluginPath)) fail(`Pi package source was not pinned: ${cePayload.pluginPath}`);
-    for (const source of sources.slice(2)) {
-      if (!after.sources.has(source)) fail(`Pi package source was not pinned: ${source}`);
+    for (const source of sources) {
+      const installed = isAbsolute(source) ? piHasLocalPath(before, source) : before.sources.has(source);
+      if (!installed) runner.run(binaryPath, ["install", source, "--approve"], { env: piEnv });
     }
+    const after = removed.length > 0 || sources.some((source) => (
+      isAbsolute(source) ? !piHasLocalPath(before, source) : !before.sources.has(source)
+    ))
+      ? listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }))
+      : before;
+    const inspected = inspectPiPackages(after, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
+    if (inspected.state !== "installed") fail(`Pi package registration did not converge: ${inspected.state}`);
     return { installed: sources, removed };
   }
   fail(`unsupported runtime registration: ${runtimeId}`);
@@ -1006,7 +1243,7 @@ function publicPlan(plan) {
   };
 }
 
-export async function applyInstallPlan(plan, { register = true, repoRoot = REPO_ROOT, runner = DEFAULT_RUNNER } = {}) {
+export async function applyInstallPlan(plan, { environment = process.env, register = true, repoRoot = REPO_ROOT, runner = DEFAULT_RUNNER } = {}) {
   const installRoot = ensureInstallRoot(plan.installRoot, repoRoot);
   const harnessPayload = await createHarnessPayload({ installRoot, repoRoot, runner });
   const cePayload = createCompoundEngineeringPayload({ installRoot, runner });
@@ -1014,7 +1251,7 @@ export async function applyInstallPlan(plan, { register = true, repoRoot = REPO_
   for (const selected of plan.runtimes) {
     const binary = await installRuntimeBinary({ installRoot, runtime: selected.runtime, tuple: selected.tuple, runner });
     const registration = register
-      ? registerRuntimePackages({ runtimeId: selected.id, binaryPath: binary.executablePath, harnessPayload, cePayload, managedRoot: installRoot, runner })
+      ? registerRuntimePackages({ runtimeId: selected.id, binaryPath: binary.executablePath, harnessPayload, cePayload, managedRoot: installRoot, runner, environment })
       : { skipped: true };
     const result = {
       runtimeId: selected.id,
@@ -1059,14 +1296,14 @@ export async function inspectInstallPlan(plan, { environment = process.env, runn
       else if (await sha256File(executablePath) !== selected.executable.sha256) state = "digest-drift";
       else {
         try {
-          versionOutput = runtimeVersionOutput(executablePath, selected.id, runner);
+          versionOutput = runtimeVersionOutput(executablePath, runner, { env: environment });
           assertExactRuntimeVersion(selected.id, selected.version, versionOutput);
           const receiptPath = join(plan.installRoot, "receipts", `${selected.id}.json`);
           state = existsSync(receiptPath) ? "installed" : "binary-only";
-          if (state === "installed" && selected.id === "codex") {
+          if (state === "installed") {
             try {
-              const receipt = readJson(receiptPath, "Codex runtime registration receipt");
-              registration = inspectCodexRegistration(executablePath, plan.installRoot, receipt, runner, environment);
+              const receipt = readJson(receiptPath, `${selected.id} runtime registration receipt`);
+              registration = inspectRuntimeRegistration(selected.id, executablePath, plan.installRoot, receipt, runner, environment);
               state = registration.state;
             } catch (error) {
               registration = { state: "registration-unverifiable", error: errorText(error) };

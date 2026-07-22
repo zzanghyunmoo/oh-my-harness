@@ -111,6 +111,8 @@ omh profiles apply        Pi profile의 비파괴 적용 계획 출력
 
 설치기는 release archive와 executable의 reviewed SHA-256을 모두 확인하고 `~/.oh-my-harness` 아래에 content-addressed package snapshot과 runtime을 둡니다. Claude Code와 Codex는 local marketplace/plugin, OpenCode는 local plugin, Pi는 local package로 등록됩니다. 설치된 고정 실행파일을 우선 사용하려면 셸 설정에 다음 경로를 추가합니다.
 
+`omh agents status`는 runtime receipt만으로 설치 완료를 판단하지 않습니다. Claude Code는 marketplace 경로와 plugin 버전·활성 상태, OpenCode는 canonical global config의 local plugin 경로, Pi는 local package와 고정 companion spec을 실제 native 상태에서 다시 확인합니다. 등록 유실·경로/버전 drift·검사 실패는 각각 `registration-missing`, `registration-drift`, `registration-unverifiable`로 보고하며, 같은 대상을 `omh agents install --only <ids> --apply`로 다시 적용하면 정상 등록은 재사용하고 유실·drift만 복구합니다.
+
 ```bash
 export PATH="$HOME/.oh-my-harness/bin:$PATH"
 ```
