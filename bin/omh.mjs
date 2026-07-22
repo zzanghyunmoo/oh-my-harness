@@ -409,7 +409,7 @@ export async function runOmh(argv, { env = process.env, dependencies = {} } = {}
   if (options.command === "setup") {
     if (options.apply) assertToolPreflight(toolPlan);
     if (options.apply) assertProxyPreflight(proxyInstallPlan);
-    const agents = options.apply ? await deps.applyAgentPlan(agentPlan, { register: options.register }) : publicAgentPlan(agentPlan);
+    const agents = options.apply ? await deps.applyAgentPlan(agentPlan, { environment: env, register: options.register }) : publicAgentPlan(agentPlan);
     const quietRun = options.json
       ? (command, args, runOptions) => execFileSync(command, args, { ...runOptions, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, stdio: "pipe" })
       : undefined;
@@ -424,9 +424,9 @@ export async function runOmh(argv, { env = process.env, dependencies = {} } = {}
   }
   if (options.command === "agents") {
     const agents = options.subcommand === "status"
-      ? await deps.inspectAgents(agentPlan)
+      ? await deps.inspectAgents(agentPlan, { environment: env })
       : options.apply
-        ? await deps.applyAgentPlan(agentPlan, { register: options.register })
+        ? await deps.applyAgentPlan(agentPlan, { environment: env, register: options.register })
         : publicAgentPlan(agentPlan);
     return { command: "agents", subcommand: options.subcommand, apply: options.apply, agents, toolProfiles };
   }
@@ -438,7 +438,7 @@ export async function runOmh(argv, { env = process.env, dependencies = {} } = {}
     const tools = options.apply ? deps.applyTools(toolPlan, { env, ...(quietRun ? { run: quietRun } : {}) }) : toolPlan;
     return { command: "tools", subcommand: options.subcommand, apply: options.apply, tools };
   }
-  const agents = await deps.inspectAgents(agentPlan);
+  const agents = await deps.inspectAgents(agentPlan, { environment: env });
   const tools = toolPlan;
   const result = {
     command: options.command,
