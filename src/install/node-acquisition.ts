@@ -6,14 +6,12 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   renameSync,
   rmSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import type { AgentId } from "../domain/catalog.js";
 import {
   findTrustedExecutable,
   sha256File,

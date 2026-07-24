@@ -99,4 +99,3 @@ export interface UnsupportedAgentInstallResult {
 export type AgentInstallResult =
   | ReadyAgentInstallResult
   | UnsupportedAgentInstallResult;
-

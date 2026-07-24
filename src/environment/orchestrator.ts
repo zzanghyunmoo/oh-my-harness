@@ -7,8 +7,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import {
-  basename,
-  dirname,
   isAbsolute,
   join,
   resolve,

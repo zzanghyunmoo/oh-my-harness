@@ -78,35 +78,35 @@ export function gitTreeSha1(
           || !(options.ignoreTopLevel ?? []).includes(entry.name),
       )
       .map((entry) => {
-      entries += 1;
-      if (entries > MAX_TREE_ENTRIES) {
-        throw new Error("official plugin tree has too many entries");
-      }
-      const childPath = join(path, entry.name);
-      const stat = lstatSync(childPath);
-      if (stat.isSymbolicLink()) {
-        throw new Error("official plugin tree contains a symbolic link");
-      }
-      if (stat.isDirectory()) {
+        entries += 1;
+        if (entries > MAX_TREE_ENTRIES) {
+          throw new Error("official plugin tree has too many entries");
+        }
+        const childPath = join(path, entry.name);
+        const stat = lstatSync(childPath);
+        if (stat.isSymbolicLink()) {
+          throw new Error("official plugin tree contains a symbolic link");
+        }
+        if (stat.isDirectory()) {
+          return {
+            hash: visit(childPath, depth + 1),
+            mode: "40000",
+            name: entry.name,
+          };
+        }
+        if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
+          throw new Error("official plugin tree contains an unsafe entry");
+        }
+        const content = readFileSync(childPath);
+        bytes += content.length;
+        if (bytes > MAX_TREE_BYTES) {
+          throw new Error("official plugin tree exceeds the byte limit");
+        }
         return {
-          hash: visit(childPath, depth + 1),
-          mode: "40000",
+          hash: gitObject("blob", content),
+          mode: (stat.mode & 0o111) === 0 ? "100644" : "100755",
           name: entry.name,
         };
-      }
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
-        throw new Error("official plugin tree contains an unsafe entry");
-      }
-      const content = readFileSync(childPath);
-      bytes += content.length;
-      if (bytes > MAX_TREE_BYTES) {
-        throw new Error("official plugin tree exceeds the byte limit");
-      }
-      return {
-        hash: gitObject("blob", content),
-        mode: (stat.mode & 0o111) === 0 ? "100644" : "100755",
-        name: entry.name,
-      };
       });
     children.sort((left, right) => {
       const leftKey = `${left.name}${left.mode === "40000" ? "/" : ""}`;

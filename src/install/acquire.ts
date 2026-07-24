@@ -202,4 +202,3 @@ export async function installOrAdoptAgent(
     acquireManagedRuntime(adapter, artifact, operations)
   );
 }
-
