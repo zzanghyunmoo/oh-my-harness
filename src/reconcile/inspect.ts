@@ -4,20 +4,8 @@ import type {
   ReleaseArtifactClass,
   ReleaseArtifactDeclaration,
 } from "./release-discovery.js";
-import type { ReleaseConsent } from "./release-acquisition.js";
 
-export interface StartupManagedReceipt extends ManagedStateReceipt {
-  readonly releaseChannels?: Readonly<
-    Record<
-      string,
-      {
-        readonly sequence: number;
-        readonly manifestDigest: string;
-      }
-    >
-  >;
-  readonly startupConsent?: ReleaseConsent;
-}
+export type StartupManagedReceipt = ManagedStateReceipt;
 
 export type StartupReceiptObservation =
   | { readonly state: "missing" }

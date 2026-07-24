@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
+import { validateContractDocument } from "../../dist/catalog/load.js";
 import {
   createApplyPlan,
   verifyApplyPlanDigest,
 } from "../../dist/planning/preview.js";
 
 const SHA256 = "a".repeat(64);
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function previewInput() {
   return {
@@ -52,6 +55,9 @@ test("U3 preview is deterministic, immutable, and digest-bound to every input", 
   assert.equal(verifyApplyPlanDigest(first), true);
   assert.equal(Object.isFrozen(first), true);
   assert.equal(Object.isFrozen(first.actions), true);
+  assert.doesNotThrow(() =>
+    validateContractDocument("apply-plan", first, REPOSITORY_ROOT)
+  );
 
   const changed = previewInput();
   changed.desiredState.selectedAgents = ["codex"];

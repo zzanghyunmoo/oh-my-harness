@@ -69,7 +69,7 @@ export interface VerifiedReleaseGeneration {
 
 export interface ReleaseConsent {
   readonly profileId: string;
-  readonly channel: string;
+  readonly channelId: string;
   readonly artifactClasses: readonly ReleaseArtifactClass[];
   readonly permissionScopes: readonly string[];
 }
@@ -346,7 +346,7 @@ export function classifyAdditiveRelease(input: {
   const additions: ReleaseArtifactDeclaration[] = [];
   const eligible = new Set<string>(current.keys());
 
-  if (input.consent.channel !== input.channel) {
+  if (input.consent.channelId !== input.channel) {
     reasons.push(
       `release channel ${input.channel} is outside recorded consent`,
     );

@@ -17,6 +17,9 @@ function receiptFixture() {
     schemaVersion: "2.0.0",
     kind: "managed-state-receipt",
     catalogRevision: SHA256,
+    planDigest: "b".repeat(64),
+    appliedAt: "2026-07-24T00:00:00.000Z",
+    completedActionIds: [],
     desiredState: {
       profileId: "personal",
       selectedAgents: ["claude-code", "codex"],
@@ -25,6 +28,9 @@ function receiptFixture() {
       repairPinned: true,
       addReviewedContent: true,
       channelId: "stable",
+      profileId: "personal",
+      artifactClasses: ["managed-skill"],
+      permissionScopes: ["workspace:read"],
     },
     runtimeReadiness: [
       { agentId: "claude-code", state: "ready" },
@@ -73,13 +79,16 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
     schemaVersion: "2.0.0",
     kind: "apply-plan",
     catalogRevision: SHA256,
-    profileId: "personal",
-    selectedAgents: ["claude-code"],
+    desiredState: {
+      profileId: "personal",
+      selectedAgents: ["claude-code"],
+    },
     platform: {
       os: "darwin",
-      architecture: "arm64",
+      arch: "arm64",
     },
-    observations: [],
+    observedState: {},
+    preflights: [],
     actions: [],
     digest: SHA256,
   };

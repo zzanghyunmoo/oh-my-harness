@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
+import {
+  isAgentId,
+  type AgentId,
+} from "../domain/catalog.js";
 import type {
   ManagedStateReceipt,
   StatePort,
@@ -75,14 +80,60 @@ function receiptFor(
   completedActionIds: readonly string[],
   now: () => Date,
 ): ManagedStateReceipt {
+  const selectedAgents = plan.desiredState.selectedAgents.map((agentId) => {
+    if (!isAgentId(agentId)) {
+      throw new Error(`cannot publish receipt for unsupported agent: ${agentId}`);
+    }
+    return agentId;
+  });
+  const ownership = plan.actions
+    .filter(({ kind }) => kind !== "remove")
+    .map((action) => {
+      const declaredDigest = action.payload?.contentDigest
+        ?? action.payload?.sourceDigest;
+      const digest = typeof declaredDigest === "string"
+          && /^[0-9a-f]{64}$/.test(declaredDigest)
+        ? declaredDigest
+        : createHash("sha256")
+            .update(JSON.stringify(action), "utf8")
+            .digest("hex");
+      const kind = action.kind === "register"
+        ? "registration" as const
+        : action.kind === "acquire"
+          ? "executable" as const
+          : "file" as const;
+      return {
+        id: action.id,
+        kind,
+        target: action.target,
+        digest,
+      };
+    });
   return {
+    $schema: "../contracts/managed-state-receipt.schema.json",
     schemaVersion: "2.0.0",
     kind: "managed-state-receipt",
     catalogRevision: plan.catalogRevision,
     planDigest: plan.digest,
-    desiredState: structuredClone(plan.desiredState),
+    desiredState: {
+      profileId: plan.desiredState.profileId,
+      selectedAgents,
+    },
     completedActionIds: [...completedActionIds],
     appliedAt: now().toISOString(),
+    startupConsent: {
+      repairPinned: true,
+      addReviewedContent: true,
+      channelId: "stable",
+      profileId: plan.desiredState.profileId,
+      artifactClasses: ["managed-skill"],
+      permissionScopes: ["workspace:read"],
+    },
+    runtimeReadiness: selectedAgents.map((agentId: AgentId) => ({
+      agentId,
+      state: "ready",
+    })),
+    ownership,
   };
 }
 

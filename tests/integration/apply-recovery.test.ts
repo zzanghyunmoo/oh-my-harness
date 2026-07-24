@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
+import { validateContractDocument } from "../../dist/catalog/load.js";
 import {
   applyExactPlan,
   StalePreviewError,
@@ -13,6 +15,7 @@ import type {
 } from "../../dist/ports/state.js";
 
 const SHA256 = "a".repeat(64);
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function plan() {
   return createApplyPlan({
@@ -158,6 +161,13 @@ test("U3 partial failure journals verified work, publishes no receipt, and retry
   assert.deepEqual(retried.completedActionIds, ["one", "two"]);
   assert.equal(state.receipt?.catalogRevision, SHA256);
   assert.deepEqual(state.receipt?.desiredState.selectedAgents, ["claude-code"]);
+  assert.doesNotThrow(() =>
+    validateContractDocument(
+      "managed-state-receipt",
+      state.receipt,
+      REPOSITORY_ROOT,
+    )
+  );
 });
 
 test("U3 action-local revalidation stops a target changed after an earlier action", async () => {

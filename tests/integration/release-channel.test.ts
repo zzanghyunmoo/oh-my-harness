@@ -337,7 +337,7 @@ test("U9 additive classification treats managed-skill prompts as active permissi
   const addition = artifact();
   const consent = {
     artifactClasses: ["managed-skill"] as const,
-    channel: "stable",
+    channelId: "stable",
     permissionScopes: ["workspace:read"] as const,
     profileId: "personal",
   };

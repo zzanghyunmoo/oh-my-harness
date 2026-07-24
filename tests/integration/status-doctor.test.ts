@@ -14,6 +14,7 @@ test("U13 runtime context exposes the current profile, revision, content, and re
   const context = buildRuntimeContext({
     runtimeId: "claude-code",
     receipt: {
+      $schema: "../contracts/managed-state-receipt.schema.json",
       schemaVersion: "2.0.0",
       kind: "managed-state-receipt",
       catalogRevision: REVISION,
@@ -24,6 +25,20 @@ test("U13 runtime context exposes the current profile, revision, content, and re
       },
       completedActionIds: ["capability:goal", "capability:plan"],
       appliedAt: "2026-07-24T00:00:00.000Z",
+      startupConsent: {
+        repairPinned: true,
+        addReviewedContent: true,
+        channelId: "stable",
+        profileId: "personal",
+        artifactClasses: ["managed-skill"],
+        permissionScopes: ["workspace:read"],
+      },
+      runtimeReadiness: [
+        { agentId: "claude-code", state: "ready" },
+        { agentId: "opencode", state: "ready" },
+        { agentId: "codex", state: "ready" },
+      ],
+      ownership: [],
     },
     reconciliation: {
       state: "no-drift",
@@ -76,6 +91,7 @@ test("U13 doctor emits preview-first remediation and separates optional gaps", (
     context: buildRuntimeContext({
       runtimeId: "opencode",
       receipt: {
+        $schema: "../contracts/managed-state-receipt.schema.json",
         schemaVersion: "2.0.0",
         kind: "managed-state-receipt",
         catalogRevision: REVISION,
@@ -86,6 +102,18 @@ test("U13 doctor emits preview-first remediation and separates optional gaps", (
         },
         completedActionIds: [],
         appliedAt: "2026-07-24T00:00:00.000Z",
+        startupConsent: {
+          repairPinned: true,
+          addReviewedContent: true,
+          channelId: "stable",
+          profileId: "company",
+          artifactClasses: ["managed-skill"],
+          permissionScopes: ["workspace:read"],
+        },
+        runtimeReadiness: [
+          { agentId: "opencode", state: "ready" },
+        ],
+        ownership: [],
       },
       reconciliation: {
         state: "repairable",

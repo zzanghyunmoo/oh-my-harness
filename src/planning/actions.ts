@@ -40,6 +40,7 @@ export interface ApplyPlanInput {
 }
 
 export interface ApplyPlan extends ApplyPlanInput {
+  readonly $schema: "../contracts/apply-plan.schema.json";
   readonly schemaVersion: "2.0.0";
   readonly kind: "apply-plan";
   readonly digest: string;

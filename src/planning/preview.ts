@@ -42,6 +42,7 @@ function deepFreeze<T>(value: T): T {
 
 function unsignedPlan(input: ApplyPlanInput): Omit<ApplyPlan, "digest"> {
   return {
+    $schema: "../contracts/apply-plan.schema.json",
     schemaVersion: "2.0.0",
     kind: "apply-plan",
     catalogRevision: input.catalogRevision,

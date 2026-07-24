@@ -8,10 +8,10 @@
     "schemaVersion",
     "kind",
     "catalogRevision",
-    "profileId",
-    "selectedAgents",
+    "desiredState",
     "platform",
-    "observations",
+    "observedState",
+    "preflights",
     "actions",
     "digest"
   ],
@@ -28,19 +28,20 @@
     "catalogRevision": {
       "$ref": "#/$defs/sha256"
     },
-    "profileId": {
-      "$ref": "#/$defs/stableId"
-    },
-    "selectedAgents": {
-      "$ref": "#/$defs/selectedAgents"
+    "desiredState": {
+      "$ref": "#/$defs/desiredState"
     },
     "platform": {
       "$ref": "#/$defs/platform"
     },
-    "observations": {
+    "observedState": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "preflights": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/observation"
+        "$ref": "#/$defs/preflight"
       }
     },
     "actions": {
@@ -56,60 +57,98 @@
   "$defs": {
     "stableId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$"
+      "pattern": "^[a-z][a-z0-9-]*(?::[a-z][a-z0-9-]*)*$"
     },
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "selectedAgents": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "enum": ["claude-code", "opencode", "codex"]
+    "desiredState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "selectedAgents"],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "selectedAgents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["claude-code", "opencode", "codex"]
+          }
+        }
       }
     },
     "platform": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["os", "architecture"],
+      "required": ["os", "arch"],
       "properties": {
         "os": {
           "enum": ["darwin", "linux", "win32"]
         },
-        "architecture": {
+        "arch": {
           "enum": ["arm64", "x64"]
         }
       }
     },
-    "observation": {
+    "preflight": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "target", "state"],
+      "required": ["id", "required", "status"],
       "properties": {
         "id": {
           "$ref": "#/$defs/stableId"
         },
-        "kind": {
-          "enum": ["file", "executable", "registration", "package"]
+        "required": {
+          "type": "boolean"
         },
-        "target": {
-          "type": "string",
-          "minLength": 1
+        "status": {
+          "enum": ["ready", "optional-gap", "unsupported", "unverifiable"]
         },
-        "state": {
-          "enum": ["absent", "managed", "external", "conflict"]
-        },
-        "digest": {
-          "$ref": "#/$defs/sha256"
+        "detail": {
+          "type": "string"
         }
       }
+    },
+    "preimage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "missing"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "sha256", "size"],
+          "properties": {
+            "kind": {
+              "const": "file"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
     },
     "action": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "target", "observationId"],
+      "required": ["id", "kind", "required", "target", "preimage"],
       "properties": {
         "id": {
           "$ref": "#/$defs/stableId"
@@ -117,15 +156,19 @@
         "kind": {
           "enum": ["acquire", "register", "write", "remove"]
         },
+        "required": {
+          "type": "boolean"
+        },
         "target": {
           "type": "string",
           "minLength": 1
         },
-        "observationId": {
-          "$ref": "#/$defs/stableId"
+        "preimage": {
+          "$ref": "#/$defs/preimage"
         },
-        "sourceDigest": {
-          "$ref": "#/$defs/sha256"
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
         }
       }
     }

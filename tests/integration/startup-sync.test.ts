@@ -62,6 +62,7 @@ class MemoryState implements StatePort {
 
 function receipt(): StartupManagedReceipt {
   return {
+    $schema: "../contracts/managed-state-receipt.schema.json",
     schemaVersion: "2.0.0",
     kind: "managed-state-receipt",
     appliedAt: "2026-07-24T00:00:00.000Z",
@@ -80,10 +81,23 @@ function receipt(): StartupManagedReceipt {
     },
     startupConsent: {
       artifactClasses: ["managed-skill"],
-      channel: "stable",
+      channelId: "stable",
+      repairPinned: true,
+      addReviewedContent: true,
       permissionScopes: ["workspace:read"],
       profileId: "personal",
     },
+    runtimeReadiness: [
+      { agentId: "claude-code", state: "ready" },
+    ],
+    ownership: [
+      {
+        id: "skill:goal",
+        kind: "directory",
+        target: "/managed/skills/goal",
+        digest: PINNED_DIGEST,
+      },
+    ],
   };
 }
 
