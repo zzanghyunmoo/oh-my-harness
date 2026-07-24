@@ -125,10 +125,11 @@ function helpText(topic: string | undefined, catalog: CliRenderCatalog): string 
   if (topic === "setup") {
     return [
       "Usage:",
-      "  omh setup [--agents ids] [--tools ids] [--proxies ids] [--root path] [--apply] [--json]",
+      "  omh setup [--profile id] [--agents ids] [--root path] [--json]",
+      "  omh setup [same options] --apply --digest sha256",
       "",
-      "Resolves declarative runtime tool profiles and applies their shared CLI union automatically.",
-      "Explicit --tools overrides installation selection but does not change runtime role bindings.",
+      "Preview is read-only and prints the exact digest required by apply.",
+      "The profile selects packages, capabilities, startup policy, and runtime tool backends.",
     ].join("\n") + "\n";
   }
   if (topic === "agents") {
@@ -155,6 +156,16 @@ function helpText(topic: string | undefined, catalog: CliRenderCatalog): string 
   if (topic === "profiles") {
     return [
       "Usage:",
+      "  omh profiles list [--json]",
+      "  omh profiles create --id id --name name --agents ids --required ids [--optional ids] --capabilities ids [--json]",
+      "  omh profiles validate --file profile.json [--json]",
+      "  omh profiles preview --file profile.json --repo /absolute/checkout [--json]",
+      "  omh profiles publish --file profile.json --repo /absolute/checkout --digest sha256 [--json]",
+      "",
+      "Create and validate are read-only. Preview prints a reviewable local repository diff identity.",
+      "Publish writes only that exact local profile file; commit, push, and PR creation are separate actions.",
+      "",
+      "Legacy package-profile compatibility:",
       "  omh profiles verify",
       "  omh profiles apply [--profile id]",
     ].join("\n") + "\n";
@@ -171,7 +182,8 @@ function helpText(topic: string | undefined, catalog: CliRenderCatalog): string 
     `Oh My Harness ${catalog.version}`,
     "",
     "Usage:",
-    "  omh setup [--agents ids] [--tools ids] [--proxies ids] [--root path] [--apply] [--json]",
+    "  omh setup [--profile id] [--agents ids] [--root path] [--json]",
+    "  omh setup [same options] --apply --digest sha256",
     "  omh agents install|status [options]",
     "  omh tools install|doctor [options]",
     "  omh proxies install|configure|doctor [options]",
@@ -179,7 +191,7 @@ function helpText(topic: string | undefined, catalog: CliRenderCatalog): string 
     "  omh doctor [--agents ids] [--tools ids] [--proxies ids] [--root path] [--json]",
     "  omh profiles verify|apply [options]",
     "",
-    "All install commands are preview-only unless --apply is present.",
+    "All install commands are preview-only. Apply also requires the exact printed digest.",
     "External CLI executables are shared machine-wide; role tools are filtered per runtime profile.",
     "",
     `Agent ids: ${catalog.runtimeIds.join(", ")}`,

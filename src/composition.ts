@@ -26,6 +26,16 @@ import {
   type CliRenderCatalog,
   type OmhResult,
 } from "./cli/render.js";
+import {
+  applyCustomProfilePublication,
+  createCustomProfile,
+  previewCustomProfilePublication,
+} from "./catalog/custom-profile.js";
+import {
+  loadCatalogBundle,
+  validateContractDocument,
+} from "./catalog/load.js";
+import type { EnvironmentProfile } from "./catalog/types.js";
 
 type Environment = NodeJS.ProcessEnv;
 type RunCommand = (
@@ -259,6 +269,70 @@ export async function runOmh(
 
   const deps: OmhDependencies = { ...defaultDependencies, ...dependencies };
   if (parsed.command === "profiles") {
+    if (parsed.subcommand === "list") {
+      const profiles = loadCatalogBundle(repositoryRoot).profiles.map((profile) => ({
+        id: profile.id,
+        displayName: profile.displayName,
+        selectedAgents: profile.selectedAgents,
+      }));
+      return {
+        ...parsed,
+        output: parsed.json
+          ? JSON.stringify(profiles)
+          : profiles
+              .map(({ id, displayName, selectedAgents }) =>
+                `${id}: ${displayName} [${selectedAgents.join(",")}]`
+              )
+              .join("\n"),
+      };
+    }
+    if (parsed.subcommand === "create") {
+      const profile = createCustomProfile(parsed.input);
+      return {
+        ...parsed,
+        output: JSON.stringify(profile, null, parsed.json ? 0 : 2),
+      };
+    }
+    if (parsed.subcommand === "validate") {
+      const profile = JSON.parse(readFileSync(parsed.file, "utf8")) as EnvironmentProfile;
+      validateContractDocument("environment-profile", profile, repositoryRoot);
+      return {
+        ...parsed,
+        output: parsed.json
+          ? JSON.stringify({ state: "valid", profile })
+          : `valid custom profile: ${profile.id}`,
+      };
+    }
+    if (parsed.subcommand === "preview" || parsed.subcommand === "publish") {
+      const profile = JSON.parse(readFileSync(parsed.file, "utf8")) as EnvironmentProfile;
+      const preview = previewCustomProfilePublication({
+        profile,
+        repositoryRoot: parsed.repositoryRoot,
+      });
+      if (parsed.subcommand === "publish") {
+        if (parsed.digest !== preview.digest) {
+          throw new Error("custom profile publication preview is stale");
+        }
+        applyCustomProfilePublication(preview);
+      }
+      return {
+        ...parsed,
+        output: parsed.json
+          ? JSON.stringify({
+              state: parsed.subcommand === "publish" ? "published" : "preview",
+              preview,
+            })
+          : [
+              `custom profile ${parsed.subcommand}: ${profile.id}`,
+              `catalog revision: ${preview.catalogRevisionBefore} -> ${preview.catalogRevisionAfter}`,
+              `target: ${preview.targetPath}`,
+              `digest: ${preview.digest}`,
+              parsed.subcommand === "preview"
+                ? "No changes were made. Publish with the exact digest after review."
+                : "Published locally. Commit/push/PR remain separate explicit actions.",
+            ].join("\n"),
+      };
+    }
     const args = parsed.subcommand === "verify"
       ? ["verify"]
       : ["apply", "--profile", parsed.profile ?? "default"];

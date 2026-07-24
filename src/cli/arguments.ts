@@ -9,11 +9,22 @@ export interface CliArgumentCatalog {
 export interface CliSelectionOptions {
   readonly agents: string[];
   readonly apply: boolean;
+  readonly digest: string | undefined;
   readonly json: boolean;
+  readonly profile: string;
   readonly proxies: string[];
   readonly register: boolean;
   readonly root: string | undefined;
   readonly tools: string[];
+}
+
+export interface CliCustomProfileInput {
+  readonly id: string;
+  readonly displayName: string;
+  readonly selectedAgents: string[];
+  readonly requiredPackages: string[];
+  readonly optionalPackages: string[];
+  readonly capabilities: string[];
 }
 
 export type ParsedOmhArguments =
@@ -43,6 +54,38 @@ export type ParsedOmhArguments =
       readonly subcommand: "verify" | "apply";
       readonly profile?: string;
       readonly json: false;
+    }
+  | {
+      readonly command: "profiles";
+      readonly subcommand: "list";
+      readonly json: boolean;
+    }
+  | {
+      readonly command: "profiles";
+      readonly subcommand: "create";
+      readonly input: CliCustomProfileInput;
+      readonly json: boolean;
+    }
+  | {
+      readonly command: "profiles";
+      readonly subcommand: "validate";
+      readonly file: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly command: "profiles";
+      readonly subcommand: "preview";
+      readonly file: string;
+      readonly json: boolean;
+      readonly repositoryRoot: string;
+    }
+  | {
+      readonly command: "profiles";
+      readonly subcommand: "publish";
+      readonly digest: string;
+      readonly file: string;
+      readonly json: boolean;
+      readonly repositoryRoot: string;
     };
 
 type SelectionContext = "setup" | "status" | "doctor" | "agents" | "tools";
@@ -56,6 +99,8 @@ interface InternalSelectionOptions extends CliSelectionOptions {
 interface AllowedOptions {
   readonly allowAgents?: boolean;
   readonly allowApply?: boolean;
+  readonly allowDigest?: boolean;
+  readonly allowProfile?: boolean;
   readonly allowProxies?: boolean;
   readonly allowRegister?: boolean;
   readonly allowRoot?: boolean;
@@ -123,7 +168,9 @@ function parseOptions(
   let agents = [...catalog.runtimeIds];
   let agentsExplicit = false;
   let apply = false;
+  let digest: string | undefined;
   let json = false;
+  let profile = "personal";
   let proxies = [...catalog.proxyIds];
   let proxiesExplicit = false;
   let register = true;
@@ -134,6 +181,13 @@ function parseOptions(
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--apply") apply = true;
+    else if (value === "--digest") {
+      digest = readValue(argv, index, value);
+      index += 1;
+    } else if (value === "--profile") {
+      profile = readValue(argv, index, value);
+      index += 1;
+    }
     else if (value === "--json") json = true;
     else if (value === "--skip-registration") register = false;
     else if (value === "--root") {
@@ -178,7 +232,9 @@ function parseOptions(
     agents,
     agentsExplicit,
     apply,
+    digest,
     json,
+    profile,
     proxies,
     proxiesExplicit,
     register,
@@ -193,6 +249,8 @@ function rejectOptions(
   {
     allowAgents = false,
     allowApply = false,
+    allowDigest = false,
+    allowProfile = false,
     allowProxies = false,
     allowRegister = false,
     allowRoot = false,
@@ -200,24 +258,170 @@ function rejectOptions(
   }: AllowedOptions = {},
 ): void {
   if (!allowApply && options.apply) fail("--apply is not valid for this command");
+  if (!allowDigest && options.digest !== undefined) fail("--digest is not valid for this command");
+  if (!allowProfile && options.profile !== "personal") fail("--profile is not valid for this command");
   if (!allowRegister && !options.register) fail("--skip-registration is not valid for this command");
   if (!allowRoot && options.root !== undefined) fail("--root is not valid for this command");
   if (!allowAgents && options.agentsExplicit) fail("agent selection is not valid for this command");
   if (!allowProxies && options.proxiesExplicit) fail("proxy selection is not valid for this command");
   if (!allowTools && options.toolsExplicit) fail("tool selection is not valid for this command");
   if (!options.apply && !options.register) fail("--skip-registration requires --apply");
+  if (options.apply && options.digest === undefined) {
+    fail("--apply requires the exact --digest printed by preview");
+  }
+  if (!options.apply && options.digest !== undefined) {
+    fail("--digest requires --apply");
+  }
+  if (options.digest !== undefined && !/^[0-9a-f]{64}$/.test(options.digest)) {
+    fail("--digest must be an exact lowercase SHA-256");
+  }
 }
 
 function publicOptions(options: InternalSelectionOptions): CliSelectionOptions {
   return {
     agents: options.agents,
     apply: options.apply,
+    digest: options.digest,
     json: options.json,
+    profile: options.profile,
     proxies: options.proxies,
     register: options.register,
     root: options.root,
     tools: options.tools,
   };
+}
+
+function commaSeparated(value: string): string[] {
+  const values = value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (new Set(values).size !== values.length) {
+    fail("profile lists must not contain duplicate IDs");
+  }
+  return values;
+}
+
+function parseProfileArguments(argv: readonly string[]): ParsedOmhArguments {
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+  if (subcommand === undefined || ["--help", "-h", "help"].includes(subcommand)) {
+    return { command: "help", topic: "profiles", json: false };
+  }
+  if (subcommand === "list") {
+    if (rest.length === 0) return { command: "profiles", subcommand, json: false };
+    if (rest.length === 1 && rest[0] === "--json") {
+      return { command: "profiles", subcommand, json: true };
+    }
+    fail("use `omh profiles list [--json]`");
+  }
+  if (subcommand === "verify" && rest.length === 0) {
+    return { command: "profiles", subcommand, json: false };
+  }
+  if (subcommand === "apply") {
+    if (rest.length === 0) {
+      return { command: "profiles", subcommand, profile: "default", json: false };
+    }
+    if (
+      rest.length === 2
+      && rest[0] === "--profile"
+      && rest[1] !== undefined
+      && rest[1].length > 0
+    ) {
+      return { command: "profiles", subcommand, profile: rest[1], json: false };
+    }
+    fail("use `omh profiles apply [--profile id]`");
+  }
+
+  let json = false;
+  let file: string | undefined;
+  let repositoryRoot: string | undefined;
+  let digest: string | undefined;
+  const fields = new Map<string, string>();
+  for (let index = 0; index < rest.length; index += 1) {
+    const flag = rest[index];
+    if (flag === "--json") {
+      json = true;
+      continue;
+    }
+    if (flag === undefined || ![
+      "--id",
+      "--name",
+      "--agents",
+      "--required",
+      "--optional",
+      "--capabilities",
+      "--file",
+      "--repo",
+      "--digest",
+    ].includes(flag)) {
+      fail(`unknown profiles ${subcommand} option: ${String(flag)}`);
+    }
+    const value = readValue(rest, index, flag);
+    if (fields.has(flag)) fail(`${flag} must be specified once`);
+    fields.set(flag, value);
+    index += 1;
+  }
+  file = fields.get("--file");
+  repositoryRoot = fields.get("--repo");
+  digest = fields.get("--digest");
+
+  if (subcommand === "create") {
+    const requiredFlags = [
+      "--id",
+      "--name",
+      "--agents",
+      "--required",
+      "--capabilities",
+    ] as const;
+    for (const flag of requiredFlags) {
+      if (!fields.has(flag)) fail(`profiles create requires ${flag}`);
+    }
+    if (file !== undefined || repositoryRoot !== undefined || digest !== undefined) {
+      fail("profiles create accepts catalog IDs only; use preview/publish for repository paths");
+    }
+    return {
+      command: "profiles",
+      subcommand,
+      input: {
+        id: String(fields.get("--id")),
+        displayName: String(fields.get("--name")),
+        selectedAgents: commaSeparated(String(fields.get("--agents"))),
+        requiredPackages: commaSeparated(String(fields.get("--required"))),
+        optionalPackages: commaSeparated(fields.get("--optional") ?? ""),
+        capabilities: commaSeparated(String(fields.get("--capabilities"))),
+      },
+      json,
+    };
+  }
+  if (subcommand === "validate") {
+    if (file === undefined || repositoryRoot !== undefined || digest !== undefined) {
+      fail("use `omh profiles validate --file path [--json]`");
+    }
+    return { command: "profiles", subcommand, file, json };
+  }
+  if (subcommand === "preview") {
+    if (file === undefined || repositoryRoot === undefined || digest !== undefined) {
+      fail("use `omh profiles preview --file path --repo path [--json]`");
+    }
+    return { command: "profiles", subcommand, file, repositoryRoot, json };
+  }
+  if (subcommand === "publish") {
+    if (
+      file === undefined
+      || repositoryRoot === undefined
+      || digest === undefined
+      || !/^[0-9a-f]{64}$/.test(digest)
+    ) {
+      fail("use `omh profiles publish --file path --repo path --digest sha256 [--json]`");
+    }
+    return {
+      command: "profiles",
+      subcommand,
+      file,
+      repositoryRoot,
+      digest,
+      json,
+    };
+  }
+  fail("profiles requires list, create, validate, preview, or publish");
 }
 
 function parseProxyArguments(
@@ -312,6 +516,8 @@ export function createArgumentParser(
       rejectOptions(options, {
         allowAgents: true,
         allowApply: true,
+        allowDigest: true,
+        allowProfile: true,
         allowProxies: true,
         allowRegister: true,
         allowRoot: true,
@@ -333,6 +539,8 @@ export function createArgumentParser(
       rejectOptions(options, {
         allowAgents: true,
         allowApply: subcommand === "install",
+        allowDigest: subcommand === "install",
+        allowProfile: true,
         allowRegister: subcommand === "install",
         allowRoot: true,
       });
@@ -355,6 +563,8 @@ export function createArgumentParser(
       const options = parseOptions(rest, "tools", catalog, agentAliases, toolAliases, proxyAliases);
       rejectOptions(options, {
         allowApply: subcommand === "install",
+        allowDigest: subcommand === "install",
+        allowProfile: true,
         allowTools: true,
       });
       return {
@@ -373,6 +583,7 @@ export function createArgumentParser(
       const options = parseOptions(argv.slice(1), command, catalog, agentAliases, toolAliases, proxyAliases);
       rejectOptions(options, {
         allowAgents: true,
+        allowProfile: true,
         allowProxies: true,
         allowRoot: true,
         allowTools: true,
@@ -380,26 +591,7 @@ export function createArgumentParser(
       return { command, ...publicOptions(options) };
     }
     if (command === "profiles") {
-      if (subcommand === undefined || ["--help", "-h", "help"].includes(subcommand)) {
-        return { command: "help", topic: "profiles", json: false };
-      }
-      if (subcommand === "verify" && rest.length === 0) {
-        return { command, subcommand, json: false };
-      }
-      if (subcommand === "apply") {
-        if (rest.length === 0) {
-          return { command, subcommand, profile: "default", json: false };
-        }
-        if (
-          rest.length === 2
-          && rest[0] === "--profile"
-          && rest[1] !== undefined
-          && rest[1].length > 0
-        ) {
-          return { command, subcommand, profile: rest[1], json: false };
-        }
-      }
-      fail("use `omh profiles verify` or `omh profiles apply [--profile id]`");
+      return parseProfileArguments(argv.slice(1));
     }
     fail(`unknown command: ${String(command)}`);
   };
