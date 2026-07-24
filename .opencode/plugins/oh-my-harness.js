@@ -1,5 +1,3 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import {
   assertCurrentToolPolicy,
@@ -12,12 +10,15 @@ import {
   staleSessionToolPolicy,
   toolPolicyStatus,
 } from "../../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
+import {
+  applyOpenCodeNativeConfig,
+  createFileOpenCodeRuntimeDependencies,
+  createOpenCodeLifecycleHooks,
+  loadOpenCodeCapabilityDefinitions,
+  resolveOpenCodePackageRoot,
+} from "../../dist/runtime/opencode.js";
 
-const pluginDir = path.dirname(fileURLToPath(import.meta.url));
-const skillsDir = path.resolve(
-  pluginDir,
-  "../../plugins/oh-my-harness/skills",
-);
+const packageRoot = resolveOpenCodePackageRoot(import.meta.url);
 
 function currentPolicy() {
   return loadToolPolicySnapshot({ runtimeId: "opencode" });
@@ -108,28 +109,111 @@ function setupTool(sessionPolicy) {
   });
 }
 
-export const OhMyHarnessPlugin = async () => {
-  const sessionPolicy = currentPolicy();
-  const definitions = cliToolDefinitionsForPolicy(sessionPolicy);
-  return {
-    config: async (config) => {
-      config.skills = config.skills || {};
-      config.skills.paths = config.skills.paths || [];
-      if (!config.skills.paths.includes(skillsDir)) {
-        config.skills.paths.push(skillsDir);
-      }
-    },
-    tool: {
-      workspace_cli_status: statusTool(sessionPolicy),
-      workspace_cli_setup: setupTool(sessionPolicy),
-      ...Object.fromEntries(
-        definitions.map((definition) => [
-          definition.name,
-          cliTool(definition, sessionPolicy),
-        ]),
+function sameContextIdentity(left, right) {
+  return left.profileId === right.profileId
+    && left.catalogRevision === right.catalogRevision
+    && left.selectedAgents.join("\u0000") === right.selectedAgents.join("\u0000");
+}
+
+function capabilityTool(definition, initialContext, dependencies) {
+  return tool({
+    description:
+      `${definition.description} Loads the receipt-selected Oh My Harness workflow instructions for this OpenCode session.`,
+    args: {
+      request: tool.schema.string().max(16_384).optional().describe(
+        "The task to perform with this workflow.",
       ),
     },
+    async execute(args, context) {
+      const [current, startup] = await Promise.all([
+        dependencies.loadContext(context.directory),
+        dependencies.inspectStartup(context.directory),
+      ]);
+      const capability = current.json.capabilities.find(
+        ({ id }) => id === definition.id,
+      );
+      if (
+        !sameContextIdentity(initialContext, current.json)
+        || current.json.mode === "status-only"
+        || capability?.state !== "ready"
+        || !startup.ready
+        || startup.restartRequired
+      ) {
+        const remediation = current.json.remediation.join(" | ")
+          || "Start a new OpenCode session after running omh setup.";
+        throw new Error(
+          `OpenCode capability ${definition.id} is not current for this session. ${remediation}`,
+        );
+      }
+      const request = args.request?.trim();
+      return request
+        ? `${definition.content}\n\n## Current request\n\n${request}`
+        : definition.content;
+    },
+  });
+}
+
+export function createOpenCodePlugin(runtimeDependencies) {
+  return async ({ directory }) => {
+    const dependencies = runtimeDependencies
+      ?? createFileOpenCodeRuntimeDependencies();
+    const [initialSnapshot, initialStartup] = await Promise.all([
+      dependencies.loadContext(directory),
+      dependencies.inspectStartup(directory),
+    ]);
+    const lifecycle = createOpenCodeLifecycleHooks({
+      directory,
+      loadContext: dependencies.loadContext,
+      inspectStartup: dependencies.inspectStartup,
+    });
+    const initialContext = initialSnapshot.json;
+    const readyCapabilityIds = new Set(
+      initialContext.capabilities
+        .filter(({ state }) => state === "ready")
+        .map(({ id }) => id),
+    );
+    const workflowDefinitions =
+      initialContext.mode !== "status-only"
+        && initialStartup.ready
+        && !initialStartup.restartRequired
+        ? loadOpenCodeCapabilityDefinitions(packageRoot).filter(({ id }) =>
+          readyCapabilityIds.has(id)
+        )
+        : [];
+
+    const sessionPolicy = currentPolicy();
+    const definitions = cliToolDefinitionsForPolicy(sessionPolicy);
+    return {
+      ...lifecycle,
+      config: async (config) => {
+        const [current, startup] = await Promise.all([
+          dependencies.loadContext(directory),
+          dependencies.inspectStartup(directory),
+        ]);
+        if (startup.ready && !startup.restartRequired) {
+          applyOpenCodeNativeConfig(config, current.json);
+        }
+      },
+      tool: {
+        workspace_cli_status: statusTool(sessionPolicy),
+        workspace_cli_setup: setupTool(sessionPolicy),
+        ...Object.fromEntries(
+          workflowDefinitions.map((definition) => [
+            definition.toolName,
+            capabilityTool(definition, initialContext, dependencies),
+          ]),
+        ),
+        ...Object.fromEntries(
+          definitions.map((definition) => [
+            definition.name,
+            cliTool(definition, sessionPolicy),
+          ]),
+        ),
+      },
+    };
   };
-};
+}
+
+export const OhMyHarnessPlugin = createOpenCodePlugin();
 
 export default OhMyHarnessPlugin;

@@ -132,12 +132,12 @@
       "version": "0.144.4"
     },
     "opencode": {
-      "descriptorCanonicalSha256": "cce446785fc165c6f1c9bbf663ecfccf999f0e60d81db617fe864fe3cd8fe806",
+      "descriptorCanonicalSha256": "c0b709c9947e84da7e7d76e442ae9db54520892498062fef5df3628e9d6a9160",
       "gateSource": {
         "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
         "locations": [
-          "packages/plugin/src/index.ts::Hooks[\"chat.message\"]",
-          "packages/opencode/src/session/prompt.ts"
+          "packages/plugin/src/index.ts::Hooks[\"experimental.chat.system.transform\"]",
+          "packages/opencode/src/session/llm.ts"
         ],
         "owner": "anomalyco",
         "repository": "opencode"

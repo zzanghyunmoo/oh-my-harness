@@ -57,14 +57,14 @@
       "sourceRef": {
         "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
         "locations": [
-          "packages/plugin/src/index.ts::Hooks[\"chat.message\"]",
-          "packages/opencode/src/session/prompt.ts"
+          "packages/plugin/src/index.ts::Hooks[\"experimental.chat.system.transform\"]",
+          "packages/opencode/src/session/llm.ts"
         ],
         "owner": "anomalyco",
         "repository": "opencode"
       },
-      "status": "candidate-deny-unproven",
-      "surfaceId": "chat.message"
+      "status": "candidate",
+      "surfaceId": "experimental.chat.system.transform"
     }
   },
   "optionalExtensions": [],
