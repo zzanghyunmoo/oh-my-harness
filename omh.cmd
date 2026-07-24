@@ -1,3 +1,4 @@
 @echo off
 setlocal
-node "%~dp0bin\omh.mjs" %*
+node "%~dp0dist\cli\main.js" %*
+exit /b %errorlevel%

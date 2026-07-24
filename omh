@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { main } from "./bin/omh.mjs";
+import { main } from "./dist/cli/main.js";
 
 try { await main(); }
 catch (error) {

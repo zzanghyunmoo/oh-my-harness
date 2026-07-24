@@ -10,7 +10,7 @@ import {
   formatOmhResult,
   parseOmhArguments,
   runOmh,
-} from "../../bin/omh.mjs";
+} from "../../dist/cli/main.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
