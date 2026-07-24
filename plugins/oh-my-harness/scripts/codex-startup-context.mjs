@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import {
   lstatSync,
-  readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import {
@@ -24,11 +24,22 @@ function fail(message) {
   throw new Error(message);
 }
 
-function readInput() {
-  const bytes = readFileSync(0);
-  if (bytes.byteLength > MAX_INPUT_BYTES) {
-    fail("hook input exceeds the bounded policy");
+function readBoundedStdin(maximumBytes) {
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maximumBytes - total + 1));
+    const bytes = readSync(0, chunk, 0, chunk.length, null);
+    if (bytes === 0) break;
+    total += bytes;
+    if (total > maximumBytes) fail("hook input exceeds the bounded policy");
+    chunks.push(chunk.subarray(0, bytes));
   }
+  return Buffer.concat(chunks, total);
+}
+
+function readInput() {
+  const bytes = readBoundedStdin(MAX_INPUT_BYTES);
   const encoded = bytes.toString("utf8");
   const parsed = JSON.parse(encoded || "{}");
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -118,7 +129,13 @@ function boundedDiagnostic(error) {
       safe = safe.replaceAll(value, replacement);
     }
   }
-  safe = safe.replace(/\s+/g, " ").slice(0, 320);
+  safe = safe
+    .replace(
+      /(?:bearer|basic)\s+[^\s]+|(?:token|password|secret|authorization)\s*[:=]\s*\S+/gi,
+      "[redacted]",
+    )
+    .replace(/\s+/g, " ")
+    .slice(0, 320);
   return [
     "Oh My Harness startup context is unavailable.",
     `Diagnostic: ${safe || "unknown startup failure"}`,

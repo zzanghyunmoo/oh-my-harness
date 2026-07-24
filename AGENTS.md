@@ -66,6 +66,9 @@ oh-my-harness/
 - agent, package, capability installer의 모든 필수 preflight를 mutation보다 먼저 실행한다.
 - 부분 실패는 last-known-good를 보존하고 `partial-unready` 결과와 재시도 가능한 journal을 남긴다. required 항목이 모두 검증되기 전 success receipt를 쓰지 않는다.
 - removal, pin 변경, source 변경, user-owned 충돌은 additive repair와 분리된 새 preview를 요구한다.
+- 같은 marketplace/plugin ID가 다른 source, version, tree, enabled state로 이미
+  등록되어 있으면 이를 제거하거나 교체하지 않고 user-owned collision으로
+  실패한다. exact registration만 idempotent하게 재사용한다.
 
 ## 카탈로그와 프로필 규칙
 
@@ -128,8 +131,14 @@ oh-my-harness/
 - runtime plugin payload는 content-addressed store와 receipt-owned generation을
   분리한다. receipt의 `repairSource`는 같은 digest의 로컬 store만 가리키며,
   startup repair는 target이 단순 삭제된 경우에만 atomic copy를 수행한다.
-- receipt는 secret-free이며 catalog revision, profile, selected agents, pins, managed paths/digests, ownership, sync consent, lifecycle result를 기록한다.
-- managed root 밖 경로, symlink escape, pre-image가 바뀐 target에는 쓰지 않는다.
+- receipt는 secret-free이며 catalog revision, profile, selected agents, pins,
+  managed paths/digests, `managed`/`external` ownership scope, sync consent,
+  lifecycle result를 기록한다. adopted Node/agent executable은 `external`이며
+  harness가 소유권을 주장하거나 자동 복구하지 않는다.
+- managed state root는 절대 경로여야 하고 파일시스템 root가 될 수 없다.
+  managed root 밖 경로, symlink escape, pre-image가 바뀐 target에는 쓰지 않는다.
+  startup repair는 정확히
+  `payloads/store/<digest> → payloads/generations/<digest>`만 허용한다.
 - v1/Pi/Compound Engineering 상태는 read-only migration inspector로 탐지한다. receipt가 없거나 손상된 경로는 `suspected`로만 보고한다.
 - Pi와 v1 plugin/payload 제거는 exact removal preview가 있을 때만 수행하며 user-owned 파일을 추정 삭제하지 않는다.
 - legacy connector/proxy/provider 코드는 v2 제품 surface로 확장하지 않는다. 독립적 가치가 있는 코드는 별도 결정 전까지 보존하되 canonical CLI/profile/catalog에 포함하지 않는다.
@@ -139,6 +148,8 @@ oh-my-harness/
 - unit/integration test는 `node:test`와 `node:assert/strict`를 기본으로 사용한다.
 - TypeScript typecheck와 build는 별도 CI gate이며 test가 emitted JavaScript를 실제로 실행해야 한다.
 - 테스트는 네트워크 대신 temp directory, fake runner, pinned fixture, dependency injection을 사용한다.
+- receipt, snapshot, hook stdin, JSON-RPC line, subprocess output은 읽기 전에
+  크기 한계를 적용하고 symlink/non-regular file을 fail closed한다.
 - 최소 검증 범위:
   - catalog/profile/receipt closed-schema와 deterministic revision/digest
   - preview 무변경, stale-preview 거부, partial apply 재시도

@@ -77,6 +77,8 @@ function receipt(
       digest,
       id: "skill:goal",
       kind: "file",
+      repairSource: `${target}.repair`,
+      scope: "managed",
       target,
     }],
     planDigest: "a".repeat(64),

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-
-import readline from "node:readline";
 import {
   assertCliToolAllowed,
   assertCurrentToolPolicy,
@@ -23,7 +21,9 @@ const SERVER_INFO = Object.freeze({
   name: "oh-my-harness-cli-tools",
   version: "0.2.0",
 });
+const MAX_LINE_BYTES = 64 * 1024;
 const JSON_RPC_ERRORS = Object.freeze({
+  INVALID_REQUEST: -32600,
   METHOD_NOT_FOUND: -32601,
   INVALID_PARAMS: -32602,
   INTERNAL_ERROR: -32603,
@@ -284,16 +284,13 @@ async function handle(message) {
   );
 }
 
-const input = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
-input.on("line", (line) => {
+function handleLine(line) {
   if (!line.trim()) return;
   let message;
   try {
     message = JSON.parse(line);
   } catch {
+    error(null, JSON_RPC_ERRORS.INVALID_REQUEST, "invalid JSON-RPC request");
     return;
   }
   handle(message).catch((caught) => {
@@ -305,4 +302,49 @@ input.on("line", (line) => {
       );
     }
   });
+}
+
+let lineChunks = [];
+let lineBytes = 0;
+let discardingOversizedLine = false;
+
+process.stdin.on("data", (rawChunk) => {
+  const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+  let offset = 0;
+  while (offset < chunk.length) {
+    const newline = chunk.indexOf(0x0a, offset);
+    const end = newline === -1 ? chunk.length : newline;
+    const slice = chunk.subarray(offset, end);
+    if (!discardingOversizedLine) {
+      lineBytes += slice.length;
+      if (lineBytes > MAX_LINE_BYTES) {
+        discardingOversizedLine = true;
+        lineChunks = [];
+        error(
+          null,
+          JSON_RPC_ERRORS.INVALID_REQUEST,
+          "JSON-RPC request exceeds the bounded line limit",
+        );
+      } else if (slice.length > 0) {
+        lineChunks.push(slice);
+      }
+    }
+    if (newline === -1) break;
+    if (!discardingOversizedLine) {
+      const line = Buffer.concat(lineChunks, lineBytes)
+        .toString("utf8")
+        .replace(/\r$/u, "");
+      handleLine(line);
+    }
+    lineChunks = [];
+    lineBytes = 0;
+    discardingOversizedLine = false;
+    offset = newline + 1;
+  }
+});
+
+process.stdin.on("end", () => {
+  if (!discardingOversizedLine && lineBytes > 0) {
+    handleLine(Buffer.concat(lineChunks, lineBytes).toString("utf8"));
+  }
 });

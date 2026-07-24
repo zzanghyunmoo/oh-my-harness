@@ -1,6 +1,5 @@
 import {
   existsSync,
-  readFileSync,
   readdirSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +12,7 @@ import {
   SUPPORTED_AGENT_IDS,
   type AgentId,
 } from "../domain/catalog.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 import { computeCatalogRevision } from "./revision.js";
 import {
   validateJsonSchema,
@@ -29,6 +29,7 @@ import type {
 const DEFAULT_REPOSITORY_ROOT = fileURLToPath(
   new URL("../../", import.meta.url),
 );
+const MAX_CATALOG_DOCUMENT_BYTES = 4 * 1024 * 1024;
 
 const CONTRACT_FILES = {
   "capability-catalog": "capability-catalog.schema.json",
@@ -83,7 +84,9 @@ function assertSecretFree(value: unknown, path = "$"): void {
 
 function readJson(path: string): unknown {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return JSON.parse(
+      readBoundedRegularFile(path, MAX_CATALOG_DOCUMENT_BYTES).toString("utf8"),
+    ) as unknown;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`failed to read JSON ${path}: ${reason}`);

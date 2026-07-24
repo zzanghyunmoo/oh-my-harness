@@ -42,6 +42,15 @@ A secret-free local record of the Catalog Revision, selected Environment Profile
 
 The receipt supports drift detection, repair, migration, and removal previews. It never grants ownership of unrelated user configuration.
 
+### Ownership Scope
+
+The receipt classifies every recorded artifact or registration as `managed` or
+`external`. `managed` means Oh My Harness created and may verify that exact
+receipt-bound object; `external` means it was adopted from the machine and is
+verified without claiming mutation or repair authority. A `repairSource` is
+valid only for `managed` content and must name the same digest-addressed local
+store as its generation target.
+
 ### Exact Apply Plan
 
 An immutable preview of the desired Environment Profile, selected agents, Catalog Revision, platform, observed managed-state pre-images, preflight results, and ordered actions.

@@ -18,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
@@ -47,4 +49,4 @@ jobs:
       - name: Packed artifact
         run: npm run package:verify
       - name: Patch hygiene
-        run: git diff --check
+        run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}" HEAD

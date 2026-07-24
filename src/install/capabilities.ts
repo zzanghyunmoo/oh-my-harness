@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   lstatSync,
-  readFileSync,
   readdirSync,
 } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
@@ -17,10 +16,15 @@ import type {
   CapabilityCatalogEntry,
   OperatingSystem,
 } from "../catalog/types.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_PROVENANCE_BYTES = 4 * 1024 * 1024;
+const MAX_MANAGED_ENTRIES = 4_096;
+const MAX_MANAGED_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_MANAGED_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export interface CapabilitySurfaces {
   readonly skills: readonly string[];
@@ -537,7 +541,9 @@ export function validateCapabilityProvenance(
 
 function readJson(path: string): unknown {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return JSON.parse(
+      readBoundedRegularFile(path, MAX_PROVENANCE_BYTES).toString("utf8"),
+    ) as unknown;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`failed to read capability provenance ${path}: ${reason}`);
@@ -608,22 +614,36 @@ export function verifyOfficialCandidate(
 function collectManagedFiles(
   directory: string,
   root = directory,
+  budget: { entries: number; bytes: number } = { entries: 0, bytes: 0 },
 ): Array<{ path: string; sha256: string }> {
   const entries = readdirSync(directory, { withFileTypes: true });
   const files: Array<{ path: string; sha256: string }> = [];
   for (const entry of entries) {
     const path = join(directory, entry.name);
     const stat = lstatSync(path);
+    budget.entries += 1;
+    if (budget.entries > MAX_MANAGED_ENTRIES) {
+      fail("managed capability has too many entries");
+    }
     if (stat.isSymbolicLink()) fail(`managed capability contains a symbolic link: ${path}`);
     if (stat.isDirectory()) {
-      files.push(...collectManagedFiles(path, root));
+      files.push(...collectManagedFiles(path, root, budget));
       continue;
     }
     if (!stat.isFile()) fail(`managed capability contains a non-file entry: ${path}`);
+    if (stat.size > MAX_MANAGED_FILE_BYTES) {
+      fail(`managed capability contains an oversized file: ${path}`);
+    }
+    budget.bytes += stat.size;
+    if (budget.bytes > MAX_MANAGED_TOTAL_BYTES) {
+      fail("managed capability exceeds the total byte limit");
+    }
     const relativePath = relative(root, path).split(sep).join("/");
     files.push({
       path: relativePath,
-      sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+      sha256: createHash("sha256")
+        .update(readBoundedRegularFile(path, MAX_MANAGED_FILE_BYTES))
+        .digest("hex"),
     });
   }
   return files.sort((left, right) => left.path.localeCompare(right.path));

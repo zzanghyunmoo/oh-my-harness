@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
-  readFileSync,
   readdirSync,
   readlinkSync,
 } from "node:fs";
@@ -16,6 +15,10 @@ import {
 } from "node:path";
 
 import type { AgentId } from "../domain/catalog.js";
+import {
+  readBoundedRegularFile,
+  sha256File as hashFile,
+} from "../environment/filesystem.js";
 import type {
   ApplyPlan,
   ObservedPreimage,
@@ -59,9 +62,13 @@ interface LegacyReceipt {
 }
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const MAX_LEGACY_ENTRIES = 4_096;
+const MAX_LEGACY_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_LEGACY_TOTAL_BYTES = 64 * 1024 * 1024;
+const MAX_LEGACY_RECEIPT_BYTES = 1024 * 1024;
 
 function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return hashFile(path);
 }
 
 function stableJson(value: unknown): string {
@@ -86,12 +93,17 @@ function directoryEntries(
   root: string,
   current = root,
   entries: Array<Record<string, unknown>> = [],
+  budget: { entries: number; bytes: number } = { entries: 0, bytes: 0 },
 ): Array<Record<string, unknown>> {
   for (const name of readdirSync(current).sort()) {
     const path = join(current, name);
     const rel = relative(root, path).split(sep).join("/");
     if (rel === ".oh-my-harness-install.json") continue;
     const stat = lstatSync(path);
+    budget.entries += 1;
+    if (budget.entries > MAX_LEGACY_ENTRIES) {
+      throw new Error("legacy payload has too many entries");
+    }
     if (stat.isSymbolicLink()) {
       const link = readlinkSync(path);
       const target = resolve(dirname(path), link);
@@ -100,8 +112,15 @@ function directoryEntries(
       }
       entries.push({ path: rel, symlink: link });
     } else if (stat.isDirectory()) {
-      directoryEntries(root, path, entries);
+      directoryEntries(root, path, entries, budget);
     } else if (stat.isFile()) {
+      if (stat.size > MAX_LEGACY_FILE_BYTES) {
+        throw new Error(`legacy payload contains an oversized file: ${path}`);
+      }
+      budget.bytes += stat.size;
+      if (budget.bytes > MAX_LEGACY_TOTAL_BYTES) {
+        throw new Error("legacy payload exceeds the total byte limit");
+      }
       entries.push({ path: rel, sha256: sha256File(path), size: stat.size });
     } else {
       throw new Error(`legacy payload contains a non-regular entry: ${path}`);
@@ -121,6 +140,9 @@ function observe(path: string): ObservedPreimage {
     };
   }
   if (stat.isFile()) {
+    if (stat.size > MAX_LEGACY_FILE_BYTES) {
+      throw new Error(`legacy target is oversized: ${path}`);
+    }
     return { kind: "file", sha256: sha256File(path), size: stat.size };
   }
   if (stat.isDirectory()) {
@@ -135,9 +157,19 @@ function observe(path: string): ObservedPreimage {
 }
 
 function readReceipt(path: string): LegacyReceipt | null {
-  if (!existsSync(path) || lstatSync(path).isSymbolicLink()) return null;
+  if (!existsSync(path)) return null;
+  const stat = lstatSync(path);
+  if (
+    stat.isSymbolicLink()
+    || !stat.isFile()
+    || stat.size > MAX_LEGACY_RECEIPT_BYTES
+  ) {
+    return null;
+  }
   try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    const value = JSON.parse(
+      readBoundedRegularFile(path, MAX_LEGACY_RECEIPT_BYTES).toString("utf8"),
+    ) as unknown;
     return value !== null && typeof value === "object"
       ? value as LegacyReceipt
       : null;

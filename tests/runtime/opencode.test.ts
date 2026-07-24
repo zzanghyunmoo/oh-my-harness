@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -246,6 +247,48 @@ test("U10 file-backed direct launch fails closed on absent or corrupt state", as
     const corrupt = await dependencies.loadContext("/arbitrary/workspace");
     assert.equal(corrupt.json.mode, "status-only");
     assert.match(corrupt.text, /corrupt runtime context snapshot/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("U10 file-backed snapshots reject oversized, unknown, and symlinked context", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-bounded-state-"));
+  const runtimeRoot = join(root, "runtime", "opencode");
+  const contextPath = join(runtimeRoot, "context.json");
+  try {
+    mkdirSync(runtimeRoot, { recursive: true });
+    const dependencies = createFileOpenCodeRuntimeDependencies({
+      stateRoot: root,
+    });
+
+    writeFileSync(contextPath, "x".repeat(64 * 1024 + 1));
+    const oversized = await dependencies.loadContext("/arbitrary/workspace");
+    assert.equal(oversized.json.mode, "status-only");
+    assert.match(oversized.text, /bounded size limit/u);
+
+    writeFileSync(
+      contextPath,
+      JSON.stringify({
+        ...readyContext(),
+        capabilities: [
+          ...readyContext().capabilities,
+          { id: "unknown-capability", state: "ready", source: "managed" },
+        ],
+      }),
+    );
+    const unknown = await dependencies.loadContext("/arbitrary/workspace");
+    assert.equal(unknown.json.mode, "status-only");
+    assert.match(unknown.text, /invalid capability/u);
+
+    if (process.platform === "win32") return t.skip("symlink fixture");
+    const outside = join(root, "outside.json");
+    writeFileSync(outside, JSON.stringify(readyContext()));
+    rmSync(contextPath);
+    symlinkSync(outside, contextPath);
+    const symlinked = await dependencies.loadContext("/arbitrary/workspace");
+    assert.equal(symlinked.json.mode, "status-only");
+    assert.match(symlinked.text, /regular non-symlink file|symbolic link/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

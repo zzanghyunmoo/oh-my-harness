@@ -3,21 +3,11 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import {
-  isAbsolute,
   join,
   resolve,
 } from "node:path";
-import { pathToFileURL } from "node:url";
-
-import {
-  applyEdits,
-  modify,
-  parse as parseJsonc,
-} from "jsonc-parser";
 
 import {
   loadCatalogBundle,
@@ -52,7 +42,6 @@ import {
 } from "../install/managed-payload.js";
 import { createNodeAgentAcquisitionOperations } from "../install/node-acquisition.js";
 import {
-  gitTreeSha1,
   inspectOfficialClaudeMarketplace,
   type OfficialMarketplaceInspection,
   type VerifiedOfficialPlugin,
@@ -84,11 +73,22 @@ import {
   atomicWriteFile,
   findTrustedExecutable,
   observeRegularFile,
+  readBoundedRegularFile,
   resolveStateRoot,
   sha256Bytes,
   sha256File,
   stableJson,
 } from "./filesystem.js";
+import {
+  claudeRegistrationReady,
+  codexRegistrationReady,
+  openCodeConfigPath,
+  openCodeRegistrationReady,
+  registerClaudeOfficialPlugin,
+  registerClaudeRuntime,
+  registerCodexRuntime,
+  registerOpenCodeRuntime,
+} from "./native-registration.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
 const MARKER_SCHEMA_VERSION = "2.0.0";
@@ -557,20 +557,6 @@ function capabilityMarkerPath(
   return join(stateRoot, "markers", "capabilities", runtimeId, `${id}.json`);
 }
 
-function openCodeConfigPath(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-): string {
-  const configRoot = env.XDG_CONFIG_HOME
-    ?? (platform === "win32"
-      ? env.APPDATA
-      : join(env.HOME ?? homedir(), ".config"));
-  if (!configRoot || !isAbsolute(configRoot)) {
-    throw new Error("OpenCode user configuration root must be absolute");
-  }
-  return join(configRoot, "opencode", "opencode.json");
-}
-
 function actionPreimage(action: PlanAction): ObservedPreimage {
   const observedTarget = action.payload?.observedTarget;
   const target = typeof observedTarget === "string"
@@ -648,6 +634,7 @@ function planActions(
         contentDigest: sha256File(process.execPath),
         operation: "verify-file",
         ownershipKind: "file",
+        ownershipScope: "external",
       },
       preimage: observeRegularFile(process.execPath),
       required: true,
@@ -660,6 +647,7 @@ function planActions(
         contentDigest: reconcilerDigest,
         operation: "verify-file",
         ownershipKind: "file",
+        ownershipScope: "external",
       },
       preimage: observeRegularFile(reconcilerPath),
       required: true,
@@ -672,6 +660,7 @@ function planActions(
         contentDigest: model.managedPayload.digest,
         operation: "materialize-runtime-package",
         ownershipKind: "directory",
+        ownershipScope: "managed",
         repairSource: model.managedPayload.storeRoot,
       },
       preimage: observeManagedPath(model.managedPayload.activeRoot),
@@ -697,6 +686,7 @@ function planActions(
           ? "verify-agent"
           : "acquire-agent",
         ownershipKind: "executable",
+        ownershipScope: agent.ownership === "external" ? "external" : "managed",
         sourceDigest: artifact.executable.sha256,
       },
       preimage: observeRegularFile(target),
@@ -721,6 +711,7 @@ function planActions(
         contentDigest: sha256Bytes(content),
         operation: "install-package",
         ownershipKind: "file",
+        ownershipScope: "managed",
         packageId: entry.id,
       },
       preimage: observeRegularFile(target),
@@ -757,6 +748,7 @@ function planActions(
           contentDigest: sha256Bytes(content),
           operation: "register-claude-official",
           ownershipKind: "registration",
+          ownershipScope: "managed",
           pathTree: plugin.pathTree,
           selector: plugin.selector,
         },
@@ -789,6 +781,7 @@ function planActions(
         observedTarget,
         operation: "register-runtime",
         ownershipKind: "registration",
+        ownershipScope: "managed",
         receiptPath: model.receiptPath,
         runtimeId,
       },
@@ -873,6 +866,16 @@ export function previewEnvironment(
   options: EnvironmentOrchestratorOptions,
 ): EnvironmentPreview {
   const normalized = normalizedOptions(options);
+  return buildEnvironmentPreview(selection, normalized).preview;
+}
+
+function buildEnvironmentPreview(
+  selection: EnvironmentSelection,
+  normalized: ReturnType<typeof normalizedOptions>,
+): {
+  readonly model: EnvironmentModel;
+  readonly preview: EnvironmentPreview;
+} {
   const model = buildModel(selection, normalized);
   const checks = preflights(model);
   const blockers = blockingIds(checks);
@@ -894,25 +897,28 @@ export function previewEnvironment(
       })
     : null;
   return {
-    agents: model.agents,
-    blockers,
-    capabilities: model.capabilities,
-    catalogRevision: model.catalog.revision,
-    digest: plan?.digest ?? null,
-    kind: "environment-preview",
-    optionalGaps: optionalGapIds(checks),
-    packages: model.packages,
-    plan,
-    preflights: checks,
-    profileId: model.profile.id,
-    readiness: plan === null ? "blocked" : "preview",
-    receiptPath: model.receiptPath,
-    remediation: plan === null
-      ? `${previewCommand(model)} after resolving required blockers`
-      : `${previewCommand(model)} --apply --digest ${plan.digest}`,
-    schemaVersion: "2.0.0",
-    selectedAgents: model.selectedAgents,
-    stateRoot: model.stateRoot,
+    model,
+    preview: {
+      agents: model.agents,
+      blockers,
+      capabilities: model.capabilities,
+      catalogRevision: model.catalog.revision,
+      digest: plan?.digest ?? null,
+      kind: "environment-preview",
+      optionalGaps: optionalGapIds(checks),
+      packages: model.packages,
+      plan,
+      preflights: checks,
+      profileId: model.profile.id,
+      readiness: plan === null ? "blocked" : "preview",
+      receiptPath: model.receiptPath,
+      remediation: plan === null
+        ? `${previewCommand(model)} after resolving required blockers`
+        : `${previewCommand(model)} --apply --digest ${plan.digest}`,
+      schemaVersion: "2.0.0",
+      selectedAgents: model.selectedAgents,
+      stateRoot: model.stateRoot,
+    },
   };
 }
 
@@ -1018,357 +1024,6 @@ function runtimeExecutable(
   return external;
 }
 
-function parseJsonArray(
-  output: string,
-  label: string,
-): readonly Record<string, unknown>[] {
-  let value: unknown;
-  try {
-    value = JSON.parse(output);
-  } catch {
-    throw new Error(`${label} did not return JSON`);
-  }
-  if (
-    !Array.isArray(value)
-    || value.some(
-      (entry) =>
-        typeof entry !== "object"
-        || entry === null
-        || Array.isArray(entry),
-    )
-  ) {
-    throw new Error(`${label} did not return an object array`);
-  }
-  return value as readonly Record<string, unknown>[];
-}
-
-function claudeMarketplacePath(
-  entry: Readonly<Record<string, unknown>>,
-): string | null {
-  for (const key of ["path", "sourcePath", "directory", "localPath"]) {
-    const value = entry[key];
-    if (typeof value === "string" && isAbsolute(value)) return value;
-  }
-  const source = entry.source;
-  if (
-    typeof source === "object"
-    && source !== null
-    && !Array.isArray(source)
-  ) {
-    for (const key of ["path", "directory"]) {
-      const value = (source as Record<string, unknown>)[key];
-      if (typeof value === "string" && isAbsolute(value)) return value;
-    }
-  }
-  return null;
-}
-
-function parseCodexMarketplaces(output: string): ReadonlyMap<string, string> {
-  const entries = new Map<string, string>();
-  for (const line of output.split(/\r?\n/u).slice(1)) {
-    const match = /^(\S+)\s{2,}(.+?)\s*$/u.exec(line);
-    if (match?.[1] && match[2]) entries.set(match[1], match[2]);
-  }
-  return entries;
-}
-
-function codexPluginStatus(
-  output: string,
-  selector: string,
-): { readonly installed: boolean; readonly enabled: boolean } {
-  const columns = output
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim().split(/\s{2,}/u))
-    .find(([name]) => name === selector);
-  const status = columns?.[1] ?? "";
-  return {
-    enabled: /(?:^|,\s*)enabled(?:,|$)/u.test(status),
-    installed: /^installed(?:,|$)/u.test(status),
-  };
-}
-
-function codexPluginReady(output: string, selector: string): boolean {
-  const status = codexPluginStatus(output, selector);
-  return status.installed && status.enabled;
-}
-
-function exactClaudeOfficialPlugin(
-  entry: Readonly<Record<string, unknown>> | undefined,
-  plugin: VerifiedOfficialPlugin,
-): boolean {
-  if (
-    entry?.id !== plugin.selector
-    || entry.scope !== "user"
-    || entry.enabled !== true
-    || typeof entry.installPath !== "string"
-    || !isAbsolute(entry.installPath)
-  ) {
-    return false;
-  }
-  try {
-    return gitTreeSha1(entry.installPath, {
-      ignoreTopLevel: [".in_use"],
-    }) === plugin.pathTree;
-  } catch {
-    return false;
-  }
-}
-
-function registerClaudeOfficialPlugin(
-  executable: string,
-  plugin: VerifiedOfficialPlugin,
-  options: ReturnType<typeof normalizedOptions>,
-): void {
-  const plugins = parseJsonArray(
-    runCommand(executable, ["plugin", "list", "--json"], options),
-    "Claude plugin list",
-  );
-  const matches = plugins.filter(({ id }) => id === plugin.selector);
-  if (matches.some(({ scope }) => scope !== "user")) {
-    throw new Error(
-      `${plugin.selector} collides with a non-user Claude plugin registration`,
-    );
-  }
-  const current = matches.find(({ scope }) => scope === "user");
-  if (!exactClaudeOfficialPlugin(current, plugin)) {
-    if (current !== undefined) {
-      runCommand(
-        executable,
-        ["plugin", "uninstall", plugin.selector, "--scope", "user"],
-        options,
-      );
-    }
-    runCommand(
-      executable,
-      ["plugin", "install", plugin.selector, "--scope", "user"],
-      options,
-    );
-  }
-  const verified = parseJsonArray(
-    runCommand(executable, ["plugin", "list", "--json"], options),
-    "Claude plugin list",
-  ).find(
-    ({ id, scope }) => id === plugin.selector && scope === "user",
-  );
-  if (!exactClaudeOfficialPlugin(verified, plugin)) {
-    throw new Error(`${plugin.selector} installation did not match its reviewed tree`);
-  }
-}
-
-function registerClaude(
-  executable: string,
-  model: EnvironmentModel,
-  options: ReturnType<typeof normalizedOptions>,
-  markerCurrent: boolean,
-): void {
-  const marketplaces = parseJsonArray(
-    runCommand(
-      executable,
-      ["plugin", "marketplace", "list", "--json"],
-      options,
-    ),
-    "Claude marketplace list",
-  );
-  const marketplace = marketplaces.find(
-    (entry) => entry.name === "oh-my-harness",
-  );
-  if (marketplace !== undefined) {
-    const source = claudeMarketplacePath(marketplace);
-    if (
-      source === null
-      || resolve(source) !== resolve(model.managedPayload.activeRoot)
-    ) {
-      throw new Error("Claude marketplace oh-my-harness points to another source");
-    }
-  } else {
-    runCommand(executable, [
-      "plugin",
-      "marketplace",
-      "add",
-      model.managedPayload.activeRoot,
-    ], options);
-  }
-
-  const selector = "oh-my-harness@oh-my-harness";
-  const plugins = parseJsonArray(
-    runCommand(executable, ["plugin", "list", "--json"], options),
-    "Claude plugin list",
-  );
-  const plugin = plugins.find(
-    (entry) => entry.id === selector && entry.scope === "user",
-  );
-  const sourcePluginDigest = hashManagedDirectory(
-    join(model.managedPayload.activeRoot, "plugins", "oh-my-harness"),
-  );
-  let installedPluginExact = false;
-  if (typeof plugin?.installPath === "string" && isAbsolute(plugin.installPath)) {
-    try {
-      installedPluginExact = hashManagedDirectory(plugin.installPath, {
-        ignoreTopLevel: [".in_use"],
-      }) === sourcePluginDigest;
-    } catch {
-      installedPluginExact = false;
-    }
-  }
-  const pluginCurrent =
-    plugin?.version === "0.2.0"
-    && plugin.enabled === true
-    && installedPluginExact;
-  if (!markerCurrent || !pluginCurrent) {
-    if (plugin !== undefined) {
-      runCommand(
-        executable,
-        ["plugin", "uninstall", selector, "--scope", "user"],
-        options,
-      );
-    }
-    runCommand(executable, [
-      "plugin",
-      "install",
-      selector,
-      "--scope",
-      "user",
-      "--config",
-      `node_path=${process.execPath}`,
-      "--config",
-      `receipt_path=${model.receiptPath}`,
-    ], options);
-  }
-  const verifiedMarketplaces = parseJsonArray(
-    runCommand(
-      executable,
-      ["plugin", "marketplace", "list", "--json"],
-      options,
-    ),
-    "Claude marketplace list",
-  );
-  const verifiedMarketplace = verifiedMarketplaces.find(
-    (entry) => entry.name === "oh-my-harness",
-  );
-  const verifiedMarketplacePath = verifiedMarketplace === undefined
-    ? null
-    : claudeMarketplacePath(verifiedMarketplace);
-  const verifiedPlugins = parseJsonArray(
-    runCommand(executable, ["plugin", "list", "--json"], options),
-    "Claude plugin list",
-  );
-  if (
-    verifiedMarketplace === undefined
-    || verifiedMarketplacePath === null
-    || resolve(verifiedMarketplacePath) !== resolve(model.managedPayload.activeRoot)
-    || !verifiedPlugins.some((entry) => {
-      if (
-        entry.id !== selector
-        || entry.scope !== "user"
-        || entry.version !== "0.2.0"
-        || entry.enabled !== true
-        || typeof entry.installPath !== "string"
-        || !isAbsolute(entry.installPath)
-      ) {
-        return false;
-      }
-      try {
-        return hashManagedDirectory(entry.installPath, {
-          ignoreTopLevel: [".in_use"],
-        }) === sourcePluginDigest;
-      } catch {
-        return false;
-      }
-    })
-  ) {
-    throw new Error("Claude native registration could not be verified");
-  }
-}
-
-function registerCodex(
-  executable: string,
-  model: EnvironmentModel,
-  options: ReturnType<typeof normalizedOptions>,
-): void {
-  const marketplaces = parseCodexMarketplaces(
-    runCommand(executable, ["plugin", "marketplace", "list"], options),
-  );
-  const marketplace = marketplaces.get("oh-my-harness");
-  if (
-    marketplace !== undefined
-    && resolve(marketplace) !== resolve(model.managedPayload.activeRoot)
-  ) {
-    throw new Error("Codex marketplace oh-my-harness points to another root");
-  }
-  if (marketplace === undefined) {
-    runCommand(executable, [
-      "plugin",
-      "marketplace",
-      "add",
-      model.managedPayload.activeRoot,
-      "--json",
-    ], options);
-  }
-  const selector = "oh-my-harness@oh-my-harness";
-  const pluginStatus = codexPluginStatus(
-    runCommand(executable, ["plugin", "list"], options),
-    selector,
-  );
-  if (!pluginStatus.enabled) {
-    if (pluginStatus.installed) {
-      runCommand(
-        executable,
-        ["plugin", "remove", selector, "--json"],
-        options,
-      );
-    }
-    runCommand(executable, [
-      "plugin",
-      "add",
-      selector,
-      "--json",
-    ], options);
-  }
-  const verifiedMarketplace = parseCodexMarketplaces(
-    runCommand(executable, ["plugin", "marketplace", "list"], options),
-  );
-  const verifiedPlugins = runCommand(
-    executable,
-    ["plugin", "list"],
-    options,
-  );
-  const verifiedMarketplaceRoot = verifiedMarketplace.get("oh-my-harness");
-  if (
-    verifiedMarketplaceRoot === undefined
-    || resolve(verifiedMarketplaceRoot) !== resolve(model.managedPayload.activeRoot)
-    || !codexPluginReady(verifiedPlugins, selector)
-  ) {
-    throw new Error("Codex native registration could not be verified");
-  }
-}
-
-function registerOpenCode(
-  model: EnvironmentModel,
-  options: ReturnType<typeof normalizedOptions>,
-): void {
-  const configPath = openCodeConfigPath(options.env, options.os);
-  const current = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{}\n";
-  const parsed = parseJsonc(current) as { readonly plugin?: unknown } | undefined;
-  if (parsed === undefined || (parsed.plugin !== undefined && !Array.isArray(parsed.plugin))) {
-    throw new Error("OpenCode plugin configuration is not an array");
-  }
-  const sourcePath = resolve(
-    model.managedPayload.activeRoot,
-    ".opencode",
-    "plugins",
-    "oh-my-harness.js",
-  );
-  const pluginUrl = pathToFileURL(sourcePath).href;
-  const plugins = Array.isArray(parsed.plugin)
-    ? parsed.plugin.filter((entry): entry is string => typeof entry === "string")
-    : [];
-  if (plugins.includes(pluginUrl) || plugins.includes(sourcePath)) return;
-  const edits = modify(current, ["plugin"], [...plugins, pluginUrl], {
-    formattingOptions: { insertSpaces: true, tabSize: 2 },
-  });
-  atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
-}
-
 async function acquireAgent(
   action: PlanAction,
   model: EnvironmentModel,
@@ -1397,6 +1052,14 @@ async function acquireAgent(
   }
   if (installed.executablePath !== action.target) {
     throw new Error(`${rawId} runtime published at an unexpected target`);
+  }
+}
+
+function assertManagedPayloadExact(payload: ManagedRuntimePayload): void {
+  for (const path of [payload.storeRoot, payload.activeRoot]) {
+    if (!existsSync(path) || hashManagedDirectory(path) !== payload.digest) {
+      throw new Error(`managed runtime payload drifted after preview: ${path}`);
+    }
   }
 }
 
@@ -1437,10 +1100,14 @@ async function executeAction(
     };
   }
   if (operation === "register-claude-official") {
-    if (model.officialMarketplace.state !== "ready") {
+    const currentMarketplace = inspectOfficialClaudeMarketplace(
+      loadCapabilityProvenance(options.repositoryRoot).official,
+      options.env,
+    );
+    if (currentMarketplace.state !== "ready") {
       throw new Error("verified Claude official marketplace became unavailable");
     }
-    const plugin = model.officialMarketplace.plugins.find(
+    const plugin = currentMarketplace.plugins.find(
       ({ capabilityId, pathTree, selector }) =>
         capabilityId === payloadString(action, "capabilityId")
         && pathTree === payloadString(action, "pathTree")
@@ -1452,7 +1119,7 @@ async function executeAction(
     registerClaudeOfficialPlugin(
       runtimeExecutable("claude-code", model, options),
       plugin,
-      options,
+      (command, args) => runCommand(command, args, options),
     );
     atomicWriteFile(action.target, payloadString(action, "content"));
     return {
@@ -1463,12 +1130,22 @@ async function executeAction(
     const rawId = payloadString(action, "runtimeId");
     if (!isAgentId(rawId)) throw new Error(`unsupported runtime action: ${rawId}`);
     const executable = runtimeExecutable(rawId, model, options);
-    const markerCurrent = completedActionReady(action);
+    const registration = {
+      activeRoot: model.managedPayload.activeRoot,
+      receiptPath: model.receiptPath,
+    };
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    assertManagedPayloadExact(model.managedPayload);
     if (rawId === "claude-code") {
-      registerClaude(executable, model, options, markerCurrent);
+      registerClaudeRuntime(executable, registration, nativeRun);
     }
-    else if (rawId === "codex") registerCodex(executable, model, options);
-    else registerOpenCode(model, options);
+    else if (rawId === "codex") {
+      registerCodexRuntime(executable, registration, nativeRun);
+    } else {
+      registerOpenCodeRuntime(registration, options.env, options.os);
+    }
+    assertManagedPayloadExact(model.managedPayload);
     atomicWriteFile(action.target, payloadString(action, "content"));
     return {
       verified: sha256File(action.target) === payloadString(action, "contentDigest"),
@@ -1478,6 +1155,12 @@ async function executeAction(
 }
 
 function completedActionReady(action: PlanAction): boolean {
+  if (
+    action.payload?.operation === "register-runtime"
+    || action.payload?.operation === "register-claude-official"
+  ) {
+    return false;
+  }
   const expected = action.payload?.contentDigest ?? action.payload?.sourceDigest;
   if (typeof expected !== "string" || !existsSync(action.target)) return false;
   return action.payload?.ownershipKind === "directory"
@@ -1494,14 +1177,13 @@ export async function applyEnvironment(
   readonly result: ApplyResult;
 }> {
   const normalized = normalizedOptions(options);
-  const preview = previewEnvironment(selection, normalized);
+  const { model, preview } = buildEnvironmentPreview(selection, normalized);
   if (preview.plan === null || preview.digest === null) {
     throw new Error(`environment preview is blocked: ${preview.blockers.join(", ")}`);
   }
   if (preview.digest !== expectedDigest) {
     throw new StalePreviewError("environment preview digest is stale");
   }
-  const model = buildModel(selection, normalized);
   const result = await applyExactPlan(preview.plan, expectedDigest, {
     state: new FileStateStore(model.stateRoot),
     observe: async (action) => actionPreimage(action),
@@ -1521,7 +1203,9 @@ function readReceipt(
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 1024 * 1024) {
     throw new Error("managed receipt must be a bounded regular file");
   }
-  const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const value = JSON.parse(
+    readBoundedRegularFile(path, 1024 * 1024).toString("utf8"),
+  ) as unknown;
   validateContractDocument("managed-state-receipt", value, repositoryRoot);
   return value as ManagedStateReceipt;
 }
@@ -1732,31 +1416,6 @@ export function inspectEnvironment(
   };
 }
 
-function openCodeRegistrationReady(
-  runtimePackageRoot: string,
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-): boolean {
-  const configPath = openCodeConfigPath(env, platform);
-  if (!existsSync(configPath)) return false;
-  const stat = lstatSync(configPath);
-  if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 1024 * 1024) {
-    return false;
-  }
-  const value = parseJsonc(readFileSync(configPath, "utf8")) as
-    { readonly plugin?: unknown }
-    | undefined;
-  if (!Array.isArray(value?.plugin)) return false;
-  const source = resolve(
-    runtimePackageRoot,
-    ".opencode",
-    "plugins",
-    "oh-my-harness.js",
-  );
-  return value.plugin.includes(source)
-    || value.plugin.includes(pathToFileURL(source).href);
-}
-
 function nativeDoctorIssues(
   model: EnvironmentModel,
   options: ReturnType<typeof normalizedOptions>,
@@ -1777,84 +1436,33 @@ function nativeDoctorIssues(
         continue;
       }
       const executable = runtimeExecutable(runtimeId, model, options);
+      const registration = {
+        activeRoot: model.managedPayload.activeRoot,
+        receiptPath: model.receiptPath,
+      };
+      const nativeRun = (command: string, args: readonly string[]) =>
+        runCommand(command, args, options);
       if (runtimeId === "claude-code") {
-        const marketplaces = parseJsonArray(
-          runCommand(
-            executable,
-            ["plugin", "marketplace", "list", "--json"],
-            options,
-          ),
-          "Claude marketplace list",
-        );
-        const marketplace = marketplaces.find(
-          (entry) => entry.name === "oh-my-harness",
-        );
-        const plugins = parseJsonArray(
-          runCommand(executable, ["plugin", "list", "--json"], options),
-          "Claude plugin list",
-        );
-        const marketplacePath = marketplace === undefined
-          ? null
-          : claudeMarketplacePath(marketplace);
-        const sourcePluginDigest = hashManagedDirectory(
-          join(model.managedPayload.activeRoot, "plugins", "oh-my-harness"),
-        );
-        const managedPluginReady = plugins.some((entry) => {
-          if (
-            entry.id !== "oh-my-harness@oh-my-harness"
-            || entry.scope !== "user"
-            || entry.version !== "0.2.0"
-            || entry.enabled !== true
-            || typeof entry.installPath !== "string"
-            || !isAbsolute(entry.installPath)
-          ) {
-            return false;
-          }
-          try {
-            return hashManagedDirectory(entry.installPath, {
-              ignoreTopLevel: [".in_use"],
-            }) === sourcePluginDigest;
-          } catch {
-            return false;
-          }
-        });
-        const officialPluginsReady =
+        const expectedOfficialPlugins =
           model.officialMarketplace.state === "ready"
-          && model.officialMarketplace.plugins
-            .filter(({ capabilityId }) =>
-              model.profile.capabilities.some((id) => id === capabilityId)
-            )
-            .every((expected) =>
-              exactClaudeOfficialPlugin(
-                plugins.find(({ id }) => id === expected.selector),
-                expected,
+            ? model.officialMarketplace.plugins.filter(({ capabilityId }) =>
+                model.profile.capabilities.some((id) => id === capabilityId)
               )
-            );
+            : [];
         if (
-          marketplace === undefined
-          || marketplacePath === null
-          || resolve(marketplacePath) !== resolve(model.managedPayload.activeRoot)
-          || !managedPluginReady
-          || !officialPluginsReady
+          model.officialMarketplace.state !== "ready"
+          || !claudeRegistrationReady(
+            executable,
+            registration,
+            expectedOfficialPlugins,
+            nativeRun,
+          )
         ) {
           issues.push("native:claude-code:registration-drift");
         }
         continue;
       }
-      const marketplaces = parseCodexMarketplaces(
-        runCommand(executable, ["plugin", "marketplace", "list"], options),
-      );
-      const plugins = runCommand(
-        executable,
-        ["plugin", "list"],
-        options,
-      );
-      const marketplaceRoot = marketplaces.get("oh-my-harness");
-      if (
-        marketplaceRoot === undefined
-        || resolve(marketplaceRoot) !== resolve(model.managedPayload.activeRoot)
-        || !codexPluginReady(plugins, "oh-my-harness@oh-my-harness")
-      ) {
+      if (!codexRegistrationReady(executable, registration, nativeRun)) {
         issues.push("native:codex:registration-drift");
       }
     } catch {

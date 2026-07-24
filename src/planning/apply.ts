@@ -107,9 +107,13 @@ function receiptFor(
           : action.kind === "acquire"
             ? "executable" as const
             : "file" as const;
+      const scope = action.payload?.ownershipScope === "external"
+        ? "external" as const
+        : "managed" as const;
       return {
         id: action.id,
         kind,
+        scope,
         target: action.target,
         digest,
         ...(typeof action.payload?.repairSource === "string"

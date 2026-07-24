@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +26,7 @@ import {
   previewEnvironment,
   type EnvironmentSelection,
 } from "./environment/orchestrator.js";
+import { readBoundedRegularFile } from "./environment/filesystem.js";
 import {
   isAgentId,
   type PackageId,
@@ -39,7 +39,10 @@ import { FileStateStore } from "./state/receipt.js";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(
-  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  readBoundedRegularFile(
+    fileURLToPath(new URL("../package.json", import.meta.url)),
+    1024 * 1024,
+  ).toString("utf8"),
 ) as { readonly version?: unknown };
 if (typeof manifest.version !== "string" || manifest.version.length === 0) {
   throw new Error("package.json must declare a non-empty version");
@@ -103,7 +106,9 @@ function profileResult(
       state: "ready",
     };
   }
-  const profile = JSON.parse(readFileSync(parsed.file, "utf8")) as EnvironmentProfile;
+  const profile = JSON.parse(
+    readBoundedRegularFile(parsed.file, 1024 * 1024).toString("utf8"),
+  ) as EnvironmentProfile;
   if (parsed.subcommand === "validate") {
     validateContractDocument(
       "environment-profile",
@@ -251,7 +256,8 @@ export async function runOmh(
       {
         repairPinned: async ({ ownership }) => {
           if (
-            ownership.kind !== "directory"
+            ownership.scope !== "managed"
+            || ownership.kind !== "directory"
             || ownership.repairSource === undefined
           ) {
             return {
@@ -263,6 +269,7 @@ export async function runOmh(
           return repairManagedDirectory({
             digest: ownership.digest,
             source: ownership.repairSource,
+            stateRoot,
             target: ownership.target,
           });
         },

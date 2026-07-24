@@ -33,6 +33,7 @@ function packageRow(entry: PackageCatalogEntry): readonly string[] {
     entry.profileImportance.personal,
     entry.profileImportance.company,
     entry.supportedPlatforms.join(", "),
+    entry.version ?? "manager-provided",
     entry.versionPolicy,
   ];
 }
@@ -67,7 +68,8 @@ export function renderPackageCatalogTable(catalog: CatalogBundle): string {
       "Personal",
       "Company",
       "Supported OS",
-      "Version/provenance policy",
+      "Exact version",
+      "Provenance policy",
     ],
     catalog.packages.packages.map(packageRow),
   );

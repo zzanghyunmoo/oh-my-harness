@@ -5,7 +5,6 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -14,11 +13,13 @@ import {
 import {
   basename,
   dirname,
-  isAbsolute,
   join,
-  resolve,
 } from "node:path";
 
+import {
+  assertSafeManagedRootPath,
+  readBoundedRegularFile,
+} from "../environment/filesystem.js";
 import type {
   ApplyJournal,
   ManagedStateReceipt,
@@ -27,11 +28,7 @@ import type {
 import { withFileLock } from "./lock.js";
 
 function assertSafeStateRoot(path: string): string {
-  if (!isAbsolute(path)) throw new Error("state root must be absolute");
-  const resolved = resolve(path);
-  if (existsSync(resolved) && lstatSync(resolved).isSymbolicLink()) {
-    throw new Error(`unsafe state root symbolic link: ${resolved}`);
-  }
+  const resolved = assertSafeManagedRootPath(path, "state root");
   mkdirSync(resolved, { recursive: true, mode: 0o700 });
   const stat = lstatSync(resolved);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
@@ -42,11 +39,9 @@ function assertSafeStateRoot(path: string): string {
 
 function readJson<T>(path: string): T | null {
   if (!existsSync(path)) return null;
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error(`unsafe managed state file: ${path}`);
-  }
-  return JSON.parse(readFileSync(path, "utf8")) as T;
+  return JSON.parse(
+    readBoundedRegularFile(path, 1024 * 1024).toString("utf8"),
+  ) as T;
 }
 
 function atomicWriteJson(path: string, value: unknown): void {

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
-  readFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import {
@@ -21,6 +20,7 @@ import {
   isAgentId,
   type AgentId,
 } from "../domain/catalog.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 import {
   CLI_TOOL_DEFINITIONS,
   type CliServiceId,
@@ -328,7 +328,9 @@ function readReceipt(path: string): unknown | null {
   if (stat.size > MAX_RECEIPT_BYTES) {
     throw new Error("managed receipt is too large");
   }
-  return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  return JSON.parse(
+    readBoundedRegularFile(path, MAX_RECEIPT_BYTES).toString("utf8"),
+  ) as unknown;
 }
 
 export function loadToolPolicySnapshot(
@@ -621,7 +623,8 @@ const LEGACY_MANIFEST_PATH = new URL(
   import.meta.url,
 );
 const rawRuntimeToolProfileManifest = JSON.parse(
-  readFileSync(LEGACY_MANIFEST_PATH, "utf8"),
+  readBoundedRegularFile(fileURLToPath(LEGACY_MANIFEST_PATH), 1024 * 1024)
+    .toString("utf8"),
 ) as unknown;
 
 export const RUNTIME_TOOL_PROFILE_MANIFEST =

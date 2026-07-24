@@ -43,6 +43,7 @@ export interface ManagedStateReceipt {
   readonly ownership: readonly {
     readonly id: string;
     readonly kind: "file" | "directory" | "registration" | "executable";
+    readonly scope: "external" | "managed";
     readonly target: string;
     readonly digest: string;
     readonly repairSource?: string;

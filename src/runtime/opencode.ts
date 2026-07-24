@@ -1,10 +1,16 @@
-import { existsSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Hooks } from "@opencode-ai/plugin";
+
+import {
+  isAgentId,
+  isCapabilityId,
+  isPackageId,
+} from "../domain/catalog.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 
 export const OPEN_CODE_LSP_CAPABILITY_IDS = [
   "lsp-jdtls",
@@ -106,6 +112,8 @@ export interface OpenCodeNativeReadiness {
 
 const CONTEXT_MARKER = "<!-- oh-my-harness-runtime-context-v2 -->";
 const REMEDIATION = "omh setup --profile <profile-id> --agents opencode";
+const MAX_SNAPSHOT_BYTES = 64 * 1024;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const ALL_CAPABILITY_IDS: readonly OpenCodeCapabilityId[] = [
   ...OPEN_CODE_LSP_CAPABILITY_IDS,
   ...OPEN_CODE_WORKFLOW_CAPABILITY_IDS,
@@ -202,7 +210,14 @@ function stringArray(value: unknown): readonly string[] | null {
   return value;
 }
 
+function uniqueStrings(values: readonly string[]): boolean {
+  return new Set(values).size === values.length;
+}
+
 function parseContext(value: unknown): OpenCodeRuntimeContext {
+  const selectedAgents = isRecord(value)
+    ? stringArray(value.selectedAgents)
+    : null;
   if (
     !isRecord(value)
     || value.schemaVersion !== "2.0.0"
@@ -211,7 +226,10 @@ function parseContext(value: unknown): OpenCodeRuntimeContext {
     || !["ready", "degraded", "status-only"].includes(String(value.mode))
     || typeof value.profileId !== "string"
     || typeof value.catalogRevision !== "string"
-    || stringArray(value.selectedAgents) === null
+    || selectedAgents === null
+    || !uniqueStrings(selectedAgents)
+    || !selectedAgents.every(isAgentId)
+    || !selectedAgents.includes("opencode")
     || !isRecord(value.reconciliation)
     || typeof value.reconciliation.state !== "string"
     || stringArray(value.reconciliation.repaired) === null
@@ -219,34 +237,84 @@ function parseContext(value: unknown): OpenCodeRuntimeContext {
     || stringArray(value.reconciliation.conflicts) === null
     || !Array.isArray(value.packages)
     || !Array.isArray(value.capabilities)
+    || value.capabilities.length === 0
     || stringArray(value.remediation) === null
   ) {
     throw new Error("runtime context does not match the OpenCode v2 contract");
   }
 
+  const packageIds = new Set<string>();
   for (const item of value.packages) {
     if (
       !isRecord(item)
       || typeof item.id !== "string"
+      || !isPackageId(item.id)
+      || packageIds.has(item.id)
       || typeof item.required !== "boolean"
-      || typeof item.state !== "string"
+      || ![
+        "ready",
+        "installed-unconfigured",
+        "missing",
+        "unsupported",
+        "optional-gap",
+      ].includes(String(item.state))
       || (item.detail !== undefined && typeof item.detail !== "string")
     ) {
       throw new Error("runtime context contains an invalid package");
     }
+    packageIds.add(item.id);
   }
+  const capabilityIds = new Set<string>();
   for (const item of value.capabilities) {
     if (
       !isRecord(item)
       || typeof item.id !== "string"
+      || !isCapabilityId(item.id)
+      || capabilityIds.has(item.id)
       || !["ready", "pending", "degraded", "unsupported", "unverifiable"].includes(
         String(item.state),
       )
-      || typeof item.source !== "string"
+      || !["official", "managed"].includes(String(item.source))
       || (item.detail !== undefined && typeof item.detail !== "string")
     ) {
       throw new Error("runtime context contains an invalid capability");
     }
+    capabilityIds.add(item.id);
+  }
+  const reconciliationLists = [
+    value.reconciliation.repaired,
+    value.reconciliation.pendingApproval,
+    value.reconciliation.conflicts,
+  ].map(stringArray);
+  if (
+    ![
+      "no-receipt",
+      "no-drift",
+      "repairable",
+      "repaired",
+      "repair-failed",
+      "pending-approval",
+      "conflict",
+      "unverifiable",
+    ].includes(String(value.reconciliation.state))
+    || reconciliationLists.some(
+      (entries) => entries === null || !uniqueStrings(entries),
+    )
+    || (
+      value.mode === "ready"
+      && (
+        !SHA256_PATTERN.test(value.catalogRevision)
+        || value.profileId === "unverifiable"
+        || !["no-drift", "repaired"].includes(
+          String(value.reconciliation.state),
+        )
+        || value.capabilities.some(
+          (entry) => isRecord(entry) && entry.state !== "ready",
+        )
+      )
+    )
+  ) {
+    throw new Error("runtime context contains inconsistent ready state");
   }
 
   return value as unknown as OpenCodeRuntimeContext;
@@ -560,7 +628,8 @@ export function loadOpenCodeCapabilityDefinitions(
     ) {
       throw new Error(`OpenCode capability escapes package root: ${id}`);
     }
-    const content = readFileSync(sourcePath, "utf8");
+    const content = readBoundedRegularFile(sourcePath, 1024 * 1024)
+      .toString("utf8");
     const { description } = parseFrontmatter(content, sourcePath);
     return {
       id,
@@ -579,8 +648,30 @@ export function resolveOpenCodePackageRoot(moduleUrl: string): string {
 function absolutePath(
   value: string | undefined,
   fallback: string,
+  label: string,
 ): string {
-  return value !== undefined && isAbsolute(value) ? value : fallback;
+  if (value !== undefined && !isAbsolute(value)) {
+    throw new Error(`${label} must be absolute`);
+  }
+  return resolve(value ?? fallback);
+}
+
+function snapshotPath(
+  value: string | undefined,
+  fallback: string,
+  runtimeRoot: string,
+  label: string,
+): string {
+  const path = absolutePath(value, fallback, label);
+  const candidate = relative(runtimeRoot, path);
+  if (
+    candidate === ".."
+    || candidate.startsWith(`..${sep}`)
+    || isAbsolute(candidate)
+  ) {
+    throw new Error(`${label} must remain inside ${runtimeRoot}`);
+  }
+  return path;
 }
 
 function parseStartup(value: unknown): OpenCodeStartupInspection {
@@ -589,6 +680,7 @@ function parseStartup(value: unknown): OpenCodeStartupInspection {
     || typeof value.ready !== "boolean"
     || typeof value.restartRequired !== "boolean"
     || typeof value.context !== "string"
+    || Buffer.byteLength(value.context) > 12_000
     || stringArray(value.diagnostics) === null
   ) {
     throw new Error("startup snapshot does not match the OpenCode contract");
@@ -610,15 +702,20 @@ export function createFileOpenCodeRuntimeDependencies(
       ?? env.OH_MY_HARNESS_STATE_ROOT
       ?? env.OH_MY_HARNESS_HOME,
     defaultStateRoot,
+    "OpenCode managed state root",
   );
   const runtimeRoot = join(stateRoot, "runtime", "opencode");
-  const contextPath = absolutePath(
+  const contextPath = snapshotPath(
     env.OH_MY_HARNESS_RUNTIME_CONTEXT_PATH,
     join(runtimeRoot, "context.json"),
+    runtimeRoot,
+    "OpenCode runtime context path",
   );
-  const startupPath = absolutePath(
+  const startupPath = snapshotPath(
     env.OH_MY_HARNESS_STARTUP_OUTCOME_PATH,
     join(runtimeRoot, "startup.json"),
+    runtimeRoot,
+    "OpenCode startup outcome path",
   );
 
   return {
@@ -639,7 +736,11 @@ export function createFileOpenCodeRuntimeDependencies(
         return { json, text: renderOpenCodeRuntimeContext(json) };
       }
       try {
-        const json = parseContext(JSON.parse(await readFile(contextPath, "utf8")));
+        const json = parseContext(
+          JSON.parse(
+            readBoundedRegularFile(contextPath, MAX_SNAPSHOT_BYTES).toString("utf8"),
+          ),
+        );
         return { json, text: renderOpenCodeRuntimeContext(json) };
       } catch (error) {
         const detail = error instanceof Error ? error.message : "unknown error";
@@ -672,7 +773,11 @@ export function createFileOpenCodeRuntimeDependencies(
         };
       }
       try {
-        return parseStartup(JSON.parse(await readFile(startupPath, "utf8")));
+        return parseStartup(
+          JSON.parse(
+            readBoundedRegularFile(startupPath, MAX_SNAPSHOT_BYTES).toString("utf8"),
+          ),
+        );
       } catch (error) {
         const detail = error instanceof Error ? error.message : "unknown error";
         return {

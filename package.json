@@ -51,7 +51,7 @@
     "omh": "npm run build --silent && node dist/cli/main.js",
     "test:unit": "npm run build --silent && node --test \"tests/unit/*.test.ts\"",
     "test:contracts": "npm run build --silent && node --test \"tests/contracts/*.test.ts\"",
-    "test:integration": "npm run build --silent && node --test \"tests/integration/*.test.ts\"",
+    "test:integration": "npm run build --silent && node --test \"tests/integration/*.test.ts\" tests/runtime/startup-service.test.ts",
     "test:runtime:claude": "npm run build --silent && node --test tests/runtime/claude-code.test.ts tests/integration/claude-arbitrary-cwd.test.ts",
     "test:runtime:opencode": "npm run build --silent && node --test tests/runtime/opencode.test.ts",
     "test:runtime:codex": "npm run build --silent && node --test tests/runtime/codex.test.ts",

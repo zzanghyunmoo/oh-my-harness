@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
 import {
   lstatSync,
-  readFileSync,
 } from "node:fs";
 
+import { sha256File as hashFile } from "../environment/filesystem.js";
 import type { ObservedPreimage } from "../planning/actions.js";
 
 export function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return hashFile(path);
 }
 
 export function observePath(path: string): ObservedPreimage {

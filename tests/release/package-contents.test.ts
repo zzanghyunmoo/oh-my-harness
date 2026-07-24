@@ -14,6 +14,18 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
+test("cross-platform CI checks the committed patch against its event base", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/cross-platform.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(workflow, /fetch-depth:\s*0/u);
+  assert.match(
+    workflow,
+    /git diff --check "\$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}" HEAD/u,
+  );
+});
+
 test("packed artifact contains compiled entrypoints and runtime assets only", () => {
   const packed = spawnSync(
     process.platform === "win32" ? "npm.cmd" : "npm",

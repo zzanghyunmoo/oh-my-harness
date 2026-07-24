@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -20,6 +24,7 @@ const STARTUP_MODES = new Set([
 const OUTPUT_MODES = new Set(["json", "claude-hook-json"]);
 const MAX_RECEIPT_BYTES = 256 * 1024;
 const MAX_PROTOCOL_BYTES = 64 * 1024;
+const MAX_IDENTITY_BYTES = 256 * 1024 * 1024;
 const RECONCILER_TIMEOUT_MS = 10_000;
 const MINIMAL_ENV_KEYS = new Set([
   "APPDATA",
@@ -66,15 +71,51 @@ function assertRegularFile(path, label, maximumSize = Number.MAX_SAFE_INTEGER) {
   if (stat.size > maximumSize) fail(`${label} exceeds the bounded size limit`);
 }
 
+function readBoundedRegularFile(path, label, maximumSize) {
+  let descriptor;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY
+        | (process.platform === "win32" ? 0 : (constants.O_NOFOLLOW ?? 0)),
+    );
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) fail(`${label} must be a regular file`);
+    if (stat.size > maximumSize) fail(`${label} exceeds the bounded size limit`);
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const chunk = Buffer.allocUnsafe(
+        Math.min(64 * 1024, maximumSize - total + 1),
+      );
+      const bytes = readSync(descriptor, chunk, 0, chunk.length, null);
+      if (bytes === 0) break;
+      total += bytes;
+      if (total > maximumSize) {
+        fail(`${label} exceeds the bounded size limit`);
+      }
+      chunks.push(chunk.subarray(0, bytes));
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function sha256(path) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return createHash("sha256")
+    .update(readBoundedRegularFile(path, "receipt-owned identity", MAX_IDENTITY_BYTES))
+    .digest("hex");
 }
 
 function readReceipt(path) {
   assertRegularFile(path, "managed receipt", MAX_RECEIPT_BYTES);
   let receipt;
   try {
-    receipt = JSON.parse(readFileSync(path, "utf8"));
+    receipt = JSON.parse(
+      readBoundedRegularFile(path, "managed receipt", MAX_RECEIPT_BYTES)
+        .toString("utf8"),
+    );
   } catch {
     fail("managed receipt is invalid JSON");
   }
@@ -109,7 +150,11 @@ function ownedIdentity(receipt, id, allowedKinds, label) {
   ) {
     fail(`managed receipt records an invalid ${label} identity`);
   }
-  assertRegularFile(identity.target, `receipt-recorded ${label}`);
+  assertRegularFile(
+    identity.target,
+    `receipt-recorded ${label}`,
+    MAX_IDENTITY_BYTES,
+  );
   const observed = sha256(identity.target);
   if (observed !== identity.digest) {
     fail(
@@ -155,18 +200,34 @@ function parseEnvelope(stdout) {
 }
 
 function readHookInput() {
+  let input;
   try {
-    const input = readFileSync(0, "utf8");
-    if (!input) return null;
-    if (Buffer.byteLength(input) > MAX_PROTOCOL_BYTES) {
-      fail("hook input exceeded the bounded protocol limit");
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const chunk = Buffer.allocUnsafe(
+        Math.min(16 * 1024, MAX_PROTOCOL_BYTES - total + 1),
+      );
+      const bytes = readSync(0, chunk, 0, chunk.length, null);
+      if (bytes === 0) break;
+      total += bytes;
+      if (total > MAX_PROTOCOL_BYTES) {
+        fail("hook input exceeded the bounded protocol limit");
+      }
+      chunks.push(chunk.subarray(0, bytes));
     }
+    input = Buffer.concat(chunks, total).toString("utf8");
+  } catch (error) {
+    if (error?.code === "EAGAIN") return null;
+    throw error;
+  }
+  if (!input) return null;
+  try {
     const value = JSON.parse(input);
     return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : null;
-  } catch (error) {
-    if (error?.code === "EAGAIN") return null;
+  } catch {
     return null;
   }
 }
@@ -194,7 +255,13 @@ function readDedupe(path, identity) {
   if (!path || !existsSync(path)) return null;
   assertRegularFile(path, "startup dedupe record", MAX_PROTOCOL_BYTES);
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
+    const value = JSON.parse(
+      readBoundedRegularFile(
+        path,
+        "startup dedupe record",
+        MAX_PROTOCOL_BYTES,
+      ).toString("utf8"),
+    );
     return value?.reconcilerSha256 === identity.sha256
       ? parseEnvelope(JSON.stringify(value.envelope))
       : null;

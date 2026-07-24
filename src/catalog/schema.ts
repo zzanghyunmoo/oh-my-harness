@@ -7,7 +7,10 @@ export interface JsonSchema {
   oneOf?: JsonSchema[];
   const?: unknown;
   enum?: unknown[];
+  else?: JsonSchema;
+  if?: JsonSchema;
   type?: "object" | "array" | "string" | "boolean" | "integer" | "number";
+  then?: JsonSchema;
   required?: string[];
   additionalProperties?: boolean;
   properties?: Record<string, JsonSchema>;
@@ -63,6 +66,12 @@ export function validateJsonSchema(
 
   for (const child of schema.allOf ?? []) {
     validateJsonSchema(value, child, root, path);
+  }
+  if (schema.if !== undefined) {
+    const branch = matches(value, schema.if, root) ? schema.then : schema.else;
+    if (branch !== undefined) {
+      validateJsonSchema(value, branch, root, path);
+    }
   }
   if (schema.anyOf && !schema.anyOf.some((child) => matches(value, child, root))) {
     throw new Error(`${path}: no schema anyOf branch matched`);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import test from "node:test";
 
 import { FileStateStore } from "../../dist/state/receipt.js";
@@ -50,4 +50,28 @@ test("U3 state publication rejects a symlinked managed-state ancestor", async ()
   } finally {
     await rm(parent, { recursive: true, force: true });
   }
+});
+
+test("U3 state publication rejects a symlink inside the managed-state path", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink fixture");
+  const parent = await mkdtemp(join(tmpdir(), "omh-state-parent-symlink-"));
+  const outside = join(parent, "outside");
+  const linkedParent = join(parent, "linked");
+  try {
+    await mkdir(outside);
+    await symlink(outside, linkedParent);
+    assert.throws(
+      () => new FileStateStore(join(linkedParent, "state")),
+      /must not traverse a symbolic link/i,
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("U3 state publication rejects the filesystem root", () => {
+  assert.throws(
+    () => new FileStateStore(parse(process.cwd()).root),
+    /must not be the filesystem root/i,
+  );
 });

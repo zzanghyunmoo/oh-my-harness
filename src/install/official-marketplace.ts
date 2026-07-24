@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   lstatSync,
-  readFileSync,
   readdirSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -15,6 +14,7 @@ import type {
   OfficialCapabilityCandidate,
   OfficialCapabilityLock,
 } from "./capabilities.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TREE_ENTRIES = 4_096;
@@ -48,7 +48,9 @@ function sha256File(path: string): string {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_FILE_BYTES) {
     throw new Error("official marketplace file is not a bounded regular file");
   }
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return createHash("sha256")
+    .update(readBoundedRegularFile(path, MAX_FILE_BYTES))
+    .digest("hex");
 }
 
 function gitObject(type: "blob" | "tree", content: Buffer): Buffer {
@@ -97,7 +99,7 @@ export function gitTreeSha1(
         if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
           throw new Error("official plugin tree contains an unsafe entry");
         }
-        const content = readFileSync(childPath);
+        const content = readBoundedRegularFile(childPath, MAX_FILE_BYTES);
         bytes += content.length;
         if (bytes > MAX_TREE_BYTES) {
           throw new Error("official plugin tree exceeds the byte limit");
@@ -183,7 +185,9 @@ export function inspectOfficialClaudeMarketplace(
     ) {
       throw new Error("official marketplace commit marker is unsafe");
     }
-    const commit = readFileSync(commitPath, "utf8").trim();
+    const commit = readBoundedRegularFile(commitPath, 256)
+      .toString("utf8")
+      .trim();
     if (commit !== lock.repository.commit) {
       throw new Error("official marketplace commit does not match the reviewed lock");
     }
@@ -192,7 +196,9 @@ export function inspectOfficialClaudeMarketplace(
       throw new Error("official marketplace manifest digest does not match the reviewed lock");
     }
     const entries = pluginEntries(
-      JSON.parse(readFileSync(manifestPath, "utf8")) as unknown,
+      JSON.parse(
+        readBoundedRegularFile(manifestPath, MAX_FILE_BYTES).toString("utf8"),
+      ) as unknown,
     );
     const verifiedRoot = root;
     const plugins = acceptedCandidates(lock).map((candidate) => {

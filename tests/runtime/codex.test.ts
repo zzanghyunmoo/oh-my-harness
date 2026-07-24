@@ -298,6 +298,34 @@ test("U11 Codex hook helper fails open with bounded preview-first remediation", 
   assert.equal(execution.stdout.length < 16_000, true);
 });
 
+test("U11 Codex hook helper bounds oversized input and redacts secret diagnostics", () => {
+  for (const input of [
+    "x".repeat(256 * 1024 + 1),
+    JSON.stringify({
+      hook_event_name: "token=do-not-leak",
+    }),
+  ]) {
+    const execution = spawnSync(
+      process.execPath,
+      [join(PLUGIN_ROOT, "scripts", "codex-startup-context.mjs")],
+      {
+        cwd: tmpdir(),
+        encoding: "utf8",
+        env: { ...process.env, PLUGIN_ROOT },
+        input,
+      },
+    );
+    assert.equal(execution.status, 0, execution.stderr);
+    const parsed = validateCodexHookOutput(
+      "SessionStart",
+      JSON.parse(execution.stdout),
+    );
+    assert.match(parsed.context, /startup context is unavailable/i);
+    assert.doesNotMatch(parsed.context, /do-not-leak/u);
+    assert.equal(execution.stdout.length < 16_000, true);
+  }
+});
+
 test("U11 owned plugin manifests use Codex-native skills, MCP, and hook surfaces", () => {
   const marketplace = JSON.parse(readFileSync(
     join(REPOSITORY_ROOT, ".agents", "plugins", "marketplace.json"),

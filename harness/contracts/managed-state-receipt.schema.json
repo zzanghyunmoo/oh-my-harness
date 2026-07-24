@@ -172,13 +172,32 @@
     "ownership": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "target", "digest"],
+      "required": ["id", "kind", "scope", "target", "digest"],
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "required": ["repairSource"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "const": "managed"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/actionId"
         },
         "kind": {
           "enum": ["file", "directory", "registration", "executable"]
+        },
+        "scope": {
+          "enum": ["external", "managed"]
         },
         "target": {
           "type": "string",

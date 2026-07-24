@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CatalogBundle, PlatformId } from "../catalog/types.js";
@@ -6,6 +5,7 @@ import {
   isAgentId,
   type AgentId,
 } from "../domain/catalog.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 import type {
   AgentPlatformArtifact,
   RuntimeAdapterDescriptor,
@@ -64,7 +64,9 @@ export function loadRuntimeAdapters(
   const catalogById = new Map(catalog.agents.agents.map((entry) => [entry.id, entry]));
   return catalog.agents.agents.map((agent) => {
     const path = join(repositoryRoot, "harness", "adapters", `${agent.id}.json`);
-    const descriptor = JSON.parse(readFileSync(path, "utf8")) as LegacyDescriptor;
+    const descriptor = JSON.parse(
+      readBoundedRegularFile(path, 1024 * 1024).toString("utf8"),
+    ) as LegacyDescriptor;
     if (!isAgentId(descriptor.id) || descriptor.id !== agent.id) {
       throw new Error(`runtime adapter identity mismatch: ${path}`);
     }

@@ -99,12 +99,14 @@ test("U8 cached Claude plugin reconciles by receipt identity from arbitrary CWD"
           {
             id: "omh-node",
             kind: "file",
+            scope: "external",
             target: process.execPath,
             digest: sha256(process.execPath),
           },
           {
             id: "omh-reconciler",
             kind: "file",
+            scope: "external",
             target: reconcilerPath,
             digest: sha256(reconcilerPath),
           },
@@ -318,12 +320,14 @@ test("U8 status MCP returns the receipt-derived startup envelope from arbitrary 
           {
             id: "omh-node",
             kind: "file",
+            scope: "external",
             target: process.execPath,
             digest: sha256(process.execPath),
           },
           {
             id: "omh-reconciler",
             kind: "file",
+            scope: "external",
             target: reconcilerPath,
             digest: sha256(reconcilerPath),
           },

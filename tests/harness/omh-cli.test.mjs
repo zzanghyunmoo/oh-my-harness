@@ -55,7 +55,7 @@ test("legacy omh parser coverage preserves preview-first digest safety", () => {
   assert.equal(apply.digest, digest);
   assert.throws(
     () => parseOmhArguments(["status", "--apply"]),
-    /unknown option/,
+    /--apply is not valid for this command/,
   );
 });
 

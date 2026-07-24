@@ -112,6 +112,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   const calls: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
   let marketplaceRegistered = false;
   let pluginInstalled = false;
+  let managedPluginVersion = "0.2.0";
   let managedMarketplaceRoot: string | null = null;
   const officialInstalled = new Set<string>();
 
@@ -234,7 +235,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
                 "oh-my-harness",
               ),
               scope: "user",
-              version: "0.2.0",
+              version: managedPluginVersion,
             });
           }
           return JSON.stringify(plugins);
@@ -318,6 +319,61 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(reapplied.state, "ready");
     assert.equal(mutationCount(), mutationsAfterApply);
 
+    const officialSelector = [...officialInstalled][0];
+    assert.ok(officialSelector);
+    const reviewedOfficialPath = officialInstallPaths.get(officialSelector);
+    assert.ok(reviewedOfficialPath);
+    const conflictingOfficialPath = join(root, "user-owned-official-plugin");
+    mkdirSync(conflictingOfficialPath);
+    writeFileSync(join(conflictingOfficialPath, "user.txt"), "keep me\n");
+    officialInstallPaths.set(officialSelector, conflictingOfficialPath);
+    const officialCollisionPreview = await runOmh(previewArgs, commonOptions);
+    assert.ok(officialCollisionPreview.preview?.digest);
+    const callsBeforeOfficialCollision = calls.length;
+    const officialCollision = await runOmh(
+      [
+        ...previewArgs,
+        "--apply",
+        "--digest",
+        officialCollisionPreview.preview.digest,
+      ],
+      commonOptions,
+    );
+    assert.equal(officialCollision.state, "partial-unready");
+    assert.match(officialCollision.apply?.failure ?? "", /user-owned Claude plugin/u);
+    assert.equal(mutationCount(), mutationsAfterApply);
+    assert.equal(
+      calls.slice(callsBeforeOfficialCollision).some(
+        ({ args }) => args.join(" ").startsWith("plugin uninstall "),
+      ),
+      false,
+    );
+    officialInstallPaths.set(officialSelector, reviewedOfficialPath);
+
+    managedPluginVersion = "9.9.9";
+    const collisionPreview = await runOmh(previewArgs, commonOptions);
+    assert.ok(collisionPreview.preview?.digest);
+    const callsBeforeCollision = calls.length;
+    const collision = await runOmh(
+      [
+        ...previewArgs,
+        "--apply",
+        "--digest",
+        collisionPreview.preview.digest,
+      ],
+      commonOptions,
+    );
+    assert.equal(collision.state, "partial-unready");
+    assert.match(collision.apply?.failure ?? "", /user-owned Claude plugin/u);
+    assert.equal(mutationCount(), mutationsAfterApply);
+    assert.equal(
+      calls.slice(callsBeforeCollision).some(
+        ({ args }) => args.join(" ").startsWith("plugin uninstall "),
+      ),
+      false,
+    );
+    managedPluginVersion = "0.2.0";
+
     const receiptPath = join(stateRoot, "receipts", "environment.json");
     assert.equal(existsSync(receiptPath), true);
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
@@ -326,6 +382,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         id: string;
         kind: string;
         repairSource?: string;
+        scope: string;
         target: string;
       }>;
     };
@@ -334,12 +391,16 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.deepEqual(
       receipt.ownership
         .filter(({ id }) => ["omh-node", "omh-reconciler", "agent:claude-code"].includes(id))
-        .map(({ id, kind }) => [id, kind]),
+        .map(({ id, kind, scope }) => [id, kind, scope]),
       [
-        ["omh-node", "file"],
-        ["omh-reconciler", "file"],
-        ["agent:claude-code", "executable"],
+        ["omh-node", "file", "external"],
+        ["omh-reconciler", "file", "external"],
+        ["agent:claude-code", "executable", "external"],
       ],
+    );
+    assert.equal(
+      receipt.ownership.find(({ id }) => id === "plugin:runtime-package")?.scope,
+      "managed",
     );
 
     const status = await runOmh(

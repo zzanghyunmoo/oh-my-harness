@@ -46,6 +46,34 @@ test("managed receipt preserves the selected-agent override in desired state", (
   assert.deepEqual(receipt.desiredState.selectedAgents, ["claude-code", "codex"]);
 });
 
+test("managed receipt makes ownership scope explicit and limits repair to managed content", () => {
+  const missingScope = receiptFixture();
+  missingScope.ownership = [{
+    digest: SHA256,
+    id: "omh-node",
+    kind: "file",
+    target: process.execPath,
+  }];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", missingScope, REPO_ROOT),
+    /scope: required field/i,
+  );
+
+  const externalRepair = receiptFixture();
+  externalRepair.ownership = [{
+    digest: SHA256,
+    id: "plugin:runtime-package",
+    kind: "directory",
+    repairSource: "/managed/store",
+    scope: "external",
+    target: "/managed/generation",
+  }];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", externalRepair, REPO_ROOT),
+    /schema const/i,
+  );
+});
+
 test("all five v2 contracts are closed and have unique stable schema IDs", () => {
   const files = [
     "capability-catalog.schema.json",

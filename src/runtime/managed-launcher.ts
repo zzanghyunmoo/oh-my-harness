@@ -169,7 +169,7 @@ export function minimalManagedEnvironment(
 function boundedDiagnostic(value: string): string {
   return value
     .replace(
-      /(?:bearer|basic)\s+[^\s]+|(?:token|password|secret)=\S+/gi,
+      /(?:bearer|basic)\s+[^\s]+|(?:token|password|secret|authorization)\s*[:=]\s*\S+/gi,
       "[redacted]",
     )
     .replace(/\s+/g, " ")

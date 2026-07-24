@@ -346,6 +346,31 @@ test("MCP server exposes only the selected runtime profile and rejects hidden to
   }
 });
 
+test("MCP server rejects an oversized line and continues with the next request", async () => {
+  const { root } = fixture();
+  try {
+    const home = writeApprovedReceipt(root, "personal");
+    const responses = await runMcp(
+      [
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "ping",
+          padding: "x".repeat(64 * 1024),
+        },
+        { jsonrpc: "2.0", id: 2, method: "ping" },
+      ],
+      { ...process.env, PATH: "", OH_MY_HARNESS_HOME: home },
+      "codex",
+    );
+    assert.equal(responses[0].error.code, -32600);
+    assert.equal(responses[1].id, 2);
+    assert.deepEqual(responses[1].result, {});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("MCP server executes an exposed runtime tool through the shared core", async (t) => {
   if (process.platform === "win32") return t.skip("POSIX fixture");
   const { root, bin, workspace } = fixture();

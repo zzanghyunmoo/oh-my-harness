@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   lstatSync,
-  readFileSync,
   readdirSync,
 } from "node:fs";
 import {
@@ -12,7 +11,12 @@ import {
 } from "node:path";
 
 import { loadCapabilityProvenance } from "../install/capabilities.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 import { loadCatalogBundle } from "./load.js";
+
+const MAX_ARTIFACT_ENTRIES = 4_096;
+const MAX_ARTIFACT_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_ARTIFACT_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export interface ReleaseManifest {
   readonly $schema: "../contracts/release-catalog.schema.json";
@@ -36,12 +40,18 @@ export interface ReleaseManifest {
 function hashDirectory(directory: string): string {
   const root = resolve(directory);
   const files: Array<{ readonly path: string; readonly digest: string }> = [];
+  let entries = 0;
+  let totalBytes = 0;
 
   function collect(current: string): void {
     for (const entry of readdirSync(current, { withFileTypes: true })
       .sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(current, entry.name);
       const stat = lstatSync(path);
+      entries += 1;
+      if (entries > MAX_ARTIFACT_ENTRIES) {
+        throw new Error("release artifact has too many entries");
+      }
       if (stat.isSymbolicLink()) {
         throw new Error(`release artifact contains a symbolic link: ${path}`);
       }
@@ -52,8 +62,17 @@ function hashDirectory(directory: string): string {
       if (!stat.isFile()) {
         throw new Error(`release artifact contains an unsupported entry: ${path}`);
       }
+      if (stat.size > MAX_ARTIFACT_FILE_BYTES) {
+        throw new Error(`release artifact contains an oversized file: ${path}`);
+      }
+      totalBytes += stat.size;
+      if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
+        throw new Error("release artifact exceeds the total byte limit");
+      }
       files.push({
-        digest: createHash("sha256").update(readFileSync(path)).digest("hex"),
+        digest: createHash("sha256")
+          .update(readBoundedRegularFile(path, MAX_ARTIFACT_FILE_BYTES))
+          .digest("hex"),
         path: relative(root, path).split(sep).join("/"),
       });
     }

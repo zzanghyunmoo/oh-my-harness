@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import {
   existsSync,
   lstatSync,
-  readFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
 
@@ -14,6 +13,7 @@ import {
   type AgentId,
 } from "../domain/catalog.js";
 import {
+  readBoundedRegularFile,
   sha256File,
 } from "../environment/filesystem.js";
 import type { ManagedStateReceipt } from "../ports/state.js";
@@ -38,7 +38,9 @@ function readReceipt(
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_RECEIPT_BYTES) {
     throw new Error("managed launch receipt must be a bounded regular file");
   }
-  const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  const value = JSON.parse(
+    readBoundedRegularFile(path, MAX_RECEIPT_BYTES).toString("utf8"),
+  ) as unknown;
   validateContractDocument("managed-state-receipt", value, repositoryRoot);
   return value as ManagedStateReceipt;
 }
@@ -121,14 +123,24 @@ function runProcess(
     let stderr = "";
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
+    const appendBounded = (current: string, chunk: string): string => {
+      const remaining = MAX_CAPTURE_BYTES - Buffer.byteLength(current);
+      if (remaining <= 0) return current;
+      const bytes = Buffer.from(chunk);
+      let end = Math.min(bytes.length, remaining);
+      if (end < bytes.length) {
+        while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+      }
+      return current + bytes.subarray(0, end).toString("utf8");
+    };
     if (!interactive) {
       child.stdout?.setEncoding("utf8");
       child.stderr?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
-        if (Buffer.byteLength(stdout) < MAX_CAPTURE_BYTES) stdout += chunk;
+        stdout = appendBounded(stdout, chunk);
       });
       child.stderr?.on("data", (chunk: string) => {
-        if (Buffer.byteLength(stderr) < MAX_CAPTURE_BYTES) stderr += chunk;
+        stderr = appendBounded(stderr, chunk);
       });
       if (input.stdin !== undefined) {
         child.stdin?.end(input.stdin);

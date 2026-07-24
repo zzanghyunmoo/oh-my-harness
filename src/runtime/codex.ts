@@ -1,6 +1,5 @@
 import {
   lstatSync,
-  readFileSync,
   realpathSync,
 } from "node:fs";
 import {
@@ -10,6 +9,7 @@ import {
 } from "node:path";
 
 import type { RuntimeObservation } from "../ports/runtime.js";
+import { readBoundedRegularFile } from "../environment/filesystem.js";
 
 export const CODEX_RUNTIME_ID = "codex";
 
@@ -169,7 +169,9 @@ function inspectSkills(
           state: "drift",
         };
       }
-      const observedName = skillName(readFileSync(path, "utf8"));
+      const observedName = skillName(
+        readBoundedRegularFile(path, 1024 * 1024).toString("utf8"),
+      );
       if (observedName !== id) {
         return {
           detail: `${id} skill frontmatter name is ${observedName ?? "missing"}`,

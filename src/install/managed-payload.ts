@@ -4,7 +4,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -12,7 +11,6 @@ import {
 import { createRequire } from "node:module";
 import {
   dirname,
-  isAbsolute,
   join,
   relative,
   resolve,
@@ -20,6 +18,10 @@ import {
 } from "node:path";
 
 import type { ObservedPreimage } from "../planning/actions.js";
+import {
+  assertSafeManagedRootPath,
+  readBoundedRegularFile,
+} from "../environment/filesystem.js";
 
 const MAX_ENTRIES = 4_096;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -90,7 +92,9 @@ function collectFiles(
     throw new Error("managed runtime payload exceeds the byte limit");
   }
   return [{
-    digest: createHash("sha256").update(readFileSync(source)).digest("hex"),
+    digest: createHash("sha256")
+      .update(readBoundedRegularFile(source, MAX_FILE_BYTES))
+      .digest("hex"),
     path: portablePath(relative(root, join(root, destinationPrefix))),
   }];
 }
@@ -115,7 +119,9 @@ function dependencyRoot(
   while (dirname(current) !== current) {
     const manifest = join(current, "package.json");
     if (existsSync(manifest)) {
-      const value = JSON.parse(readFileSync(manifest, "utf8")) as {
+      const value = JSON.parse(
+        readBoundedRegularFile(manifest, 1024 * 1024).toString("utf8"),
+      ) as {
         readonly name?: unknown;
         readonly version?: unknown;
       };
@@ -190,7 +196,9 @@ export function observeManagedPath(path: string): ObservedPreimage {
   }
   return {
     kind: "file",
-    sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+    sha256: createHash("sha256")
+      .update(readBoundedRegularFile(path, MAX_FILE_BYTES))
+      .digest("hex"),
     size: stat.size,
   };
 }
@@ -209,12 +217,16 @@ export function inspectManagedRuntimePayload(
   stateRoot: string,
 ): ManagedRuntimePayload {
   const sourceRoot = resolve(repositoryRoot);
+  const managedStateRoot = assertSafeManagedRootPath(
+    stateRoot,
+    "managed state root",
+  );
   const digest = sourceDigest(sourceRoot);
   return {
-    activeRoot: join(stateRoot, "payloads", "generations", digest),
+    activeRoot: join(managedStateRoot, "payloads", "generations", digest),
     digest,
     sourceRoot,
-    storeRoot: join(stateRoot, "payloads", "store", digest),
+    storeRoot: join(managedStateRoot, "payloads", "store", digest),
   };
 }
 
@@ -269,6 +281,15 @@ function publishExactDirectory(
 export function materializeManagedRuntimePayload(
   payload: ManagedRuntimePayload,
 ): void {
+  for (const target of [payload.storeRoot, payload.activeRoot]) {
+    const parent = dirname(target);
+    if (
+      assertSafeManagedRootPath(parent, "managed payload parent")
+      !== parent
+    ) {
+      throw new Error("managed payload path traverses a symbolic link");
+    }
+  }
   publishExactDirectory(payload.storeRoot, payload.digest, (staging) => {
     copyPayloadSource(payload.sourceRoot, staging);
   });
@@ -285,29 +306,55 @@ export function materializeManagedRuntimePayload(
 export function repairManagedDirectory(input: {
   readonly digest: string;
   readonly source: string;
+  readonly stateRoot: string;
   readonly target: string;
 }): { readonly verified: boolean; readonly detail?: string } {
-  if (!isAbsolute(input.source) || !isAbsolute(input.target)) {
-    return {
-      detail: "managed repair source and target must be absolute",
-      verified: false,
-    };
-  }
-  if (existsSync(input.target)) {
-    return {
-      detail: "managed repair never overwrites an existing target",
-      verified: false,
-    };
-  }
   try {
-    if (hashManagedDirectory(input.source) !== input.digest) {
+    if (!/^[a-f0-9]{64}$/u.test(input.digest)) {
+      throw new Error("managed repair digest must be a SHA-256 value");
+    }
+    const stateRoot = assertSafeManagedRootPath(input.stateRoot, "managed state root");
+    const expectedSource = join(
+      stateRoot,
+      "payloads",
+      "store",
+      input.digest,
+    );
+    const expectedTarget = join(
+      stateRoot,
+      "payloads",
+      "generations",
+      input.digest,
+    );
+    const source = assertSafeManagedRootPath(input.source, "managed repair source");
+    const target = assertSafeManagedRootPath(input.target, "managed repair target");
+    if (
+      source !== expectedSource
+      || target !== expectedTarget
+    ) {
+      throw new Error(
+        "managed repair is limited to the digest-addressed store and generation paths",
+      );
+    }
+    if (
+      assertSafeManagedRootPath(dirname(expectedSource), "managed repair source parent")
+        !== dirname(expectedSource)
+      || assertSafeManagedRootPath(dirname(expectedTarget), "managed repair target parent")
+        !== dirname(expectedTarget)
+    ) {
+      throw new Error("managed repair path traverses a symbolic link");
+    }
+    if (existsSync(target)) {
+      throw new Error("managed repair never overwrites an existing target");
+    }
+    if (hashManagedDirectory(source) !== input.digest) {
       return {
         detail: "managed repair source does not match the approved digest",
         verified: false,
       };
     }
-    publishExactDirectory(input.target, input.digest, (staging) => {
-      cpSync(input.source, staging, {
+    publishExactDirectory(target, input.digest, (staging) => {
+      cpSync(source, staging, {
         errorOnExist: true,
         force: false,
         recursive: true,
@@ -315,7 +362,7 @@ export function repairManagedDirectory(input: {
       });
     });
     return {
-      verified: hashManagedDirectory(input.target) === input.digest,
+      verified: hashManagedDirectory(target) === input.digest,
     };
   } catch (error) {
     return {

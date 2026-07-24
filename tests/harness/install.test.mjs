@@ -942,7 +942,7 @@ test("one plugin package shares skills and CLI tools across three maintained run
   assert.equal(claudeMarketplace.plugins[0].source, "./plugins/oh-my-harness");
   assert.equal(plugin.version, packageJson.version);
   assert.equal(claudePlugin.version, packageJson.version);
-  assert.equal(plugin.skills, "./skills/");
+  assert.deepEqual(plugin.skills, ["./skills/", "./codex/skills/"]);
   assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.equal(claudePlugin.mcpServers, "./.mcp.claude.json");
   assert.match(codexMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'codex'/);

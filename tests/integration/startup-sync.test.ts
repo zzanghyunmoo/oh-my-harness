@@ -94,6 +94,7 @@ function receipt(): StartupManagedReceipt {
       {
         id: "skill:goal",
         kind: "directory",
+        scope: "managed",
         target: "/managed/skills/goal",
         digest: PINNED_DIGEST,
       },

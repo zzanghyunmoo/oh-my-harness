@@ -1,14 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
-  constants,
   existsSync,
-  fstatSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
-  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -18,7 +15,6 @@ import {
   dirname,
   isAbsolute,
   join,
-  parse,
   resolve,
 } from "node:path";
 
@@ -26,6 +22,10 @@ import {
   loadCatalogBundle,
   validateContractDocument,
 } from "../catalog/load.js";
+import {
+  assertSafeManagedRootPath,
+  readBoundedRegularFile,
+} from "../environment/filesystem.js";
 import type {
   CatalogBundle,
   CapabilityCatalogEntry,
@@ -150,7 +150,7 @@ function assertAbsolutePath(path: string, label: string): string {
 function boundedDiagnostic(value: unknown): string {
   return redactCliOutput(value)
     .replace(
-      /(?:token|password|secret|authorization)\s*[:=]\s*\S+/gi,
+      /(token|password|secret|authorization)\s*[:=]\s*\S+/gi,
       "$1=[redacted]",
     )
     .replace(/\s+/g, " ")
@@ -190,6 +190,12 @@ function semanticReceiptError(
       return `duplicate receipt ownership: ${ownership.id}`;
     }
     ownershipIds.add(ownership.id);
+    if (
+      ownership.repairSource !== undefined
+      && ownership.scope !== "managed"
+    ) {
+      return `external receipt ownership cannot declare repairSource: ${ownership.id}`;
+    }
     if (
       ownership.kind !== "registration"
       && !isAbsolute(ownership.target)
@@ -304,41 +310,6 @@ function receiptIdentity(loaded: LoadedReceipt): string {
   ].join(":");
 }
 
-function readBoundedRegularFile(path: string, maximumBytes: number): Buffer {
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(
-      path,
-      constants.O_RDONLY
-        | (process.platform === "win32" ? 0 : (constants.O_NOFOLLOW ?? 0)),
-    );
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile()) {
-      throw new Error("managed target is not a regular file");
-    }
-    if (stat.size > maximumBytes) {
-      throw new Error("managed target exceeds the bounded size limit");
-    }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    while (true) {
-      const chunk = Buffer.allocUnsafe(
-        Math.min(64 * 1024, maximumBytes - total + 1),
-      );
-      const bytes = readSync(descriptor, chunk, 0, chunk.length, null);
-      if (bytes === 0) break;
-      total += bytes;
-      if (total > maximumBytes) {
-        throw new Error("managed target exceeds the bounded size limit");
-      }
-      chunks.push(chunk.subarray(0, bytes));
-    }
-    return Buffer.concat(chunks, total);
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
 function hashFile(path: string): {
   readonly bytes: number;
   readonly sha256: string;
@@ -419,8 +390,10 @@ function localOwnership(
   receipt: ManagedStateReceipt,
 ): readonly OwnershipEntry[] {
   return receipt.ownership.filter(
-    ({ kind, repairSource }) =>
-      kind !== "registration" && repairSource !== undefined,
+    ({ kind, repairSource, scope }) =>
+      scope === "managed"
+      && kind !== "registration"
+      && repairSource !== undefined,
   );
 }
 
@@ -738,10 +711,10 @@ function assertSafeDirectory(path: string, label: string): void {
 }
 
 function snapshotDirectory(stateRoot: string): string {
-  const root = assertAbsolutePath(stateRoot, "state root");
-  if (root === parse(root).root) {
-    throw new Error("state root must not be the filesystem root");
-  }
+  const root = assertSafeManagedRootPath(
+    assertAbsolutePath(stateRoot, "state root"),
+    "state root",
+  );
   if (!existsSync(root)) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
   }
