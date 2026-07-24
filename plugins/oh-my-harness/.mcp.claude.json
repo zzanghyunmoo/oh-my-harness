@@ -1,13 +1,26 @@
 {
   "mcpServers": {
     "workspace-cli-tools": {
-      "command": "node",
+      "command": "${user_config.node_path}",
       "args": [
         "--input-type=module",
         "--eval",
-        "import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; process.env.OH_MY_HARNESS_RUNTIME = 'claude-code'; await import(pathToFileURL(resolve(process.env.CLAUDE_PLUGIN_ROOT || process.cwd(), 'mcp/cli-tools-server.mjs')).href);"
+        "import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; const root = process.env.CLAUDE_PLUGIN_ROOT; if (!root) throw new Error('CLAUDE_PLUGIN_ROOT is required'); process.env.OH_MY_HARNESS_RUNTIME = 'claude-code'; await import(pathToFileURL(resolve(root, 'mcp/cli-tools-server.mjs')).href);"
       ],
-      "cwd": "."
+      "env": {
+        "OH_MY_HARNESS_RECEIPT_PATH": "${user_config.receipt_path}",
+        "OH_MY_HARNESS_RUNTIME": "claude-code"
+      }
+    },
+    "environment-status": {
+      "command": "${user_config.node_path}",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/status-server.mjs"
+      ],
+      "env": {
+        "OH_MY_HARNESS_RECEIPT_PATH": "${user_config.receipt_path}",
+        "OH_MY_HARNESS_RUNTIME": "claude-code"
+      }
     }
   }
 }

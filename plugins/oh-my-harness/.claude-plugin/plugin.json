@@ -13,7 +13,22 @@
     "issue-tracker",
     "wiki",
     "git",
-    "code-review"
+    "code-review",
+    "startup-reconciliation"
   ],
-  "mcpServers": "./.mcp.claude.json"
+  "mcpServers": "./.mcp.claude.json",
+  "userConfig": {
+    "node_path": {
+      "type": "file",
+      "title": "Managed Node executable",
+      "description": "Absolute receipt-approved Node executable used without PATH lookup.",
+      "required": true
+    },
+    "receipt_path": {
+      "type": "file",
+      "title": "Managed-state receipt",
+      "description": "Absolute Oh My Harness v2 receipt used for startup and status.",
+      "required": true
+    }
+  }
 }

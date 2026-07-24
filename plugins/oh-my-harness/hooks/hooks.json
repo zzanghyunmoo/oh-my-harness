@@ -1,0 +1,55 @@
+{
+  "description": "Bounded receipt-derived startup reconciliation and context",
+  "hooks": {
+    "Setup": [
+      {
+        "matcher": "init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${user_config.node_path}",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/startup-sync.mjs",
+              "--receipt",
+              "${user_config.receipt_path}",
+              "--runtime",
+              "claude-code",
+              "--mode",
+              "native-post-discovery",
+              "--output",
+              "claude-hook-json",
+              "--dedupe-dir",
+              "${CLAUDE_PLUGIN_DATA}/startup-sync"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${user_config.node_path}",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/startup-sync.mjs",
+              "--receipt",
+              "${user_config.receipt_path}",
+              "--runtime",
+              "claude-code",
+              "--mode",
+              "native-post-discovery",
+              "--output",
+              "claude-hook-json",
+              "--dedupe-dir",
+              "${CLAUDE_PLUGIN_DATA}/startup-sync"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
