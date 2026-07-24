@@ -213,6 +213,34 @@ function validateReferences(source: CatalogSourceDocuments): void {
     assertApprovedSource(sources, agent.sourceId, `agent ${agent.id}`);
   }
   for (const packageEntry of source.packages.packages) {
+    const installerOperatingSystems = packageEntry.installers.map(({ os }) => os);
+    if (new Set(installerOperatingSystems).size !== installerOperatingSystems.length) {
+      throw new Error(`${packageEntry.id}: duplicate installer operating system`);
+    }
+    const supportedOperatingSystems = [...packageEntry.supportedPlatforms].sort();
+    const declaredOperatingSystems = [...installerOperatingSystems].sort();
+    if (
+      supportedOperatingSystems.length !== declaredOperatingSystems.length
+      || supportedOperatingSystems.some(
+        (os, index) => os !== declaredOperatingSystems[index],
+      )
+    ) {
+      throw new Error(
+        `${packageEntry.id}: installers must cover every supported operating system exactly once`,
+      );
+    }
+    for (const installer of packageEntry.installers) {
+      if (installer.kind === "command" && !installer.command) {
+        throw new Error(
+          `${packageEntry.id}/${installer.os}: command installer is missing its command`,
+        );
+      }
+      if (installer.kind === "managed-artifact" && installer.command !== undefined) {
+        throw new Error(
+          `${packageEntry.id}/${installer.os}: managed artifact must not use an ambient command`,
+        );
+      }
+    }
     for (const installation of packageEntry.installationSources) {
       assertApprovedSource(
         sources,

@@ -39,6 +39,14 @@ export interface PackageInstallationSource {
   platforms: OperatingSystem[];
 }
 
+export interface PackageInstaller {
+  os: OperatingSystem;
+  kind: "command" | "managed-artifact";
+  command?: string;
+  args: string[];
+  guidance: string;
+}
+
 export interface PackageCatalogEntry {
   id: PackageId;
   displayName: string;
@@ -46,6 +54,7 @@ export interface PackageCatalogEntry {
   executables: string[];
   supportedPlatforms: OperatingSystem[];
   installationSources: PackageInstallationSource[];
+  installers: PackageInstaller[];
   authentication: {
     owner: "external-cli";
     guidance: string;

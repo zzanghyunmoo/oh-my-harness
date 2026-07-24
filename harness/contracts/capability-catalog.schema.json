@@ -143,6 +143,7 @@
         "executables",
         "supportedPlatforms",
         "installationSources",
+        "installers",
         "authentication",
         "versionPolicy",
         "profileImportance"
@@ -183,6 +184,13 @@
             "$ref": "#/$defs/packageInstallationSource"
           }
         },
+        "installers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/packageInstaller"
+          }
+        },
         "authentication": {
           "$ref": "#/$defs/authentication"
         },
@@ -218,6 +226,48 @@
           }
         }
       }
+    },
+    "packageInstaller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "kind", "args", "guidance"],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/operatingSystem"
+        },
+        "kind": {
+          "enum": ["command", "managed-artifact"]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "guidance": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["command"]
+          }
+        }
+      ]
     },
     "authentication": {
       "type": "object",

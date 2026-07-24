@@ -16,6 +16,22 @@
           "platforms": ["darwin", "linux"]
         }
       ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "@notionhq/notion-cli@0.19.0", "--ignore-scripts"],
+          "guidance": "Install Notion CLI with `npm install --global @notionhq/notion-cli@0.19.0 --ignore-scripts`."
+        },
+        {
+          "os": "linux",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "@notionhq/notion-cli@0.19.0", "--ignore-scripts"],
+          "guidance": "Install Notion CLI with `npm install --global @notionhq/notion-cli@0.19.0 --ignore-scripts`."
+        }
+      ],
       "authentication": {
         "owner": "external-cli",
         "guidance": "Run `ntn login`; Notion owns and stores its authentication state."
@@ -37,6 +53,29 @@
           "sourceId": "package-linear-cli",
           "kind": "npm",
           "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "@schpet/linear-cli@2.0.0", "--ignore-scripts"],
+          "guidance": "Install Linear CLI with `npm install --global @schpet/linear-cli@2.0.0 --ignore-scripts`."
+        },
+        {
+          "os": "linux",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "@schpet/linear-cli@2.0.0", "--ignore-scripts"],
+          "guidance": "Install Linear CLI with `npm install --global @schpet/linear-cli@2.0.0 --ignore-scripts`."
+        },
+        {
+          "os": "win32",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "@schpet/linear-cli@2.0.0", "--ignore-scripts"],
+          "guidance": "Install Linear CLI with `npm install --global @schpet/linear-cli@2.0.0 --ignore-scripts`."
         }
       ],
       "authentication": {
@@ -67,6 +106,27 @@
           "platforms": ["win32"]
         }
       ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "brew",
+          "args": ["install", "ankitpokhrel/jira-cli/jira-cli"],
+          "guidance": "Install Jira CLI from the reviewed Homebrew source."
+        },
+        {
+          "os": "linux",
+          "kind": "managed-artifact",
+          "args": ["jira-cli", "1.7.0"],
+          "guidance": "Install the reviewed Jira CLI 1.7.0 release artifact through OMH."
+        },
+        {
+          "os": "win32",
+          "kind": "managed-artifact",
+          "args": ["jira-cli", "1.7.0"],
+          "guidance": "Install the reviewed Jira CLI 1.7.0 Windows artifact through OMH."
+        }
+      ],
       "authentication": {
         "owner": "external-cli",
         "guidance": "Run `jira init`; Jira CLI owns its authentication configuration."
@@ -88,6 +148,29 @@
           "sourceId": "package-confluence-cli",
           "kind": "npm",
           "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "confluence-cli@2.18.0", "--ignore-scripts"],
+          "guidance": "Install Confluence CLI with `npm install --global confluence-cli@2.18.0 --ignore-scripts`."
+        },
+        {
+          "os": "linux",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "confluence-cli@2.18.0", "--ignore-scripts"],
+          "guidance": "Install Confluence CLI with `npm install --global confluence-cli@2.18.0 --ignore-scripts`."
+        },
+        {
+          "os": "win32",
+          "kind": "command",
+          "command": "npm",
+          "args": ["install", "--global", "confluence-cli@2.18.0", "--ignore-scripts"],
+          "guidance": "Install Confluence CLI with `npm install --global confluence-cli@2.18.0 --ignore-scripts`."
         }
       ],
       "authentication": {
@@ -113,6 +196,29 @@
           "platforms": ["darwin", "linux", "win32"]
         }
       ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "brew",
+          "args": ["install", "gh"],
+          "guidance": "Install GitHub CLI from the reviewed Homebrew source."
+        },
+        {
+          "os": "linux",
+          "kind": "command",
+          "command": "apt-get",
+          "args": ["install", "gh"],
+          "guidance": "Install GitHub CLI from the reviewed platform package source."
+        },
+        {
+          "os": "win32",
+          "kind": "command",
+          "command": "winget",
+          "args": ["install", "--id", "GitHub.cli", "--exact"],
+          "guidance": "Install GitHub CLI from the reviewed winget source."
+        }
+      ],
       "authentication": {
         "owner": "external-cli",
         "guidance": "Run `gh auth login`; GitHub CLI owns and stores its authentication state."
@@ -134,6 +240,29 @@
           "sourceId": "package-gitlab-cli",
           "kind": "package-manager",
           "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "installers": [
+        {
+          "os": "darwin",
+          "kind": "command",
+          "command": "brew",
+          "args": ["install", "glab"],
+          "guidance": "Install GitLab CLI from the reviewed Homebrew source."
+        },
+        {
+          "os": "linux",
+          "kind": "command",
+          "command": "apt-get",
+          "args": ["install", "glab"],
+          "guidance": "Install GitLab CLI from the reviewed platform package source."
+        },
+        {
+          "os": "win32",
+          "kind": "command",
+          "command": "winget",
+          "args": ["install", "--id", "GLab.GLab", "--exact"],
+          "guidance": "Install GitLab CLI from the reviewed winget source."
         }
       ],
       "authentication": {
