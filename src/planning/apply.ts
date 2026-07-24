@@ -97,11 +97,16 @@ function receiptFor(
         : createHash("sha256")
             .update(JSON.stringify(action), "utf8")
             .digest("hex");
-      const kind = action.kind === "register"
-        ? "registration" as const
-        : action.kind === "acquire"
-          ? "executable" as const
-          : "file" as const;
+      const declaredKind = action.payload?.ownershipKind;
+      const kind = ["file", "directory", "registration", "executable"].includes(
+          typeof declaredKind === "string" ? declaredKind : "",
+        )
+        ? declaredKind as "file" | "directory" | "registration" | "executable"
+        : action.kind === "register"
+          ? "registration" as const
+          : action.kind === "acquire"
+            ? "executable" as const
+            : "file" as const;
       return {
         id: action.id,
         kind,

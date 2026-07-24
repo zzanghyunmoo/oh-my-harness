@@ -18,9 +18,14 @@ export {
 export async function main(argv: readonly string[] = process.argv.slice(2)) {
   const parsed = parseOmhArguments(argv);
   const result = await runOmh(argv);
+  const jsonValue =
+    parsed.command === "startup" && result.envelope !== undefined
+      ? result.envelope
+      : result;
   process.stdout.write(
-    parsed.json ? `${JSON.stringify(result)}\n` : formatOmhResult(result),
+    parsed.json ? `${JSON.stringify(jsonValue)}\n` : formatOmhResult(result),
   );
+  if (result.exitCode !== undefined) process.exitCode = result.exitCode;
   return result;
 }
 

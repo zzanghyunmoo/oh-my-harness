@@ -598,6 +598,7 @@ function parseStartup(value: unknown): OpenCodeStartupInspection {
 
 export function createFileOpenCodeRuntimeDependencies(
   options: {
+    beforeRead?(directory: string): Promise<void>;
     readonly env?: Readonly<Record<string, string | undefined>>;
     readonly stateRoot?: string;
   } = {},
@@ -621,7 +622,16 @@ export function createFileOpenCodeRuntimeDependencies(
   );
 
   return {
-    async loadContext(_directory) {
+    async loadContext(directory) {
+      try {
+        await options.beforeRead?.(directory);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "unknown error";
+        const json = fallbackContext(
+          `unverifiable: receipt-driven startup reconciliation failed (${detail})`,
+        );
+        return { json, text: renderOpenCodeRuntimeContext(json) };
+      }
       if (!existsSync(contextPath)) {
         const json = fallbackContext(
           `unverifiable: runtime context snapshot is absent at ${contextPath}`,
@@ -639,7 +649,20 @@ export function createFileOpenCodeRuntimeDependencies(
         return { json, text: renderOpenCodeRuntimeContext(json) };
       }
     },
-    async inspectStartup(_directory) {
+    async inspectStartup(directory) {
+      try {
+        await options.beforeRead?.(directory);
+      } catch (error) {
+        return {
+          ready: false,
+          restartRequired: false,
+          context: "receipt-driven startup reconciliation failed",
+          diagnostics: [
+            error instanceof Error ? error.message : "unknown startup error",
+            `Run the preview-first remediation: ${REMEDIATION}`,
+          ],
+        };
+      }
       if (!existsSync(startupPath)) {
         return {
           ready: false,

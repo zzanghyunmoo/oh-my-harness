@@ -9,14 +9,14 @@ test("compiled CLI preserves friendly aliases and preview-first defaults", () =>
     "--agents",
     "claude,codex",
     "--tools",
-    "gh,cr",
+    "gh,glab",
     "--root",
     "/tmp/omh test",
     "--json",
   ]);
 
   assert.deepEqual(setup.agents, ["claude-code", "codex"]);
-  assert.deepEqual(setup.tools, ["github", "coderabbit"]);
+  assert.deepEqual(setup.tools, ["github", "gitlab"]);
   assert.equal(setup.root, "/tmp/omh test");
   assert.equal(setup.apply, false);
   assert.equal(setup.digest, undefined);
@@ -39,7 +39,7 @@ test("compiled CLI rejects contradictory options with stable errors", () => {
   );
   assert.throws(
     () => parseOmhArguments(["setup", "--skip-registration"]),
-    /--skip-registration requires --apply/,
+    /unknown option: --skip-registration/,
   );
   assert.throws(
     () => parseOmhArguments(["tools", "doctor", "--apply"]),
@@ -52,6 +52,49 @@ test("compiled CLI rejects contradictory options with stable errors", () => {
   assert.throws(
     () => parseOmhArguments(["setup", "--digest", "a".repeat(64)]),
     /--digest requires --apply/,
+  );
+});
+
+test("compiled CLI parses receipt-bound startup and managed runtime launch", () => {
+  assert.deepEqual(
+    parseOmhArguments([
+      "startup",
+      "--runtime",
+      "opencode",
+      "--mode",
+      "native-post-discovery",
+      "--receipt",
+      "/tmp/environment.json",
+      "--format",
+      "json",
+    ]),
+    {
+      command: "startup",
+      format: "json",
+      json: true,
+      mode: "native-post-discovery",
+      receipt: "/tmp/environment.json",
+      runtime: "opencode",
+    },
+  );
+
+  assert.deepEqual(
+    parseOmhArguments([
+      "run",
+      "--runtime",
+      "claude-code",
+      "--receipt",
+      "/tmp/environment.json",
+      "--",
+      "--resume",
+    ]),
+    {
+      command: "run",
+      json: false,
+      receipt: "/tmp/environment.json",
+      runtime: "claude-code",
+      runtimeArgs: ["--resume"],
+    },
   );
 });
 

@@ -19,6 +19,7 @@ export interface PackageInstallPlanEntry {
   readonly status: PackagePlanStatus;
   readonly executables: readonly string[];
   readonly installedPath?: string;
+  readonly installerKind?: "command" | "managed-artifact";
   readonly installerCommand?: string;
   readonly installerArgs?: readonly string[];
   readonly installGuidance: string;
@@ -93,6 +94,7 @@ export function planPackageInstallations(
         invocation?.guidance
         ?? `${packageEntry.displayName} is unsupported on ${options.os}.`,
       authenticationGuidance: packageEntry.authentication.guidance,
+      ...(invocation === undefined ? {} : { installerKind: invocation.kind }),
     };
     if (installedPath !== null) {
       return {
@@ -122,6 +124,14 @@ export function planPackageInstallations(
           ? {}
           : { installerCommand: invocation.command }),
         installerArgs: [...invocation.args],
+      };
+    }
+    if (invocation.kind === "managed-artifact") {
+      return {
+        ...base,
+        status: "unsupported" as const,
+        installerArgs: [...invocation.args],
+        guidance: `${packageEntry.displayName} requires reviewed artifact URLs and SHA-256 identities that are not present in this catalog revision.`,
       };
     }
     return {

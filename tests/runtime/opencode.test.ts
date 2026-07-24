@@ -247,6 +247,29 @@ test("U10 file-backed direct launch fails closed on absent or corrupt state", as
   }
 });
 
+test("U10 direct-launch snapshots are gated by native receipt reconciliation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-refresh-"));
+  try {
+    let refreshes = 0;
+    const dependencies = createFileOpenCodeRuntimeDependencies({
+      beforeRead: async () => {
+        refreshes += 1;
+        throw new Error("receipt identity did not verify");
+      },
+      stateRoot: root,
+    });
+    const context = await dependencies.loadContext("/arbitrary/workspace");
+    const startup = await dependencies.inspectStartup("/arbitrary/workspace");
+    assert.equal(refreshes, 2);
+    assert.equal(context.json.mode, "status-only");
+    assert.match(context.text, /receipt-driven startup reconciliation failed/);
+    assert.equal(startup.ready, false);
+    assert.match(startup.context, /reconciliation failed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("U10 native config enables selected built-in LSPs without overriding a user disable", () => {
   const enabled: { lsp?: false | Record<string, unknown> } = {};
   assert.deepEqual(
@@ -373,6 +396,8 @@ test("U10 OpenCode adapter uses no Claude or Codex runtime module", () => {
     sources,
     /(?:from|import\()\s*["'][^"']*runtime\/(?:claude|codex)/,
   );
+  assert.match(sources, /invokeReceiptReconciler/);
+  assert.match(sources, /mode:\s*"native-post-discovery"/);
 
   const descriptor = JSON.parse(
     readFileSync(

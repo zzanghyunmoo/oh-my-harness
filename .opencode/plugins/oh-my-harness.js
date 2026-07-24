@@ -1,4 +1,6 @@
 import { tool } from "@opencode-ai/plugin";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import {
   assertCurrentToolPolicy,
   cliToolDefinitionsForPolicy,
@@ -17,8 +19,45 @@ import {
   loadOpenCodeCapabilityDefinitions,
   resolveOpenCodePackageRoot,
 } from "../../dist/runtime/opencode.js";
+import {
+  invokeReceiptReconciler,
+} from "../../plugins/oh-my-harness/scripts/startup-sync.mjs";
 
 const packageRoot = resolveOpenCodePackageRoot(import.meta.url);
+
+function defaultRuntimeDependencies() {
+  const configuredRoot =
+    process.env.OH_MY_HARNESS_STATE_ROOT
+    ?? process.env.OH_MY_HARNESS_HOME;
+  const stateRoot = configuredRoot && isAbsolute(configuredRoot)
+    ? configuredRoot
+    : join(homedir(), ".oh-my-harness");
+  const configuredReceipt = process.env.OH_MY_HARNESS_RECEIPT_PATH;
+  const receiptPath = configuredReceipt && isAbsolute(configuredReceipt)
+    ? configuredReceipt
+    : join(stateRoot, "receipts", "environment.json");
+  let inFlight;
+  const beforeRead = async (directory) => {
+    if (!inFlight) {
+      inFlight = Promise.resolve()
+        .then(() => invokeReceiptReconciler({
+          receiptPath,
+          runtimeId: "opencode",
+          mode: "native-post-discovery",
+          cwd: directory,
+        }))
+        .finally(() => {
+          inFlight = undefined;
+        });
+    }
+    await inFlight;
+  };
+  return createFileOpenCodeRuntimeDependencies({
+    beforeRead,
+    env: process.env,
+    stateRoot,
+  });
+}
 
 function currentPolicy() {
   return loadToolPolicySnapshot({ runtimeId: "opencode" });
@@ -156,7 +195,7 @@ function capabilityTool(definition, initialContext, dependencies) {
 export function createOpenCodePlugin(runtimeDependencies) {
   return async ({ directory }) => {
     const dependencies = runtimeDependencies
-      ?? createFileOpenCodeRuntimeDependencies();
+      ?? defaultRuntimeDependencies();
     const [initialSnapshot, initialStartup] = await Promise.all([
       dependencies.loadContext(directory),
       dependencies.inspectStartup(directory),

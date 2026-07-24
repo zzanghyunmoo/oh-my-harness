@@ -1,158 +1,53 @@
+import type {
+  EnvironmentPreview,
+  EnvironmentStatus,
+} from "../environment/orchestrator.js";
+
+export interface OmhResult {
+  readonly command: string;
+  readonly state?: string;
+  readonly exitCode?: number;
+  readonly output?: string;
+  readonly preview?: EnvironmentPreview;
+  readonly status?: EnvironmentStatus;
+  readonly apply?: {
+    readonly status: string;
+    readonly completedActionIds: readonly string[];
+    readonly failure?: string;
+  };
+  readonly envelope?: unknown;
+}
+
 export interface CliRenderCatalog {
-  readonly proxyIds: readonly string[];
-  readonly runtimeIds: readonly string[];
-  readonly toolIds: readonly string[];
   readonly version: string;
 }
 
-interface RuntimeRow {
-  readonly expectedVersion?: string;
-  readonly id?: string;
-  readonly runtimeId?: string;
-  readonly runtimeVersion?: string;
-  readonly state?: string;
-  readonly version?: string;
-}
-
-interface RuntimeCollection {
-  readonly runtimes: readonly RuntimeRow[];
-}
-
-interface ToolProfile {
-  readonly profileId: string;
-  readonly runtimeId: string;
-  readonly "issue-tracker": string;
-  readonly git: string;
-  readonly wiki: string;
-}
-
-interface ToolRow {
-  readonly applied?: boolean;
-  readonly guidance?: string;
-  readonly id: string;
-  readonly installedPath?: string;
-  readonly status: string;
-}
-
-interface ProxyRow extends ToolRow {
-  readonly label?: string;
-  readonly missing?: readonly string[];
-  readonly modelCount?: number;
-}
-
-interface ProxyState {
-  readonly configuration: readonly ProxyRow[];
-  readonly installs: readonly ProxyRow[];
-}
-
-export interface OmhResult {
-  readonly agents?: RuntimeCollection;
-  readonly apply?: boolean;
-  readonly command: string;
-  readonly help?: boolean;
-  readonly nextActions?: readonly string[];
-  readonly output?: string;
-  readonly proxies?: readonly ProxyRow[];
-  readonly proxyState?: ProxyState;
-  readonly subcommand?: string;
-  readonly toolProfiles?: readonly ToolProfile[];
-  readonly tools?: readonly ToolRow[];
-  readonly topic?: string;
-}
-
-function runtimeRows(value: RuntimeCollection | undefined): readonly RuntimeRow[] {
-  return value?.runtimes ?? [];
-}
-
-function formatRuntimeRow(runtime: RuntimeRow): string {
-  const id = runtime.runtimeId ?? runtime.id;
-  const version = runtime.runtimeVersion ?? runtime.version ?? runtime.expectedVersion;
-  const suffix = runtime.state ? ` — ${runtime.state}` : "";
-  return `- ${String(id)}@${String(version)}${suffix}`;
-}
-
-function formatToolRow(tool: ToolRow): string {
-  const location = tool.installedPath ? ` — ${tool.installedPath}` : "";
-  const guidance = tool.guidance ? ` — ${tool.guidance}` : "";
-  const applied = tool.applied ? " (installed now)" : "";
-  return `- ${tool.id}: ${tool.status}${applied}${location}${guidance}`;
-}
-
-function formatToolProfile(profile: ToolProfile): string {
-  return `- ${profile.runtimeId} [${profile.profileId}]: issue-tracker=${profile["issue-tracker"]}, wiki=${profile.wiki}, git=${profile.git}`;
-}
-
-function formatProxyInstallRow(proxy: ProxyRow): string {
-  const location = proxy.installedPath ? ` — ${proxy.installedPath}` : "";
-  const guidance = proxy.guidance ? ` — ${proxy.guidance}` : "";
-  return `- ${proxy.id}: ${proxy.status}${proxy.applied ? " (installed now)" : ""}${location}${guidance}`;
-}
-
-function formatProxyConfigRow(proxy: ProxyRow): string {
-  const missing = proxy.missing?.length ? ` — missing ${proxy.missing.join(", ")}` : "";
-  return `- ${proxy.id}: ${proxy.status}${proxy.applied ? " (saved to CWD .env)" : ""}${missing}`;
-}
-
-function formatProxyResult(result: OmhResult): string {
-  if (result.help) {
-    return [
-      "Usage:",
-      "  omh proxies install [--only quotio,ccs] [--root path] [--apply] [--json]",
-      "  omh proxies configure [--only litellm,quotio,ccs] [--apply] [--json]",
-      "  omh proxies doctor [--only litellm,quotio,ccs] [--json]",
-      "",
-      "Install and configure are preview-only unless --apply is present. API keys are read from the CWD .env or current environment, never command arguments.",
-    ].join("\n") + "\n";
-  }
-
-  const title = `Oh My Harness proxies ${String(result.subcommand)}${
-    result.apply ? " complete" : result.subcommand === "doctor" ? "" : " preview"
-  }`;
-  const rows = (result.proxies ?? []).map((entry) => {
-    const missing = entry.missing?.length ? ` — missing ${entry.missing.join(", ")}` : "";
-    const models = entry.modelCount !== undefined ? ` — ${entry.modelCount} models` : "";
-    const path = entry.installedPath ? ` — ${entry.installedPath}` : "";
-    const guidance = entry.guidance ? ` — ${entry.guidance}` : "";
-    return `- ${entry.id}: ${entry.status}${entry.applied ? " (applied)" : ""}${models}${path}${missing}${guidance}`;
-  });
-  const footer = !result.apply && result.subcommand !== "doctor"
-    ? ["", "No changes were made. Re-run the same command with --apply."]
-    : [];
-  return `${[title, "", ...rows, ...footer].join("\n")}\n`;
-}
-
-function helpText(topic: string | undefined, catalog: CliRenderCatalog): string {
+function help(topic: string | undefined, version: string): string {
   if (topic === "setup") {
     return [
       "Usage:",
-      "  omh setup [--profile id] [--agents ids] [--root path] [--json]",
+      "  omh setup [--profile id] [--agents ids] [--tools ids] [--root path] [--json]",
       "  omh setup [same options] --apply --digest sha256",
       "",
       "Preview is read-only and prints the exact digest required by apply.",
-      "The profile selects packages, capabilities, startup policy, and runtime tool backends.",
-    ].join("\n") + "\n";
+    ].join("\n");
   }
   if (topic === "agents") {
     return [
       "Usage:",
-      "  omh agents install [--only ids] [--root path] [--apply] [--json]",
-      "  omh agents status  [--only ids] [--root path] [--json]",
-      "",
-      `Agent ids: ${catalog.runtimeIds.join(", ")}`,
-    ].join("\n") + "\n";
+      "  omh agents status [--only claude-code,opencode,codex] [--root path] [--json]",
+      "  omh agents install [same options] [--profile id] --apply --digest sha256",
+    ].join("\n");
   }
   if (topic === "tools") {
     return [
       "Usage:",
-      "  omh tools install [--only ids] [--apply] [--json]",
-      "  omh tools doctor  [--only ids] [--json]",
+      "  omh tools doctor [--only notion,linear,jira,confluence,github,gitlab] [--profile id] [--json]",
+      "  omh tools install [same options] --apply --digest sha256",
       "",
-      `Tool ids: ${catalog.toolIds.join(", ")}`,
-      "Default: install the six backends referenced by runtime profiles; use --only for an explicit override.",
-      "External CLI executables are installed once; runtime profiles control which role tools are exposed.",
-    ].join("\n") + "\n";
+      "External CLI executables are installed once per machine; authentication remains owned by each CLI.",
+    ].join("\n");
   }
-  if (topic === "proxies") return formatProxyResult({ command: "proxies", help: true });
   if (topic === "profiles") {
     return [
       "Usage:",
@@ -161,104 +56,156 @@ function helpText(topic: string | undefined, catalog: CliRenderCatalog): string 
       "  omh profiles validate --file profile.json [--json]",
       "  omh profiles preview --file profile.json --repo /absolute/checkout [--json]",
       "  omh profiles publish --file profile.json --repo /absolute/checkout --digest sha256 [--json]",
-      "",
-      "Create and validate are read-only. Preview prints a reviewable local repository diff identity.",
-      "Publish writes only that exact local profile file; commit, push, and PR creation are separate actions.",
-      "",
-      "Legacy package-profile compatibility:",
-      "  omh profiles verify",
-      "  omh profiles apply [--profile id]",
-    ].join("\n") + "\n";
+    ].join("\n");
   }
   if (topic === "status" || topic === "doctor") {
     return [
       "Usage:",
-      `  omh ${topic} [--agents ids] [--tools ids] [--proxies ids] [--root path] [--json]`,
+      `  omh ${topic} [--root path] [--json]`,
       "",
-      "This command is read-only.",
-    ].join("\n") + "\n";
+      `${topic} is read-only. Status is local-only; doctor performs bounded native inspection without authentication.`,
+    ].join("\n");
   }
   return [
-    `Oh My Harness ${catalog.version}`,
+    `Oh My Harness ${version}`,
+    "",
+    "Claude-first, strict TypeScript environment manager for Claude Code, OpenCode, and Codex.",
     "",
     "Usage:",
-    "  omh setup [--profile id] [--agents ids] [--root path] [--json]",
-    "  omh setup [same options] --apply --digest sha256",
+    "  omh setup [options]",
     "  omh agents install|status [options]",
     "  omh tools install|doctor [options]",
-    "  omh proxies install|configure|doctor [options]",
-    "  omh status [--agents ids] [--tools ids] [--proxies ids] [--root path] [--json]",
-    "  omh doctor [--agents ids] [--tools ids] [--proxies ids] [--root path] [--json]",
-    "  omh profiles verify|apply [options]",
+    "  omh status|doctor [--root path] [--json]",
+    "  omh run --runtime id --receipt /absolute/receipt -- [runtime args]",
+    "  omh profiles list|create|validate|preview|publish [options]",
     "",
-    "All install commands are preview-only. Apply also requires the exact printed digest.",
-    "External CLI executables are shared machine-wide; role tools are filtered per runtime profile.",
+    "Every mutation is preview-first and apply requires the exact printed SHA-256 digest.",
+  ].join("\n");
+}
+
+function list(values: readonly string[]): string {
+  return values.length === 0 ? "none" : values.join(", ");
+}
+
+function renderPreview(preview: EnvironmentPreview): string {
+  const lines = [
+    `Oh My Harness setup ${preview.readiness}`,
     "",
-    `Agent ids: ${catalog.runtimeIds.join(", ")}`,
-    `Tool ids: ${catalog.toolIds.join(", ")}`,
-    `Proxy ids: ${catalog.proxyIds.join(", ")}`,
-  ].join("\n") + "\n";
+    `profile: ${preview.profileId}`,
+    `catalog revision: ${preview.catalogRevision}`,
+    `selected agents: ${list(preview.selectedAgents)}`,
+    `state root: ${preview.stateRoot}`,
+    `receipt: ${preview.receiptPath}`,
+    "",
+    "Agent runtimes (selected per environment):",
+    ...preview.agents.map((entry) =>
+      `- ${entry.id}@${entry.expectedVersion}: ${entry.state} — ${entry.detail}`
+    ),
+    "",
+    "External CLI executables (machine-shared; authentication not probed):",
+    ...preview.packages.map((entry) =>
+      `- ${entry.id}: ${entry.status} (${entry.required ? "required" : "optional"})`
+    ),
+    "",
+    "Runtime-native capabilities:",
+    ...preview.selectedAgents.map((runtimeId) => {
+      const statuses = preview.capabilities.filter((entry) =>
+        entry.runtimeId === runtimeId);
+      const ready = statuses.filter(({ state }) => state === "ready").length;
+      return `- ${runtimeId}: ${ready}/${statuses.length} ready`;
+    }),
+  ];
+  if (preview.blockers.length > 0) {
+    lines.push("", `blocking: ${list(preview.blockers)}`);
+  }
+  if (preview.optionalGaps.length > 0) {
+    lines.push("", `optional gaps: ${list(preview.optionalGaps)}`);
+  }
+  if (preview.digest) {
+    lines.push(
+      "",
+      `digest: ${preview.digest}`,
+      `apply: ${preview.remediation}`,
+    );
+  } else {
+    lines.push("", `next: ${preview.remediation}`);
+  }
+  lines.push("", "No changes were made.");
+  return lines.join("\n");
+}
+
+function renderStatus(status: EnvironmentStatus, doctor: boolean): string {
+  const lines = [
+    `Oh My Harness ${doctor ? "doctor" : "status"}: ${status.readiness}`,
+    "",
+    `profile: ${status.profileId ?? "not configured"}`,
+    `catalog revision: ${status.catalogRevision ?? "none"}`,
+    `current catalog revision: ${status.currentCatalogRevision}`,
+    `selected agents: ${list(status.selectedAgents)}`,
+    `Claude milestone ready: ${status.claudeMilestoneReady ? "yes" : "no"}`,
+    `three-runtime parity ready: ${status.v2ParityReady ? "yes" : "no"}`,
+  ];
+  if (status.agents.length > 0) {
+    lines.push(
+      "",
+      "Agents:",
+      ...status.agents.map((entry) =>
+        `- ${entry.id}: ${entry.state} — ${entry.detail}`
+      ),
+    );
+  }
+  if (status.packages.length > 0) {
+    lines.push(
+      "",
+      "Packages:",
+      ...status.packages.map((entry) =>
+        `- ${entry.id}: ${entry.status} (${entry.required ? "required" : "optional"})`
+      ),
+    );
+  }
+  if (status.blockers.length > 0) {
+    lines.push("", `blocking: ${list(status.blockers)}`);
+  }
+  if (status.optionalGaps.length > 0) {
+    lines.push("", `optional gaps: ${list(status.optionalGaps)}`);
+  }
+  if (status.remediation.length > 0) {
+    lines.push(
+      "",
+      "Preview-first remediation:",
+      ...status.remediation.map((entry) => `- ${entry}`),
+    );
+  }
+  return lines.join("\n");
 }
 
 export function createResultRenderer(
   catalog: CliRenderCatalog,
-): (result: OmhResult) => string {
-  return (result: OmhResult): string => {
-    if (result.command === "help") return helpText(result.topic, catalog);
+): (result: OmhResult & { readonly topic?: string }) => string {
+  return (result) => {
+    if (result.command === "help") return `${help(result.topic, catalog.version)}\n`;
     if (result.command === "version") return `omh ${catalog.version}\n`;
-    if (result.command === "profiles") {
-      const output = result.output ?? "";
-      return output.endsWith("\n") ? output : `${output}\n`;
+    if (result.output !== undefined) {
+      return result.output.endsWith("\n") ? result.output : `${result.output}\n`;
     }
-    if (result.command === "proxies") return formatProxyResult(result);
-
-    const title = result.command === "setup"
-      ? `Oh My Harness setup ${result.apply ? "complete" : "preview"}`
-      : result.command === "agents"
-        ? `Oh My Harness agents ${String(result.subcommand)}`
-        : result.command === "tools"
-          ? `Oh My Harness tools ${String(result.subcommand)}`
-          : `Oh My Harness ${result.command}`;
-    const lines = [title, ""];
-
-    if (result.agents) {
-      lines.push("Agent runtimes + harness plugins (selected per agent):");
-      lines.push(...runtimeRows(result.agents).map(formatRuntimeRow));
+    if (result.preview) {
+      if (result.apply) {
+        const lines = [
+          `Oh My Harness apply: ${result.apply.status}`,
+          "",
+          `profile: ${result.preview.profileId}`,
+          `catalog revision: ${result.preview.catalogRevision}`,
+          `digest: ${String(result.preview.digest)}`,
+          `completed: ${list(result.apply.completedActionIds)}`,
+        ];
+        if (result.apply.failure) lines.push(`failure: ${result.apply.failure}`);
+        return `${lines.join("\n")}\n`;
+      }
+      return `${renderPreview(result.preview)}\n`;
     }
-    if (result.toolProfiles) {
-      if (result.agents) lines.push("");
-      lines.push("Runtime tool profiles (resolved automatically; only these role tools are exposed):");
-      lines.push(...result.toolProfiles.map(formatToolProfile));
+    if (result.status) {
+      return `${renderStatus(result.status, result.command === "doctor")}\n`;
     }
-    if (result.tools) {
-      if (result.agents || result.toolProfiles) lines.push("");
-      lines.push("External CLI executables (shared machine-wide through PATH):");
-      lines.push(...result.tools.map(formatToolRow));
-    }
-    if (result.proxyState) {
-      if (result.agents || result.toolProfiles || result.tools) lines.push("");
-      lines.push("Machine proxy applications and CLIs (declarative defaults):");
-      lines.push(...result.proxyState.installs.map(formatProxyInstallRow));
-      lines.push("", "CWD proxy configuration (secret values are never printed):");
-      lines.push(...result.proxyState.configuration.map(formatProxyConfigRow));
-    }
-    if (result.command === "doctor" && result.nextActions?.length) {
-      lines.push("", "Next actions:", ...result.nextActions.map((entry) => `- ${entry}`));
-    }
-    if (
-      !result.apply
-      && ["setup", "agents", "tools"].includes(result.command)
-      && result.subcommand !== "status"
-      && result.subcommand !== "doctor"
-    ) {
-      lines.push("", "No changes were made. Re-run the same command with --apply to install.");
-    }
-    if (["setup", "status", "doctor"].includes(result.command)) {
-      lines.push(
-        "",
-        "Scope: CLI executables and proxy apps are installed once per machine; role exposure is filtered by runtime profile, and proxy credentials live in the CWD .env.",
-      );
-    }
-    return `${lines.join("\n")}\n`;
+    return `${JSON.stringify(result, null, 2)}\n`;
   };
 }

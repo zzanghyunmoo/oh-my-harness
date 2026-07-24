@@ -97,6 +97,12 @@ test("U8 cached Claude plugin reconciles by receipt identity from arbitrary CWD"
         ],
         ownership: [
           {
+            id: "omh-node",
+            kind: "file",
+            target: process.execPath,
+            digest: sha256(process.execPath),
+          },
+          {
             id: "omh-reconciler",
             kind: "file",
             target: reconcilerPath,
@@ -308,12 +314,20 @@ test("U8 status MCP returns the receipt-derived startup envelope from arbitrary 
       JSON.stringify({
         schemaVersion: "2.0.0",
         kind: "managed-state-receipt",
-        ownership: [{
-          id: "omh-reconciler",
-          kind: "file",
-          target: reconcilerPath,
-          digest: sha256(reconcilerPath),
-        }],
+        ownership: [
+          {
+            id: "omh-node",
+            kind: "file",
+            target: process.execPath,
+            digest: sha256(process.execPath),
+          },
+          {
+            id: "omh-reconciler",
+            kind: "file",
+            target: reconcilerPath,
+            digest: sha256(reconcilerPath),
+          },
+        ],
       }),
     );
     const requests = [

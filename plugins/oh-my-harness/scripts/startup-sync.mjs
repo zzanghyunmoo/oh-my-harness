@@ -91,29 +91,29 @@ function readReceipt(path) {
   return receipt;
 }
 
-function reconcilerIdentity(receipt) {
+function ownedIdentity(receipt, id, allowedKinds, label) {
   const matches = receipt.ownership.filter(
-    (entry) => entry?.id === "omh-reconciler",
+    (entry) => entry?.id === id,
   );
   if (matches.length !== 1) {
-    fail("managed receipt must record exactly one omh-reconciler");
+    fail(`managed receipt must record exactly one ${id}`);
   }
   const identity = matches[0];
   if (
     !identity
-    || !["file", "executable"].includes(identity.kind)
+    || !allowedKinds.includes(identity.kind)
     || typeof identity.target !== "string"
     || !absolute(identity.target)
     || typeof identity.digest !== "string"
     || !SHA256_PATTERN.test(identity.digest)
   ) {
-    fail("managed receipt records an invalid reconciler identity");
+    fail(`managed receipt records an invalid ${label} identity`);
   }
-  assertRegularFile(identity.target, "receipt-recorded reconciler");
+  assertRegularFile(identity.target, `receipt-recorded ${label}`);
   const observed = sha256(identity.target);
   if (observed !== identity.digest) {
     fail(
-      `reconciler digest mismatch: expected ${identity.digest}, observed ${observed}`,
+      `${label} digest mismatch: expected ${identity.digest}, observed ${observed}`,
     );
   }
   return { path: identity.target, sha256: identity.digest };
@@ -235,15 +235,29 @@ export function invokeReceiptReconciler({
   if (!absolute(receiptPath)) fail("managed receipt path must be absolute");
   if (!absolute(process.execPath)) fail("Node executable path must be absolute");
   const receipt = readReceipt(receiptPath);
-  const identity = reconcilerIdentity(receipt);
+  const nodeIdentity = ownedIdentity(
+    receipt,
+    "omh-node",
+    ["file", "executable"],
+    "Node executable",
+  );
+  if (nodeIdentity.path !== process.execPath) {
+    fail("startup helper is not running with the receipt-recorded Node executable");
+  }
+  const reconciler = ownedIdentity(
+    receipt,
+    "omh-reconciler",
+    ["file", "executable"],
+    "reconciler",
+  );
   const recordPath = dedupePath(dedupeDirectory, hookInput);
-  const cached = readDedupe(recordPath, identity);
+  const cached = readDedupe(recordPath, reconciler);
   if (cached) return cached;
 
   const result = spawnSync(
     process.execPath,
     [
-      identity.path,
+      reconciler.path,
       "startup",
       "--runtime",
       runtimeId,
@@ -274,7 +288,7 @@ export function invokeReceiptReconciler({
     );
   }
   const envelope = parseEnvelope(result.stdout);
-  writeDedupe(recordPath, identity, envelope);
+  writeDedupe(recordPath, reconciler, envelope);
   return envelope;
 }
 
