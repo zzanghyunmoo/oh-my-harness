@@ -22,6 +22,7 @@ import {
   assertSafeManagedRootPath,
   readBoundedRegularFile,
 } from "../environment/filesystem.js";
+import { PLUGIN_RUNTIME_PATHS } from "./plugin-runtime-files.js";
 
 const MAX_ENTRIES = 4_096;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -147,6 +148,15 @@ function payloadSources(repositoryRoot: string): readonly PayloadSource[] {
   return [
     ...PAYLOAD_PATHS.map((path) => ({
       destination: path,
+      source: join(repositoryRoot, path),
+    })),
+    ...PLUGIN_RUNTIME_PATHS.map((path) => ({
+      destination: join(
+        "plugins",
+        "oh-my-harness",
+        "runtime",
+        path,
+      ),
       source: join(repositoryRoot, path),
     })),
     {

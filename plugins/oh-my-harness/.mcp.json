@@ -3,15 +3,9 @@
     "workspace-cli-tools": {
       "command": "node",
       "args": [
-        "--input-type=module",
-        "--eval",
-        "import { isAbsolute, join } from 'node:path'; import { pathToFileURL } from 'node:url'; const root = process.env.PLUGIN_ROOT; if (!root || !isAbsolute(root)) throw new Error('PLUGIN_ROOT must be absolute'); process.env.OH_MY_HARNESS_RUNTIME = 'codex'; await import(pathToFileURL(join(root, 'mcp/cli-tools-server.mjs')).href);"
+        "./mcp/codex-cli-tools-server.mjs"
       ],
-      "cwd": ".",
-      "env_vars": [
-        "PLUGIN_ROOT",
-        "OH_MY_HARNESS_RECEIPT"
-      ]
+      "cwd": "."
     }
   }
 }

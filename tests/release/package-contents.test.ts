@@ -12,6 +12,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { PLUGIN_RUNTIME_PATHS } from "../../dist/install/plugin-runtime-files.js";
+
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 test("cross-platform CI checks the committed patch against its event base", () => {
@@ -71,11 +73,14 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
     "plugins/oh-my-harness/scripts/startup-sync.mjs",
     "plugins/oh-my-harness/scripts/codex-startup-context.mjs",
     "plugins/oh-my-harness/mcp/cli-tools-core.mjs",
+    "plugins/oh-my-harness/mcp/codex-cli-tools-server.mjs",
     "plugins/oh-my-harness/.claude-plugin/plugin.json",
     "plugins/oh-my-harness/.codex-plugin/plugin.json",
     "plugins/oh-my-harness/codex/skills/code-review/SKILL.md",
     "plugins/oh-my-harness/codex/skills/skill-creator/SKILL.md",
     "plugins/oh-my-harness/codex/skills/ralph-loop/SKILL.md",
+    "dist/install/plugin-runtime-files.js",
+    ...PLUGIN_RUNTIME_PATHS,
   ]) {
     assert.equal(paths.has(required), true, `package is missing ${required}`);
   }

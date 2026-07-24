@@ -15,8 +15,15 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { loadCatalogBundle } from "../../dist/catalog/load.js";
+import {
+  inspectManagedRuntimePayload,
+  materializeManagedRuntimePayload,
+} from "../../dist/install/managed-payload.js";
+
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const PLUGIN_ROOT = join(REPO_ROOT, "plugins", "oh-my-harness");
+const CATALOG = loadCatalogBundle(REPO_ROOT);
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -290,6 +297,101 @@ test("U8 Claude manifests keep hook and MCP assets self-contained in plugin cach
       true,
     );
     assert.equal(server.args.some((value) => value.includes("../")), false);
+  }
+});
+
+test("U8 cached Claude plugin starts ready workspace CLI tools from arbitrary CWD", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-claude-cached-mcp-"));
+  try {
+    const payload = inspectManagedRuntimePayload(REPO_ROOT, root);
+    materializeManagedRuntimePayload(payload);
+    const cachedPlugin = join(root, "claude-cache", "oh-my-harness");
+    cpSync(
+      join(payload.activeRoot, "plugins", "oh-my-harness"),
+      cachedPlugin,
+      { recursive: true },
+    );
+    const arbitraryCwd = join(root, "unrelated", "workspace");
+    const receiptPath = join(root, "managed", "receipts", "environment.json");
+    mkdirSync(arbitraryCwd, { recursive: true });
+    mkdirSync(join(receiptPath, ".."), { recursive: true });
+    writeFileSync(
+      receiptPath,
+      `${JSON.stringify({
+        $schema: "../contracts/managed-state-receipt.schema.json",
+        schemaVersion: "2.0.0",
+        kind: "managed-state-receipt",
+        catalogRevision: CATALOG.revision,
+        planDigest: "b".repeat(64),
+        appliedAt: "2026-07-24T00:00:00.000Z",
+        completedActionIds: [],
+        desiredState: {
+          profileId: "personal",
+          selectedAgents: ["claude-code"],
+        },
+        startupConsent: {
+          repairPinned: true,
+          addReviewedContent: true,
+          channelId: "stable",
+          profileId: "personal",
+          artifactClasses: ["managed-skill"],
+          permissionScopes: ["workspace:read"],
+        },
+        runtimeReadiness: [{ agentId: "claude-code", state: "ready" }],
+        ownership: [],
+      }, null, 2)}\n`,
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(cachedPlugin, ".mcp.claude.json"), "utf8"),
+    );
+    const server = manifest.mcpServers["workspace-cli-tools"];
+    const requests = [
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18" },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      },
+    ].map((message) => JSON.stringify(message)).join("\n") + "\n";
+    const result = spawnSync(process.execPath, server.args, {
+      cwd: arbitraryCwd,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        CLAUDE_PLUGIN_ROOT: cachedPlugin,
+        OH_MY_HARNESS_RECEIPT_PATH: receiptPath,
+        OH_MY_HARNESS_RUNTIME: "claude-code",
+      },
+      input: requests,
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const [initialize, tools] = result.stdout.trim().split("\n").map(
+      (line) => JSON.parse(line),
+    );
+    assert.match(initialize.result.instructions, /Runtime claude-code/);
+    assert.match(initialize.result.instructions, /profile personal/);
+    assert.deepEqual(
+      tools.result.tools.map(({ name }: { name: string }) => name),
+      [
+        "workspace_cli_status",
+        "workspace_cli_setup",
+        "issue_tracker_linear_cli",
+        "wiki_notion_cli",
+        "git_repository_github_cli",
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

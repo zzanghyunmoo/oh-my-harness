@@ -5,7 +5,12 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import {
   dirname,
@@ -22,6 +27,11 @@ import {
   type CodexExpectedNativeState,
   type CodexNativeOperations,
 } from "../../dist/runtime/codex.js";
+import {
+  inspectManagedRuntimePayload,
+  materializeManagedRuntimePayload,
+} from "../../dist/install/managed-payload.js";
+import { loadCatalogBundle } from "../../dist/catalog/load.js";
 
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -33,6 +43,7 @@ const PLUGIN_ROOT = join(
   "oh-my-harness",
 );
 const MARKETPLACE_ROOT = REPOSITORY_ROOT;
+const CATALOG = loadCatalogBundle(REPOSITORY_ROOT);
 
 const RENDERED_CONTEXT = [
   "Oh My Harness startup context",
@@ -107,7 +118,7 @@ function readyOperations(
           enabled: overrides.mcpEnabled ?? true,
           name: "workspace-cli-tools",
           transport: {
-            args: ["--input-type=module", "--eval", "PLUGIN_ROOT"],
+            args: ["./mcp/codex-cli-tools-server.mjs"],
             command: "node",
             cwd: PLUGIN_ROOT,
             type: "stdio",
@@ -359,13 +370,13 @@ test("U11 owned plugin manifests use Codex-native skills, MCP, and hook surfaces
   }
   assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.equal(plugin.hooks, "./hooks/codex-hooks.json");
-  assert.match(
-    mcp.mcpServers["workspace-cli-tools"].args.join(" "),
-    /process\.env\.PLUGIN_ROOT/,
-  );
-  assert.doesNotMatch(
-    mcp.mcpServers["workspace-cli-tools"].args.join(" "),
-    /process\.cwd|CLAUDE_PLUGIN_ROOT/,
+  assert.deepEqual(
+    mcp.mcpServers["workspace-cli-tools"],
+    {
+      command: "node",
+      args: ["./mcp/codex-cli-tools-server.mjs"],
+      cwd: ".",
+    },
   );
   assert.deepEqual(
     Object.keys(hooks.hooks).sort(),
@@ -382,6 +393,102 @@ test("U11 owned plugin manifests use Codex-native skills, MCP, and hook surfaces
     adapter.native.preModelGate.configurationScope,
     "managed-hooks",
   );
+});
+
+test("U11 cached Codex plugin starts its MCP server without repository siblings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omh-codex-cached-mcp-"));
+  try {
+    const payload = inspectManagedRuntimePayload(REPOSITORY_ROOT, root);
+    materializeManagedRuntimePayload(payload);
+    const sourcePlugin = join(
+      payload.activeRoot,
+      "plugins",
+      "oh-my-harness",
+    );
+    const cachedPlugin = join(root, "isolated-cache", "oh-my-harness");
+    cpSync(sourcePlugin, cachedPlugin, { recursive: true });
+    const managedHome = join(root, "managed-home");
+    mkdirSync(join(managedHome, "receipts"), { recursive: true });
+    writeFileSync(
+      join(managedHome, "receipts", "environment.json"),
+      `${JSON.stringify({
+        $schema: "../contracts/managed-state-receipt.schema.json",
+        schemaVersion: "2.0.0",
+        kind: "managed-state-receipt",
+        catalogRevision: CATALOG.revision,
+        planDigest: "b".repeat(64),
+        appliedAt: "2026-07-24T00:00:00.000Z",
+        completedActionIds: [],
+        desiredState: {
+          profileId: "personal",
+          selectedAgents: ["codex"],
+        },
+        startupConsent: {
+          repairPinned: true,
+          addReviewedContent: true,
+          channelId: "stable",
+          profileId: "personal",
+          artifactClasses: ["managed-skill"],
+          permissionScopes: ["workspace:read"],
+        },
+        runtimeReadiness: [{ agentId: "codex", state: "ready" }],
+        ownership: [],
+      }, null, 2)}\n`,
+    );
+
+    const child = spawnSync(
+      process.execPath,
+      [join(cachedPlugin, "mcp", "codex-cli-tools-server.mjs")],
+      {
+        cwd: cachedPlugin,
+        env: {
+          PATH: process.env.PATH,
+          OH_MY_HARNESS_HOME: managedHome,
+        },
+        input: [
+          {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: "2025-06-18" },
+          },
+          {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/list",
+            params: {},
+          },
+        ].map((message) => JSON.stringify(message)).join("\n") + "\n",
+        encoding: "utf8",
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+
+    assert.equal(child.status, 0, child.stderr);
+    const [initialize, tools] = child.stdout.trim().split("\n").map(
+      (line) => JSON.parse(line),
+    );
+    assert.equal(
+      initialize.result.serverInfo.name,
+      "oh-my-harness-cli-tools",
+    );
+    assert.match(initialize.result.instructions, /Runtime codex/);
+    assert.match(initialize.result.instructions, /profile personal/);
+    assert.doesNotMatch(initialize.result.instructions, /status-only/);
+    assert.deepEqual(
+      tools.result.tools.map(({ name }: { name: string }) => name),
+      [
+        "workspace_cli_status",
+        "workspace_cli_setup",
+        "issue_tracker_linear_cli",
+        "wiki_notion_cli",
+        "git_repository_github_cli",
+      ],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("U11 current Codex CLI loads the local marketplace and plugin manifest", async (t) => {

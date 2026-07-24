@@ -296,10 +296,10 @@ async function mcpReadiness(
   const args = arrayValue(transport.args, "Codex MCP transport args");
   if (
     transport.type !== "stdio"
-    || typeof transport.command !== "string"
-    || transport.command.length === 0
+    || transport.command !== "node"
     || args.some((argument) => typeof argument !== "string")
-    || !args.some((argument) => String(argument).includes("PLUGIN_ROOT"))
+    || args.length !== 1
+    || args[0] !== "./mcp/codex-cli-tools-server.mjs"
     || typeof transport.cwd !== "string"
     || !samePath(transport.cwd, expected.pluginRoot)
   ) {

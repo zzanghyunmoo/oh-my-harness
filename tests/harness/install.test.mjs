@@ -16,6 +16,10 @@ import {
   registerRuntimePackages,
   resolveInstallRoot,
 } from "../../scripts/harness/install.mjs";
+import {
+  PLUGIN_RUNTIME_PATHS,
+  materializePluginRuntime,
+} from "../../dist/install/plugin-runtime-files.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -86,6 +90,39 @@ test("installer preview closes macOS arm64 to the three exact runtime versions",
   assert.equal(plan.compoundEngineering.version, "3.19.0");
   assert.equal(plan.compoundEngineering.commit, "1756c0b9f3cf94493f287ea29ae766ad668fb7cf");
   assert.equal(existsSync(root), false);
+});
+
+test("legacy package payload mirrors the compiled CLI runtime inside the plugin boundary", () => {
+  const root = mkdtempSync(join(tmpdir(), "oh-my-harness-plugin-runtime-"));
+  try {
+    const fixtures = PLUGIN_RUNTIME_PATHS.map((path) => [
+      path,
+      path.endsWith(".json") ? "{}" : `// ${path}\n`,
+    ]);
+    for (const [path, content] of fixtures) {
+      const target = join(root, path);
+      mkdirSync(join(target, ".."), { recursive: true });
+      writeFileSync(target, content);
+    }
+
+    materializePluginRuntime(root);
+    assert.throws(
+      () => materializePluginRuntime(root),
+      /plugin runtime payload already exists/,
+    );
+
+    for (const [path, content] of fixtures) {
+      assert.equal(
+        readFileSync(
+          join(root, "plugins", "oh-my-harness", "runtime", path),
+          "utf8",
+        ),
+        content,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("installer resolves Intel macOS and both Windows architectures to reviewed native archives", async () => {
@@ -945,7 +982,14 @@ test("one plugin package shares skills and CLI tools across three maintained run
   assert.deepEqual(plugin.skills, ["./skills/", "./codex/skills/"]);
   assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.equal(claudePlugin.mcpServers, "./.mcp.claude.json");
-  assert.match(codexMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'codex'/);
+  assert.deepEqual(
+    codexMcp.mcpServers["workspace-cli-tools"],
+    {
+      command: "node",
+      args: ["./mcp/codex-cli-tools-server.mjs"],
+      cwd: ".",
+    },
+  );
   assert.match(claudeMcp.mcpServers["workspace-cli-tools"].args.at(-1), /OH_MY_HARNESS_RUNTIME = 'claude-code'/);
   assert.deepEqual(runtimeToolProfiles.runtimes, [
     { runtimeId: "claude-code", profileId: "company" },

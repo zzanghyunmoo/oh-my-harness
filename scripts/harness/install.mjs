@@ -306,6 +306,17 @@ export async function createHarnessPayload({ installRoot, repoRoot = REPO_ROOT, 
         env: { ...npmEnv, npm_config_offline: "true" },
       });
     }
+    const pluginRuntime = await import(
+      pathToFileURL(
+        join(
+          payloadRoot,
+          "dist",
+          "install",
+          "plugin-runtime-files.js",
+        ),
+      ).href
+    );
+    pluginRuntime.materializePluginRuntime(payloadRoot);
     const identity = `${HARNESS_PACKAGE.name}@${HARNESS_PACKAGE.version}+${archiveSha256}`;
     const receipt = {
       schemaVersion: INSTALL_SCHEMA_VERSION,
