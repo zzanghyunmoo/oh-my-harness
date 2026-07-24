@@ -53,7 +53,7 @@ import {
 import { resolveTrustedFile, resolveTrustedInvocation } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode", "pi"]);
+const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode"]);
 export const RUNTIME_IDS = DEFAULT_RUNTIME_IDS;
 const HARNESS_PACKAGE = Object.freeze({ name: "oh-my-harness", version: "0.2.0" });
 const HARNESS_MARKETPLACE = "oh-my-harness";
@@ -405,7 +405,6 @@ function archiveFormat(assetName) {
 
 export function assertExactRuntimeVersion(runtimeId, expectedVersion, output) {
   const versions = String(output).match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/g) ?? [];
-  if (runtimeId === "pi" && expectedVersion === "0.80.7" && versions[0] === "0.0.0") return "pinned-executable-digest";
   if (versions.length === 0 || versions[0] !== expectedVersion) {
     fail(`${runtimeId} version mismatch: expected ${expectedVersion}, observed ${versions[0] ?? "unknown"}`);
   }
@@ -954,37 +953,6 @@ function archiveOpenCodePredecessorSkills(configPaths) {
   return { archivedSkills, skillsBackupRoots };
 }
 
-function listedPiPackages(output) {
-  const sources = new Set();
-  const resolvedPaths = new Set();
-  const entries = [];
-  let activeEntry;
-  for (const line of String(output).split(/\r?\n/)) {
-    if (/^\s{2}\S/.test(line)) {
-      const source = line.trim();
-      activeEntry = { resolvedPaths: [], source };
-      entries.push(activeEntry);
-      sources.add(source);
-      continue;
-    }
-    if (activeEntry && /^\s{4}\S/.test(line)) {
-      const path = line.trim();
-      activeEntry.resolvedPaths.push(path);
-      resolvedPaths.add(path);
-    }
-  }
-  return { entries, resolvedPaths, sources };
-}
-
-function piHasLocalPath(packages, expectedPath) {
-  if (!isSafeDirectory(expectedPath)) return false;
-  const expected = realpathSync(expectedPath);
-  return [...packages.resolvedPaths].some((path) => {
-    try { return realpathSync(path) === expected; }
-    catch { return false; }
-  });
-}
-
 function realOrResolvedPath(path) {
   try { return realpathSync(path); }
   catch { return resolve(path); }
@@ -1051,75 +1019,14 @@ function inspectOpenCodeRegistration(installRoot, receipt, environment) {
   }
 }
 
-const PI_MUTABLE_SOURCES = Object.freeze([
-  "git:github.com/zzanghyunmoo/oh-my-pi",
-  "git:github.com/zzanghyunmoo/oh-my-harness",
-  "git:github.com/EveryInc/compound-engineering-plugin",
-]);
-const PI_COMPANION_SOURCES = Object.freeze(["npm:pi-subagents@0.34.0", "npm:pi-ask-user@0.13.0"]);
-const PI_COMPANION_NAMES = Object.freeze(["pi-subagents", "pi-ask-user"]);
-
-function stalePiPackageSource(source) {
-  if (PI_MUTABLE_SOURCES.includes(source)) return true;
-  const match = /^npm:([^@]+)(?:@.+)?$/.exec(source);
-  if (!match || !PI_COMPANION_NAMES.includes(match[1])) return false;
-  return !PI_COMPANION_SOURCES.includes(source);
-}
-
-function inspectPiPackages(packages, installRoot, expectedLocalPaths) {
-  const expected = new Set(expectedLocalPaths.map(realOrResolvedPath));
-  const registered = [
-    ...expectedLocalPaths.map((expectedPath, index) => ({
-      source: expectedPath,
-      kind: "local",
-      id: index === 0 ? HARNESS_PACKAGE.name : CE_PLUGIN,
-      installed: piHasLocalPath(packages, expectedPath),
-    })),
-    ...PI_COMPANION_SOURCES.map((source) => ({
-      source,
-      kind: "npm",
-      id: source.slice(4).split("@")[0],
-      installed: packages.sources.has(source),
-    })),
-  ];
-  const stalePackages = [];
-  for (const source of packages.sources) if (stalePiPackageSource(source)) stalePackages.push(source);
-  for (const entry of packages.entries) {
-    const staleManagedPath = entry.resolvedPaths.find((path) => {
-      const resolvedPath = realOrResolvedPath(path);
-      return isPathWithin(join(installRoot, "packages"), resolvedPath) && !expected.has(resolvedPath);
-    });
-    if (staleManagedPath && !stalePackages.includes(entry.source)) stalePackages.push(entry.source);
-  }
-  const missing = registered.some(({ installed }) => !installed);
-  return {
-    state: stalePackages.length > 0 ? "registration-drift" : registrationState(missing, false),
-    packages: registered,
-    stalePackages,
-  };
-}
-
 function boundedNpmEnvironment(environment) {
   return { ...environment, npm_config_fetch_retries: "0", npm_config_fetch_timeout: "10000" };
-}
-
-function inspectPiRegistration(binaryPath, installRoot, receipt, runner, environment = process.env) {
-  const expected = expectedRegistrationPaths(installRoot, receipt);
-  if (!expected) return { state: "registration-unverifiable", error: "runtime receipt is missing managed package identities" };
-  try {
-    const piEnv = boundedNpmEnvironment(environment);
-    const packages = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
-    return inspectPiPackages(packages, installRoot, [expected.harness, expected.compoundEngineeringPlugin]);
-  } catch (error) {
-    return { state: "registration-unverifiable", error: errorText(error) };
-  }
 }
 
 function inspectRuntimeRegistration(runtimeId, binaryPath, installRoot, receipt, runner, environment) {
   if (runtimeId === "codex") return inspectCodexRegistration(binaryPath, installRoot, receipt, runner, environment);
   if (runtimeId === "claude-code") return inspectClaudeRegistration(binaryPath, installRoot, receipt, runner, { env: environment });
   if (runtimeId === "opencode") return inspectOpenCodeRegistration(installRoot, receipt, environment);
-  if (runtimeId === "pi") return inspectPiRegistration(binaryPath, installRoot, receipt, runner, environment);
   return { state: "registration-unverifiable", error: `unsupported runtime registration inspection: ${runtimeId}` };
 }
 
@@ -1192,51 +1099,6 @@ export function registerRuntimePackages({
       backups: [...preparedBackups, ...migration.backups],
       ...skillsMigration,
     };
-  }
-  if (runtimeId === "pi") {
-    const piEnv = boundedNpmEnvironment(environment);
-    const before = listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }));
-    const sources = [
-      harnessPayload.path,
-      cePayload.pluginPath,
-      ...PI_COMPANION_SOURCES,
-    ];
-    let installedAny = false;
-    for (const source of sources) {
-      const installed = isAbsolute(source) ? piHasLocalPath(before, source) : before.sources.has(source);
-      if (!installed) {
-        runner.run(binaryPath, ["install", source, "--approve"], { env: piEnv });
-        installedAny = true;
-      }
-    }
-    const prepared = installedAny
-      ? listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }))
-      : before;
-    const preparedInspection = inspectPiPackages(prepared, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
-    if (preparedInspection.packages.some(({ installed }) => !installed)) {
-      fail(`Pi replacement registration did not converge: ${preparedInspection.state}`);
-    }
-    const removed = [];
-    for (const source of prepared.sources) {
-      if (!stalePiPackageSource(source)) continue;
-      runner.run(binaryPath, ["remove", source, "--approve"], { env: piEnv });
-      removed.push(source);
-    }
-    if (managedRoot) {
-      const expectedLocalPaths = new Set([realOrResolvedPath(harnessPayload.path), realOrResolvedPath(cePayload.pluginPath)]);
-      for (const entry of prepared.entries) {
-        const resolvedLocalPath = entry.resolvedPaths.find((path) => isPathWithin(join(managedRoot, "packages"), path));
-        if (!resolvedLocalPath || expectedLocalPaths.has(realOrResolvedPath(resolvedLocalPath))) continue;
-        runner.run(binaryPath, ["remove", resolvedLocalPath, "--approve"], { env: piEnv });
-        removed.push(entry.source);
-      }
-    }
-    const after = removed.length > 0
-      ? listedPiPackages(runner.run(binaryPath, ["list", "--approve"], { env: piEnv }))
-      : prepared;
-    const inspected = inspectPiPackages(after, managedRoot, [harnessPayload.path, cePayload.pluginPath]);
-    if (inspected.state !== "installed") fail(`Pi package registration did not converge: ${inspected.state}`);
-    return { installed: sources, removed };
   }
   fail(`unsupported runtime registration: ${runtimeId}`);
 }
@@ -1422,7 +1284,7 @@ function formatHelp() {
     "Options:",
     "  --apply                 Install exact runtimes and register fixed local packages",
     "  --status                Inspect the selected managed runtime installations",
-    "  --runtime <ids>         claude-code, codex, opencode, pi, comma-separated values, or all",
+    "  --runtime <ids>         claude-code, codex, opencode, comma-separated values, or all",
     "  --root <absolute-path>  Managed installation root (default: ~/.oh-my-harness)",
     "  --json                  Emit machine-readable output",
     "  --skip-registration     Install payloads only; valid only with --apply",

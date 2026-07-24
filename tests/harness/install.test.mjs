@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { applyEdits as applyJsoncEdits, modify as modifyJsonc, parse as parseJsonc } from "jsonc-parser";
 
 import {
@@ -75,14 +75,13 @@ function appendJsoncPlugin(configPath, pluginPath) {
   writeFileSync(configPath, updated);
 }
 
-test("installer preview closes macOS arm64 to the four exact runtime versions", async () => {
+test("installer preview closes macOS arm64 to the three exact runtime versions", async () => {
   const root = join(tmpdir(), "oh-my-harness-preview-root");
   const plan = await buildInstallPlan({ installRoot: root, os: "darwin", architecture: "arm64" });
   assert.deepEqual(plan.runtimes.map(({ id, version }) => [id, version]), [
     ["claude-code", "2.1.210"],
     ["codex", "0.144.4"],
     ["opencode", "1.18.0"],
-    ["pi", "0.80.7"],
   ]);
   assert.equal(plan.compoundEngineering.version, "3.19.0");
   assert.equal(plan.compoundEngineering.commit, "1756c0b9f3cf94493f287ea29ae766ad668fb7cf");
@@ -98,7 +97,7 @@ test("installer resolves Intel macOS and both Windows architectures to reviewed 
   ];
   for (const expected of cases) {
     const plan = await buildInstallPlan({ installRoot: root, os: expected.os, architecture: expected.architecture });
-    assert.equal(plan.runtimes.length, 4);
+    assert.equal(plan.runtimes.length, 3);
     assert.equal(plan.runtimes.every(({ platformId }) => platformId === expected.platformId), true);
     assert.equal(plan.runtimes.every(({ executable }) => executable.path.endsWith(".exe")), expected.suffix === ".exe");
     assert.equal(plan.runtimes.find(({ id }) => id === "claude-code").archive.name, expected.asset);
@@ -223,9 +222,9 @@ test("Claude registration installs exact local marketplaces and plugins idempote
 
 test("installer arguments are preview-first and reject ambiguous mutations", () => {
   const root = join(tmpdir(), "oh-my-harness-arguments-root");
-  const preview = parseInstallArguments(["--root", root, "--runtime", "codex,pi", "--json"]);
+  const preview = parseInstallArguments(["--root", root, "--runtime", "codex,opencode", "--json"]);
   assert.equal(preview.apply, false);
-  assert.deepEqual(preview.runtimeIds, ["codex", "pi"]);
+  assert.deepEqual(preview.runtimeIds, ["codex", "opencode"]);
   assert.equal(preview.register, true);
   assert.equal(parseInstallArguments(["--help"]).help, true);
   const apply = parseInstallArguments(["--root", root, "--runtime", "all", "--apply", "--skip-registration"]);
@@ -239,16 +238,18 @@ test("installer arguments are preview-first and reject ambiguous mutations", () 
 
 test("installer rejects combining all with an explicit runtime", async () => {
   await assert.rejects(
-    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-ambiguous-root"), os: "darwin", architecture: "arm64", runtimeIds: ["all", "pi"] }),
+    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-ambiguous-root"), os: "darwin", architecture: "arm64", runtimeIds: ["all", "codex"] }),
     /cannot be combined/i,
+  );
+  await assert.rejects(
+    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-unsupported-root"), os: "darwin", architecture: "arm64", runtimeIds: ["pi"] }),
+    /runtime selection must contain only/i,
   );
 });
 
 test("runtime version verification refuses newer and older versions", () => {
   assert.doesNotThrow(() => assertExactRuntimeVersion("codex", "0.144.4", "codex-cli 0.144.4\n"));
-  assert.equal(assertExactRuntimeVersion("pi", "0.80.7", "0.0.0\n"), "pinned-executable-digest");
   assert.throws(() => assertExactRuntimeVersion("opencode", "1.18.0", "1.18.2\n"), /version mismatch/i);
-  assert.throws(() => assertExactRuntimeVersion("pi", "0.80.7", "0.80.6\n"), /version mismatch/i);
 });
 
 test("Codex registration uses both local fixed marketplaces and is idempotent", () => {
@@ -409,13 +410,12 @@ test("Codex status reports missing registration instead of trusting a stale rece
   }
 });
 
-test("Claude, OpenCode, and Pi status report missing registration instead of trusting stale receipts", async () => {
+test("Claude and OpenCode status report missing registration instead of trusting stale receipts", async () => {
   const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-runtime-status-missing-"));
   try {
     const runtimes = [
       createRuntimeStatusFixture(installRoot, "claude-code", "2.1.210"),
       createRuntimeStatusFixture(installRoot, "opencode", "1.18.0"),
-      createRuntimeStatusFixture(installRoot, "pi", "0.80.7"),
     ];
     const expected = expectedRegistrationPaths(installRoot);
     mkdirSync(expected.harness, { recursive: true });
@@ -434,13 +434,9 @@ test("Claude, OpenCode, and Pi status report missing registration instead of tru
           if (args.join(" ") === "--version") {
             if (binary.endsWith("claude-code")) return "2.1.210 (Claude Code)\n";
             if (binary.endsWith("opencode")) return "1.18.0\n";
-            return "0.0.0\n";
           }
           if (binary.endsWith("claude-code") && args.join(" ") === "plugin marketplace list --json") return "[]\n";
           if (binary.endsWith("claude-code") && args.join(" ") === "plugin list --json") return "[]\n";
-          if (binary.endsWith("pi") && args.join(" ") === "list --approve") {
-            return `User packages:\n  ../../managed/oh-my-harness\n    ${expected.harness}\n`;
-          }
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
         },
       },
@@ -449,24 +445,21 @@ test("Claude, OpenCode, and Pi status report missing registration instead of tru
     assert.deepEqual(result.runtimes.map(({ id, state }) => [id, state]), [
       ["claude-code", "registration-missing"],
       ["opencode", "registration-missing"],
-      ["pi", "registration-missing"],
     ]);
     assert.equal(result.runtimes[0].registration.marketplaces.every(({ state }) => state === "missing"), true);
     assert.equal(result.runtimes[1].registration.plugins.find(({ id }) => id === "compound-engineering").registered, true);
     assert.equal(result.runtimes[1].registration.plugins.find(({ id }) => id === "compound-engineering").installed, false);
-    assert.equal(result.runtimes[2].registration.packages.some(({ installed }) => !installed), true);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
   }
 });
 
-test("Claude, OpenCode, and Pi status distinguish registration drift", async () => {
+test("Claude and OpenCode status distinguish registration drift", async () => {
   const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-runtime-status-drift-"));
   try {
     const runtimes = [
       createRuntimeStatusFixture(installRoot, "claude-code", "2.1.210"),
       createRuntimeStatusFixture(installRoot, "opencode", "1.18.0"),
-      createRuntimeStatusFixture(installRoot, "pi", "0.80.7"),
     ];
     const expected = materializeExpectedRegistrationPaths(installRoot);
     const staleOpenCode = join(installRoot, "packages", "oh-my-harness", "0.1.0", "old-digest");
@@ -485,7 +478,6 @@ test("Claude, OpenCode, and Pi status distinguish registration drift", async () 
           if (args.join(" ") === "--version") {
             if (binary.endsWith("claude-code")) return "2.1.210 (Claude Code)\n";
             if (binary.endsWith("opencode")) return "1.18.0\n";
-            return "0.0.0\n";
           }
           if (binary.endsWith("claude-code") && args.join(" ") === "plugin marketplace list --json") {
             return JSON.stringify([
@@ -499,9 +491,6 @@ test("Claude, OpenCode, and Pi status distinguish registration drift", async () 
               { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: false },
             ]);
           }
-          if (binary.endsWith("pi") && args.join(" ") === "list --approve") {
-            return `User packages:\n  ../../managed/oh-my-harness\n    ${expected.harness}\n  ../../managed/compound-engineering\n    ${expected.compoundEngineering}\n  npm:pi-subagents@0.33.0\n    /cache/pi-subagents\n  npm:pi-ask-user@0.12.0\n    /cache/pi-ask-user\n`;
-          }
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
         },
       },
@@ -510,10 +499,8 @@ test("Claude, OpenCode, and Pi status distinguish registration drift", async () 
     assert.deepEqual(result.runtimes.map(({ id, state }) => [id, state]), [
       ["claude-code", "registration-drift"],
       ["opencode", "registration-drift"],
-      ["pi", "registration-drift"],
     ]);
     assert.deepEqual(result.runtimes[1].registration.stalePlugins, [staleOpenCode]);
-    assert.deepEqual(result.runtimes[2].registration.stalePackages, ["npm:pi-subagents@0.33.0", "npm:pi-ask-user@0.12.0"]);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
   }
@@ -584,7 +571,6 @@ test("runtime status fails closed when receipt package identities are incomplete
     const cases = [
       ["claude-code", "2.1.210", "2.1.210 (Claude Code)\n"],
       ["opencode", "1.18.0", "1.18.0\n"],
-      ["pi", "0.80.7", "0.0.0\n"],
     ];
     for (const [runtimeId, version, versionOutput] of cases) {
       const runtime = createRuntimeStatusFixture(installRoot, runtimeId, version);
@@ -614,13 +600,12 @@ test("runtime status fails closed when receipt package identities are incomplete
   }
 });
 
-test("Claude, OpenCode, and Pi status fail closed when registration cannot be inspected", async () => {
+test("Claude and OpenCode status fail closed when registration cannot be inspected", async () => {
   const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-runtime-status-unverifiable-"));
   try {
     const runtimes = [
       createRuntimeStatusFixture(installRoot, "claude-code", "2.1.210"),
       createRuntimeStatusFixture(installRoot, "opencode", "1.18.0"),
-      createRuntimeStatusFixture(installRoot, "pi", "0.80.7"),
     ];
     const expected = materializeExpectedRegistrationPaths(installRoot);
     const xdgConfigHome = join(installRoot, "unverifiable-config");
@@ -634,7 +619,6 @@ test("Claude, OpenCode, and Pi status fail closed when registration cannot be in
           if (args.join(" ") === "--version") {
             if (binary.endsWith("claude-code")) return "2.1.210 (Claude Code)\n";
             if (binary.endsWith("opencode")) return "1.18.0\n";
-            return "0.0.0\n";
           }
           throw new Error(`registration inspection failed for ${binary}`);
         },
@@ -644,23 +628,20 @@ test("Claude, OpenCode, and Pi status fail closed when registration cannot be in
     assert.deepEqual(result.runtimes.map(({ id, state }) => [id, state]), [
       ["claude-code", "registration-unverifiable"],
       ["opencode", "registration-unverifiable"],
-      ["pi", "registration-unverifiable"],
     ]);
     assert.match(result.runtimes[0].registration.error, /inspection failed/);
     assert.match(result.runtimes[1].registration.error, /not valid JSON\/JSONC/);
-    assert.match(result.runtimes[2].registration.error, /inspection failed/);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
   }
 });
 
-test("Claude, OpenCode, and Pi status report healthy native registration details", async () => {
+test("Claude and OpenCode status report healthy native registration details", async () => {
   const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-runtime-status-healthy-"));
   try {
     const runtimes = [
       createRuntimeStatusFixture(installRoot, "claude-code", "2.1.210"),
       createRuntimeStatusFixture(installRoot, "opencode", "1.18.0"),
-      createRuntimeStatusFixture(installRoot, "pi", "0.80.7"),
     ];
     const expected = materializeExpectedRegistrationPaths(installRoot);
     const xdgConfigHome = join(installRoot, "healthy-config");
@@ -674,7 +655,6 @@ test("Claude, OpenCode, and Pi status report healthy native registration details
           if (args.join(" ") === "--version") {
             if (binary.endsWith("claude-code")) return "2.1.210 (Claude Code)\n";
             if (binary.endsWith("opencode")) return "1.18.0\n";
-            return "0.0.0\n";
           }
           if (args.join(" ") === "plugin marketplace list --json") return JSON.stringify([
             { name: "oh-my-harness", path: expected.harness },
@@ -684,28 +664,25 @@ test("Claude, OpenCode, and Pi status report healthy native registration details
             { id: "oh-my-harness@oh-my-harness", version: "0.2.0", scope: "user", enabled: true },
             { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: true },
           ]);
-          if (args.join(" ") === "list --approve") return `User packages:\n  harness\n    ${expected.harness}\n  compound\n    ${expected.compoundEngineering}\n  npm:pi-subagents@0.34.0\n    /cache/pi-subagents\n  npm:pi-ask-user@0.13.0\n    /cache/pi-ask-user\n`;
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
         },
       },
     });
     assert.deepEqual(result.runtimes.map(({ id, state }) => [id, state]), [
-      ["claude-code", "installed"], ["opencode", "installed"], ["pi", "installed"],
+      ["claude-code", "installed"], ["opencode", "installed"],
     ]);
     assert.equal(result.runtimes[0].registration.plugins.every(({ state }) => state === "installed"), true);
     assert.equal(result.runtimes[1].registration.plugins.every(({ targetSafe }) => targetSafe), true);
-    assert.equal(result.runtimes[2].registration.packages.every(({ installed }) => installed), true);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
   }
 });
 
-test("Claude and Pi status reject registrations whose payload directories were deleted", async () => {
+test("Claude status rejects registrations whose payload directories were deleted", async () => {
   const installRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-deleted-registration-targets-"));
   try {
     const runtimes = [
       createRuntimeStatusFixture(installRoot, "claude-code", "2.1.210"),
-      createRuntimeStatusFixture(installRoot, "pi", "0.80.7"),
     ];
     const expected = materializeExpectedRegistrationPaths(installRoot);
     rmSync(expected.harness, { recursive: true });
@@ -713,7 +690,7 @@ test("Claude and Pi status reject registrations whose payload directories were d
     const result = await inspectInstallPlan({ installRoot, runtimes }, {
       runner: {
         run(binary, args) {
-          if (args.join(" ") === "--version") return binary.endsWith("claude-code") ? "2.1.210 (Claude Code)\n" : "0.0.0\n";
+          if (args.join(" ") === "--version") return "2.1.210 (Claude Code)\n";
           if (args.join(" ") === "plugin marketplace list --json") return JSON.stringify([
             { name: "oh-my-harness", path: expected.harness },
             { name: "compound-engineering-plugin", path: expected.compoundEngineering },
@@ -722,7 +699,6 @@ test("Claude and Pi status reject registrations whose payload directories were d
             { id: "oh-my-harness@oh-my-harness", version: "0.2.0", scope: "user", enabled: true },
             { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: true },
           ]);
-          if (args.join(" ") === "list --approve") return `User packages:\n  harness\n    ${expected.harness}\n  compound\n    ${expected.compoundEngineering}\n  npm:pi-subagents@0.34.0\n    /cache/pi-subagents\n  npm:pi-ask-user@0.13.0\n    /cache/pi-ask-user\n`;
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
         },
       },
@@ -730,10 +706,8 @@ test("Claude and Pi status reject registrations whose payload directories were d
 
     assert.deepEqual(result.runtimes.map(({ id, state }) => [id, state]), [
       ["claude-code", "registration-missing"],
-      ["pi", "registration-missing"],
     ]);
     assert.equal(result.runtimes[0].registration.marketplaces.every(({ targetSafe }) => !targetSafe), true);
-    assert.equal(result.runtimes[1].registration.packages.filter(({ kind }) => kind === "local").every(({ installed }) => !installed), true);
   } finally {
     rmSync(installRoot, { recursive: true, force: true });
   }
@@ -841,7 +815,7 @@ test("Codex registration under Orca repairs both the canonical and active homes"
   assert.equal(calls.findIndex(({ home }) => home === "system-default") < calls.findIndex(({ home }) => home === activeHome), true);
 });
 
-test("OpenCode and Pi registration use fixed local payloads and pinned companions", (t) => {
+test("OpenCode registration uses fixed local payloads idempotently", (t) => {
   const opencodeRoot = mkdtempSync(join(tmpdir(), "oh-my-harness-opencode-registration-"));
   const managedRoot = join(opencodeRoot, "managed");
   const harnessRoot = join(managedRoot, "packages", "oh-my-harness", "0.1.0", "digest");
@@ -880,60 +854,9 @@ test("OpenCode and Pi registration use fixed local payloads and pinned companion
     ["plugin", cePluginRoot, "--global", "--force"],
   ]);
   assert.equal(opencodeCalls.filter(([command]) => command === "plugin").length, opencodeMutations);
-
-  const sources = new Set([
-    "../../.oh-my-harness/packages/oh-my-harness/0.1.0/old-digest",
-    "git:github.com/zzanghyunmoo/oh-my-pi",
-    "git:github.com/EveryInc/compound-engineering-plugin",
-    "npm:pi-subagents",
-    "npm:pi-subagents@0.33.0",
-    "npm:pi-ask-user@0.12.0",
-    "npm:unrelated@1.0.0",
-  ]);
-  const piCalls = [];
-  const piRunner = {
-    run(_binary, args, options) {
-      assert.equal(options?.env?.TEST_MARKER, "pi-registration");
-      piCalls.push(args);
-      if (args[0] === "list") return `User packages:\n${[...sources].map((source) => `  ${source}\n    ${source.includes("old-digest") ? join(managedRoot, "packages", "oh-my-harness", "0.1.0", "old-digest") : isAbsolute(source) ? source : `/cache/${source}`}`).join("\n")}\n`;
-      if (args[0] === "remove") {
-        sources.delete(args[1]);
-        if (args[1] === join(managedRoot, "packages", "oh-my-harness", "0.1.0", "old-digest")) sources.delete("../../.oh-my-harness/packages/oh-my-harness/0.1.0/old-digest");
-      }
-      if (args[0] === "install") sources.add(args[1]);
-      return "";
-    },
-  };
-  const piInput = {
-    runtimeId: "pi",
-    binaryPath: "/managed/pi",
-    harnessPayload: { path: harnessRoot },
-    cePayload: { pluginPath: cePluginRoot },
-    managedRoot,
-    environment: { TEST_MARKER: "pi-registration" },
-    runner: piRunner,
-  };
-  const result = registerRuntimePackages(piInput);
-  const piMutations = piCalls.filter(([command]) => ["install", "remove"].includes(command)).length;
-  registerRuntimePackages(piInput);
-  assert.deepEqual(result.installed, [
-    harnessRoot,
-    cePluginRoot,
-    "npm:pi-subagents@0.34.0",
-    "npm:pi-ask-user@0.13.0",
-  ]);
-  assert.equal(sources.has("npm:pi-subagents"), false);
-  assert.equal(sources.has("npm:pi-subagents@0.33.0"), false);
-  assert.equal(sources.has("npm:pi-subagents@0.34.0"), true);
-  assert.equal(sources.has("npm:pi-ask-user@0.12.0"), false);
-  assert.equal(sources.has("npm:pi-ask-user@0.13.0"), true);
-  assert.equal(sources.has("npm:unrelated@1.0.0"), true);
-  assert.equal(sources.has("../../.oh-my-harness/packages/oh-my-harness/0.1.0/old-digest"), false);
-  assert.equal(piCalls.every((args) => args.at(-1) === "--approve"), true);
-  assert.equal(piCalls.filter(([command]) => ["install", "remove"].includes(command)).length, piMutations);
 });
 
-test("OpenCode and Pi preserve stale registrations when replacements do not converge", (t) => {
+test("OpenCode preserves stale registrations when replacements do not converge", (t) => {
   const root = mkdtempSync(join(tmpdir(), "oh-my-harness-registration-prepare-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const managedRoot = join(root, "managed");
@@ -956,25 +879,6 @@ test("OpenCode and Pi preserve stale registrations when replacements do not conv
   }), /OpenCode replacement registration did not converge/);
   assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")).plugin, [staleOpenCode]);
   assert.deepEqual(JSON.parse(readFileSync(`${configPath}.oh-my-harness.pre-fixed-install`, "utf8")).plugin, [staleOpenCode]);
-
-  const stalePiSources = new Set(["npm:pi-subagents@0.33.0", "npm:pi-ask-user@0.12.0"]);
-  const piCalls = [];
-  assert.throws(() => registerRuntimePackages({
-    runtimeId: "pi",
-    binaryPath: "/managed/pi",
-    harnessPayload: { path: harnessRoot },
-    cePayload: { pluginPath: cePluginRoot },
-    managedRoot,
-    runner: {
-      run(_binary, args) {
-        piCalls.push(args);
-        if (args[0] === "list") return `User packages:\n${[...stalePiSources].map((source) => `  ${source}\n    /cache/${source}`).join("\n")}\n`;
-        return "";
-      },
-    },
-  }), /Pi replacement registration did not converge/);
-  assert.equal(piCalls.some(([command]) => command === "remove"), false);
-  assert.deepEqual([...stalePiSources], ["npm:pi-subagents@0.33.0", "npm:pi-ask-user@0.12.0"]);
 });
 
 test("OpenCode migration removes only the known mutable predecessor and keeps a recovery copy", () => {
@@ -1019,7 +923,7 @@ test("OpenCode migration removes only the known mutable predecessor and keeps a 
   }
 });
 
-test("one plugin package shares skills and CLI tools across Claude, Codex, OpenCode, and Pi", async () => {
+test("one plugin package shares skills and CLI tools across three maintained runtimes", () => {
   const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
   const marketplace = JSON.parse(readFileSync(join(REPO_ROOT, ".agents", "plugins", "marketplace.json"), "utf8"));
   const claudeMarketplace = JSON.parse(readFileSync(join(REPO_ROOT, ".claude-plugin", "marketplace.json"), "utf8"));
@@ -1030,8 +934,8 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
   const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
   const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
-  assert.deepEqual(packageJson.pi.skills, ["./plugins/oh-my-harness/skills"]);
-  assert.ok(packageJson.pi.extensions.includes("./extensions/workspace-cli-tools"));
+  assert.equal(Object.hasOwn(packageJson, "pi"), false);
+  assert.equal(packageJson.files.some((path) => path.startsWith("extensions")), false);
   assert.equal(marketplace.name, "oh-my-harness");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/oh-my-harness");
   assert.equal(claudeMarketplace.name, "oh-my-harness");
@@ -1047,17 +951,6 @@ test("one plugin package shares skills and CLI tools across Claude, Codex, OpenC
     { runtimeId: "claude-code", profileId: "company" },
     { runtimeId: "codex", profileId: "personal" },
     { runtimeId: "opencode", profileId: "company" },
-    { runtimeId: "pi", profileId: "personal" },
   ]);
   assert.equal(existsSync(skillPath), true);
-  const module = await import(`${pathToFileURL(join(REPO_ROOT, packageJson.main)).href}?test=${Date.now()}`);
-  const config = {};
-  const hooks = await module.default();
-  await hooks.config(config);
-  assert.deepEqual(config.skills.paths, [join(REPO_ROOT, "plugins", "oh-my-harness", "skills")]);
-  assert.deepEqual(Object.keys(hooks.tool), [
-    "issue_tracker_jira_cli",
-    "wiki_confluence_cli",
-    "git_repository_gitlab_cli",
-  ]);
 });

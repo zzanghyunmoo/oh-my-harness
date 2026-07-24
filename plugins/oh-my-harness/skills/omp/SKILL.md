@@ -5,8 +5,7 @@ description: "Route oh-my-harness namespace requests. Use when the user invokes 
 
 # OMP Namespace
 
-Use this skill when the user invokes the oh-my-harness namespace. The
-`oh-my-pi:` prefix remains a v1 compatibility alias:
+Use this skill when the user invokes the oh-my-harness namespace:
 
 ```text
 omp: <skill-or-command> [arguments]
@@ -34,7 +33,6 @@ omp: <skill-or-command> [arguments]
 | `omp: lsp ...` | `lsp-navigation` |
 | `omp: ast ...` | `ast-grep` |
 | `omp: ask ...` | `ask-user` |
-| `omp: subagents ...` | `pi-subagents` |
 | `omp: web ...` | `librarian` |
 | `omp: issues ...` | `issue-tracker-cli` |
 | `omp: wiki ...` | `wiki-cli` |
@@ -46,9 +44,9 @@ Exact skill names are also valid: `omp: ce-plan ...`,
 
 ## Common command aliases
 
-Pi exposes the full command palette below. Codex and OpenCode route skill
-aliases everywhere and report Pi-only commands as unavailable instead of
-inventing an equivalent.
+Claude Code, Codex, and OpenCode expose the routes supported by their native
+plugin or tool surfaces. Report unavailable routes instead of inventing an
+equivalent.
 
 | OMP input | Route to |
 | --- | --- |
@@ -64,7 +62,7 @@ inventing an equivalent.
 | `omp: connector-tools notion` | Notion MCP tool listing |
 | `omp: github-auth` | GitHub CLI auth status |
 | `omp: gitlab-auth` | GitLab CLI auth status |
-| `omp: cli-status` | `/workspace-cli-status` (Pi) or `workspace_cli_status` (MCP hosts) |
+| `omp: cli-status` | `workspace_cli_status` |
 | `omp: profile-verify` | profile verification guidance |
 | `omp: profile-apply` | profile apply dry-run guidance |
 
@@ -83,7 +81,7 @@ status, and help while the role skills own agent tool usage.
 
 - `omh setup` resolves declared runtime profiles and previews their combined,
   deduplicated agent/plugin and external CLI installation.
-- `omh agents install --only codex,pi` selects agent runtimes and plugins.
+- `omh agents install --only claude-code,codex,opencode` selects agent runtimes and plugins.
 - `omh tools install --only github,coderabbit` selects machine-shared CLIs.
 - `omh status` and `omh doctor` are read-only.
 

@@ -1,369 +1,125 @@
 #!/usr/bin/env node
+
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = dirname(SCRIPT_DIR);
-const PROFILE_DIR = join(REPO_ROOT, "docs", "profiles");
-const LOCK_PATH = join(PROFILE_DIR, "oh-my-harness.profile-lock.json");
-const PROFILE_SCHEMA = "./profile-pack.schema.json";
-const LOCK_SCHEMA = "./profile-lock.schema.json";
-const CORE_PACKAGE_INSTALL_SPEC = "git:github.com/zzanghyunmoo/oh-my-harness";
-const SECRET_VALUE_FIELD_NAMES = new Set([
-  "value",
-  "defaultValue",
-  "localValue",
-  "secretValue",
-  "apiKey",
-  "token",
-  "password",
-]);
+const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
+const RUNTIME_IDS = Object.freeze(["claude-code", "opencode", "codex"]);
+const PROFILE_IDS = Object.freeze(["company", "personal"]);
 
-function repoPath(path) {
-  return relative(REPO_ROOT, path).replaceAll("\\", "/");
+function out(message = "") {
+  process.stdout.write(`${message}\n`);
+}
+
+function fail(message) {
+  throw new Error(message);
 }
 
 function readJson(path) {
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw new Error(`${repoPath(path)} is not valid JSON: ${error.message}`);
-  }
+  return JSON.parse(readFileSync(path, "utf8"));
 }
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, canonicalize(value[key])]),
+      Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
     );
   }
   return value;
 }
 
-function canonicalString(value) {
-  return JSON.stringify(canonicalize(value));
-}
-
-function normalizeLineEndings(value) {
-  return value.replaceAll("\r\n", "\n");
-}
-
-function sha256(value) {
-  return createHash("sha256").update(canonicalString(value)).digest("hex");
-}
-
-function unique(values) {
-  return [...new Set(values)];
-}
-
-function getSelectedExtensionPaths(profile) {
-  const selected = (profile.extensionToggles ?? [])
-    .filter((toggle) => toggle.enabledByDefault)
-    .map((toggle) => toggle.extensionPath);
-  return unique(selected.length > 0 ? selected : profile.piPackage.extensions);
-}
-
-function toPackageFilterPath(path) {
-  return path.replace(/^\.\//, "");
-}
-
-function buildCorePackageSettingsEntry(profile) {
-  return {
-    source: CORE_PACKAGE_INSTALL_SPEC,
-    extensions: getSelectedExtensionPaths(profile).map(toPackageFilterPath),
-    skills: profile.piPackage.skills.map(toPackageFilterPath),
-    prompts: profile.piPackage.prompts.map(toPackageFilterPath),
-    themes: profile.piPackage.themes.map(toPackageFilterPath),
-  };
-}
-
-function buildPackageSettingsEntries(profile) {
-  return profile.packageRefs.map((ref) =>
-    ref.installSpec === CORE_PACKAGE_INSTALL_SPEC
-      ? buildCorePackageSettingsEntry(profile)
-      : ref.installSpec,
+function loadV2Catalog() {
+  const agents = readJson(
+    join(REPOSITORY_ROOT, "harness", "catalog", "agents.json"),
   );
-}
-
-function printIndentedJson(value) {
-  for (const line of prettyJson(value).trimEnd().split("\n")) {
-    out(`  ${line}`);
-  }
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-function out(message = "") {
-  process.stdout.write(`${message}\n`);
-}
-
-function loadProfileFiles() {
-  return readdirSync(PROFILE_DIR)
-    .filter((name) => name.endsWith(".profile.json"))
-    .sort()
-    .map((name) => join(PROFILE_DIR, name));
-}
-
-function collectBlueprintEnvNames(secretBlueprint) {
-  const environment = secretBlueprint.environment ?? {};
-  return new Set([
-    ...(environment.toggles ?? []).map((entry) => entry.name),
-    ...(environment.configuration ?? []).map((entry) => entry.name),
-    ...(environment.secrets ?? []).map((entry) => entry.name),
-  ]);
-}
-
-function collectSettingsPackageSpecs(settingsExample) {
-  return new Set(settingsExample.packages ?? []);
-}
-
-function ensureNoSecretValueFields(value, path = "profile") {
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => ensureNoSecretValueFields(entry, `${path}[${index}]`));
-    return;
-  }
-
-  if (!value || typeof value !== "object") return;
-
-  for (const [key, entry] of Object.entries(value)) {
-    assert(!SECRET_VALUE_FIELD_NAMES.has(key), `${path}.${key} must not store a secret/local value`);
-    ensureNoSecretValueFields(entry, `${path}.${key}`);
-  }
-}
-
-function validateProfile(profile, context, seenIds) {
-  const { packageJson, settingsSpecs, blueprintNames } = context;
-  assert(profile.$schema === PROFILE_SCHEMA, `${profile.id ?? "unknown"}: $schema must be ${PROFILE_SCHEMA}`);
-  assert(profile.schemaVersion === "0.1.0", `${profile.id}: unsupported schemaVersion ${profile.schemaVersion}`);
-  assert(/^[a-z][a-z0-9-]*$/.test(profile.id), `${profile.id}: invalid profile id`);
-  assert(!seenIds.has(profile.id), `${profile.id}: duplicate profile id`);
-  seenIds.add(profile.id);
-  ensureNoSecretValueFields(profile, profile.id);
-
-  const packageExtensions = new Set(packageJson.pi?.extensions ?? []);
-  const packageSkills = new Set(packageJson.pi?.skills ?? []);
-  const packagePrompts = new Set(packageJson.pi?.prompts ?? []);
-  const packageThemes = new Set(packageJson.pi?.themes ?? []);
-
-  assert(Array.isArray(profile.packageRefs) && profile.packageRefs.length > 0, `${profile.id}: packageRefs must not be empty`);
-  const installSpecs = new Set();
-  for (const ref of profile.packageRefs) {
-    assert(ref.name && ref.installSpec && ref.source && typeof ref.required === "boolean" && ref.intent, `${profile.id}: packageRefs entries must include name/installSpec/source/required/intent`);
-    assert(!installSpecs.has(ref.installSpec), `${profile.id}: duplicate package installSpec ${ref.installSpec}`);
-    installSpecs.add(ref.installSpec);
-    if (ref.source === "settings-example") {
-      assert(settingsSpecs.has(ref.installSpec), `${profile.id}: ${ref.installSpec} is marked settings-example but is not in settings.example.json`);
-    }
-  }
-  assert(installSpecs.has(CORE_PACKAGE_INSTALL_SPEC), `${profile.id}: must include oh-my-harness core package ref`);
-
-  for (const extensionPath of profile.piPackage?.extensions ?? []) {
-    assert(packageExtensions.has(extensionPath), `${profile.id}: piPackage extension ${extensionPath} is not in package.json pi.extensions`);
-  }
-  for (const skillPath of profile.piPackage?.skills ?? []) {
-    assert(packageSkills.has(skillPath), `${profile.id}: piPackage skill ${skillPath} is not in package.json pi.skills`);
-  }
-  for (const promptPath of profile.piPackage?.prompts ?? []) {
-    assert(packagePrompts.has(promptPath), `${profile.id}: piPackage prompt ${promptPath} is not in package.json pi.prompts`);
-  }
-  for (const themePath of profile.piPackage?.themes ?? []) {
-    assert(packageThemes.has(themePath), `${profile.id}: piPackage theme ${themePath} is not in package.json pi.themes`);
-  }
-
-  const toggleExtensionPaths = new Set();
-  for (const toggle of profile.extensionToggles ?? []) {
-    assert(toggle.extensionId && toggle.extensionPath && typeof toggle.enabledByDefault === "boolean", `${profile.id}: invalid extension toggle entry`);
-    assert(packageExtensions.has(toggle.extensionPath), `${profile.id}: toggle extensionPath ${toggle.extensionPath} is not in package.json pi.extensions`);
-    assert(!toggleExtensionPaths.has(toggle.extensionPath), `${profile.id}: duplicate extension toggle for ${toggle.extensionPath}`);
-    toggleExtensionPaths.add(toggle.extensionPath);
-    if (toggle.toggleEnvVar) assert(blueprintNames.has(toggle.toggleEnvVar), `${profile.id}: toggle ${toggle.toggleEnvVar} is not in secret blueprint`);
-  }
-
-  for (const secretRef of profile.secretRefs ?? []) {
-    assert(blueprintNames.has(secretRef.name), `${profile.id}: secretRef ${secretRef.name} is not in docs/blueprints/oh-my-harness.secret-blueprint.json`);
-    assert(secretRef.commitPolicy !== "never-commit-oauth-state" || secretRef.kind === "oauth-state", `${profile.id}: oauth commit policy must use oauth-state kind`);
-  }
-
-  const secretRefNames = new Set((profile.secretRefs ?? []).map((entry) => entry.name));
-  for (const provider of profile.providers ?? []) {
-    assert(secretRefNames.has(provider.toggleEnvVar), `${profile.id}: provider ${provider.id} toggle ${provider.toggleEnvVar} must be listed in secretRefs`);
-    for (const refName of provider.requiredSecretRefs ?? []) {
-      assert(secretRefNames.has(refName), `${profile.id}: provider ${provider.id} requiredSecretRef ${refName} must be listed in secretRefs`);
-    }
-  }
-
-  const connectorIds = new Set();
-  const validTenants = new Set(["personal", "company"]);
-  const validCapabilities = new Set(["issue-tracker", "wiki", "git"]);
-  const validSetupModes = new Set(["full", "selective", "minimal"]);
-  const validExposureStates = new Set(["runtime-tool", "runtime-gated", "setup-only"]);
-  const validAuthOwnership = new Set(["pi-oauth", "env-fallback", "external-cli", "setup-only"]);
-  for (const connector of profile.connectors ?? []) {
-    assert(connector.id && connector.backendRef && typeof connector.enabledByDefault === "boolean" && connector.auth, `${profile.id}: invalid connector entry`);
-    assert(!connectorIds.has(connector.id), `${profile.id}: duplicate connector id ${connector.id}`);
-    connectorIds.add(connector.id);
-    if (connector.tenant) assert(validTenants.has(connector.tenant), `${profile.id}: connector ${connector.id} has invalid tenant ${connector.tenant}`);
-    if (connector.capabilitySlot) assert(validCapabilities.has(connector.capabilitySlot), `${profile.id}: connector ${connector.id} has invalid capabilitySlot ${connector.capabilitySlot}`);
-    if (connector.setupModes) {
-      assert(connector.setupModes.length > 0, `${profile.id}: connector ${connector.id} setupModes must not be empty`);
-      for (const mode of connector.setupModes) assert(validSetupModes.has(mode), `${profile.id}: connector ${connector.id} has invalid setup mode ${mode}`);
-    }
-    if (connector.exposureState) assert(validExposureStates.has(connector.exposureState), `${profile.id}: connector ${connector.id} has invalid exposureState ${connector.exposureState}`);
-    for (const owner of connector.authOwnership ?? []) assert(validAuthOwnership.has(owner), `${profile.id}: connector ${connector.id} has invalid authOwnership ${owner}`);
-  }
-
-  for (const metadataPath of Object.values(profile.metadataRefs ?? {})) {
-    assert(existsSync(join(REPO_ROOT, metadataPath)), `${profile.id}: metadataRef ${metadataPath} does not exist`);
-  }
-}
-
-function makeLock(profiles, profileFiles) {
-  return {
-    $schema: LOCK_SCHEMA,
-    schemaVersion: "0.1.0",
-    generatedBy: "node scripts/profile-pack.mjs lock --write",
-    profileFiles: profileFiles.map(repoPath),
-    profiles: profiles.map((profile, index) => ({
-      id: profile.id,
-      source: repoPath(profileFiles[index]),
-      sha256: sha256(profile),
-      packages: profile.packageRefs.map((ref) => ref.installSpec),
-      extensions: profile.piPackage.extensions,
-      enabledToggles: profile.extensionToggles
-        .filter((toggle) => toggle.enabledByDefault && toggle.toggleEnvVar)
-        .map((toggle) => `${toggle.toggleEnvVar}=true`),
-      secretRefNames: (profile.secretRefs ?? []).map((entry) => entry.name),
-      connectors: (profile.connectors ?? []).map((entry) => entry.id),
-      providers: (profile.providers ?? []).map((entry) => entry.id),
-      skills: profile.piPackage.skills,
-      prompts: profile.piPackage.prompts,
-      themes: profile.piPackage.themes,
-    })),
-  };
-}
-
-function prettyJson(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function loadAndValidateProfiles() {
-  const packageJson = readJson(join(REPO_ROOT, "package.json"));
-  const settingsExample = readJson(join(REPO_ROOT, "settings.example.json"));
-  const secretBlueprint = readJson(join(REPO_ROOT, "docs", "blueprints", "oh-my-harness.secret-blueprint.json"));
-  const context = {
-    packageJson,
-    settingsSpecs: collectSettingsPackageSpecs(settingsExample),
-    blueprintNames: collectBlueprintEnvNames(secretBlueprint),
-  };
-
-  const profileFiles = loadProfileFiles();
-  assert(profileFiles.length > 0, "No *.profile.json files found under docs/profiles");
-  const profiles = profileFiles.map(readJson);
-  const seenIds = new Set();
-  for (const profile of profiles) validateProfile(profile, context, seenIds);
-  assert(
-    profiles.some((profile) => profile.packageRefs.some((ref) => ref.installSpec === "npm:pi-clear")),
-    "At least one profile must record the npm:pi-clear manual install signal",
+  const profiles = PROFILE_IDS.map((id) =>
+    readJson(join(REPOSITORY_ROOT, "harness", "profiles", `${id}.json`)),
   );
-  return { profiles, profileFiles };
+  const actualRuntimeIds = agents.agents?.map(({ id }) => id);
+  if (
+    !Array.isArray(actualRuntimeIds)
+    || JSON.stringify([...actualRuntimeIds].sort())
+    !== JSON.stringify([...RUNTIME_IDS].sort())
+  ) {
+    fail(`v2 agent catalog must contain exactly: ${RUNTIME_IDS.join(", ")}`);
+  }
+  if (profiles.some((profile, index) => profile.id !== PROFILE_IDS[index])) {
+    fail(`v2 profiles must contain exactly: ${PROFILE_IDS.join(", ")}`);
+  }
+  const supported = new Set(RUNTIME_IDS);
+  for (const profile of profiles) {
+    if (
+      !Array.isArray(profile.selectedAgents)
+      || profile.selectedAgents.length === 0
+      || profile.selectedAgents.some((id) => !supported.has(id))
+    ) {
+      fail(`${profile.id}: selectedAgents must use the v2 agent catalog`);
+    }
+  }
+  const revision = createHash("sha256")
+    .update(JSON.stringify(canonicalize({ agents, profiles })))
+    .digest("hex");
+  return { profiles, revision };
 }
 
-function verifyLock(expectedLock) {
-  assert(existsSync(LOCK_PATH), `${repoPath(LOCK_PATH)} is missing; run npm run profile:lock`);
-  const actualText = readFileSync(LOCK_PATH, "utf8");
-  const expectedText = prettyJson(expectedLock);
-  assert(normalizeLineEndings(actualText) === expectedText, `${repoPath(LOCK_PATH)} is stale; run npm run profile:lock`);
+function profileIds(catalog) {
+  return catalog.profiles.map(({ id }) => id);
 }
 
 function commandVerify() {
-  const { profiles, profileFiles } = loadAndValidateProfiles();
-  const expectedLock = makeLock(profiles, profileFiles);
-  verifyLock(expectedLock);
-  out(`profile:verify ok — ${profiles.length} profiles and ${repoPath(LOCK_PATH)} are deterministic and secret-free.`);
+  const catalog = loadV2Catalog();
+  out(
+    `profile:verify compatibility check ok — v2 source ${catalog.revision} `
+    + `contains profiles: ${profileIds(catalog).join(", ")}.`,
+  );
 }
 
 function commandLock(args) {
-  const write = args.includes("--write");
-  const { profiles, profileFiles } = loadAndValidateProfiles();
-  const lock = makeLock(profiles, profileFiles);
-  const output = prettyJson(lock);
-  if (write) {
-    writeFileSync(LOCK_PATH, output, "utf8");
-    out(`Wrote ${repoPath(LOCK_PATH)} for ${profiles.length} profiles.`);
-    return;
+  const catalog = loadV2Catalog();
+  if (args.some((argument) => argument !== "--write")) {
+    fail(`unknown lock option: ${args.find((argument) => argument !== "--write")}`);
   }
-  process.stdout.write(output);
+  out(
+    `profile:lock is retained as a v2 compatibility command; `
+    + `the canonical source fingerprint is ${catalog.revision}.`,
+  );
+  out("No legacy profile lock was written.");
 }
 
 function commandApply(args) {
   const profileFlagIndex = args.indexOf("--profile");
-  const profileId = profileFlagIndex >= 0 ? args[profileFlagIndex + 1] : "default";
-  assert(profileId, "--profile requires a profile id");
-  const { profiles, profileFiles } = loadAndValidateProfiles();
-  verifyLock(makeLock(profiles, profileFiles));
-  const profile = profiles.find((entry) => entry.id === profileId);
-  assert(profile, `Unknown profile ${profileId}; available profiles: ${profiles.map((entry) => entry.id).join(", ")}`);
+  const unsupported = args.filter(
+    (argument, index) =>
+      argument !== "--profile"
+      && index !== profileFlagIndex + 1,
+  );
+  if (unsupported.length > 0) fail(`unknown apply option: ${unsupported[0]}`);
 
-  const packageCommands = profile.packageRefs.map((ref) => `pi install ${ref.installSpec}${ref.required ? "" : "  # optional intent"}`);
-  const selectedExtensions = getSelectedExtensionPaths(profile);
-  const settingsPackageEntries = buildPackageSettingsEntries(profile);
-  const envLines = profile.extensionToggles
-    .filter((toggle) => toggle.toggleEnvVar && toggle.requiredValue === "true")
-    .map((toggle) => `${toggle.toggleEnvVar}=true`);
-  const secretPlaceholders = (profile.secretRefs ?? [])
-    .filter((entry) => entry.commitPolicy === "never-commit-value")
-    .map((entry) => `${entry.name}=<local-${entry.kind}>`);
-  const connectorSetupLines = (profile.connectors ?? [])
-    .map((connector) => {
-      const tags = [connector.tenant, connector.capabilitySlot, connector.exposureState].filter(Boolean).join("/");
-      const modes = (connector.setupModes ?? []).join("|") || "profile-only";
-      return `${connector.id}${tags ? ` (${tags})` : ""}: modes=${modes}; auth=${connector.auth}; status=${connector.statusCommand ?? "n/a"}`;
-    });
-  const connectorLogins = (profile.connectors ?? [])
-    .map((connector) => connector.loginCommand)
-    .filter(Boolean);
-  const providerChecks = (profile.providers ?? [])
-    .map((provider) => provider.statusCommand)
-    .filter(Boolean);
+  const requestedProfile =
+    profileFlagIndex >= 0 ? args[profileFlagIndex + 1] : "personal";
+  if (!requestedProfile) fail("--profile requires a profile id");
+  const profileId = requestedProfile === "default" ? "personal" : requestedProfile;
+  const catalog = loadV2Catalog();
+  const available = profileIds(catalog);
+  if (!available.includes(profileId)) {
+    fail(`unknown v2 profile ${requestedProfile}; available profiles: ${available.join(", ")}`);
+  }
 
-  out(`oh-my-harness profile apply plan (dry-run): ${profile.id}`);
-  out();
-  out("This command is intentionally non-destructive: it does not run pi install, write .env, or start OAuth.");
-  out();
-  out("Install intent:");
-  for (const command of packageCommands) out(`  ${command}`);
-  out();
-  out("Selected oh-my-harness extensions for this profile:");
-  for (const extensionPath of selectedExtensions) out(`  ${extensionPath}`);
-  out();
-  out("Optional settings.json packages entry for selected resources:");
-  printIndentedJson({ packages: settingsPackageEntries });
-  out();
-  out("Local CWD .env entries to create manually when needed:");
-  const localEnvLines = [...envLines, ...secretPlaceholders];
-  if (localEnvLines.length === 0) out("  (none)");
-  for (const line of localEnvLines) out(`  ${line}`);
-  out();
-  out("Connector setup intent:");
-  if (connectorSetupLines.length === 0) out("  (none)");
-  for (const line of connectorSetupLines) out(`  ${line}`);
-  if (connectorSetupLines.length > 0) out("  /connector-setup full  # or selective/minimal, depending on this machine's desired connector surface");
-  out();
-  out("Connector/provider follow-up:");
-  const followUps = [...connectorLogins, ...providerChecks];
-  if (followUps.length === 0) out("  (none)");
-  for (const followUp of followUps) out(`  ${followUp}`);
+  out(`profile:apply compatibility preview — ${profileId}`);
+  out(`Run: omh setup --profile ${profileId}`);
+  out("No changes were made.");
 }
 
 function printHelp() {
-  out(`Usage: node scripts/profile-pack.mjs <command> [options]\n\nCommands:\n  verify                 Validate profile JSON and deterministic lock receipt.\n  lock [--write]         Print or write docs/profiles/oh-my-harness.profile-lock.json.\n  apply [--profile id]   Print a non-destructive apply plan (default profile: default).`);
+  out(`Usage: node scripts/profile-pack.mjs <command> [options]
+
+Compatibility commands:
+  verify                 Validate the canonical v2 catalog.
+  lock [--write]         Report the canonical catalog revision without writing a legacy lock.
+  apply [--profile id]   Preview the equivalent v2 setup command (default: personal).`);
 }
 
 try {
@@ -373,9 +129,15 @@ try {
   else if (command === "apply") commandApply(args);
   else {
     printHelp();
-    if (command !== "help" && command !== "--help" && command !== "-h") process.exitCode = 1;
+    if (command !== "help" && command !== "--help" && command !== "-h") {
+      process.exitCode = 1;
+    }
   }
 } catch (error) {
-  console.error(`profile-pack error: ${error.message}`);
+  console.error(
+    `profile-pack compatibility error: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
   process.exitCode = 1;
 }

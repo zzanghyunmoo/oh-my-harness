@@ -8,7 +8,7 @@ import { assertSecretFree, canonicalSha256 } from "./canonical.mjs";
 import { validateSchema } from "./schema.mjs";
 
 const MODULE_REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const EXPECTED_VERSIONS = Object.freeze({ "claude-code": "2.1.210", codex: "0.144.4", opencode: "1.18.0", pi: "0.80.7" });
+const EXPECTED_VERSIONS = Object.freeze({ "claude-code": "2.1.210", codex: "0.144.4", opencode: "1.18.0" });
 const PLATFORM_IDENTITIES = Object.freeze({
   "darwin-arm64-personal": { os: "darwin", architecture: "arm64" },
   "darwin-x64-release": { os: "darwin", architecture: "x64" },
@@ -137,10 +137,7 @@ export function validateDescriptor(descriptor, { schema, reviewedEvidence } = {}
     const path = location.split("::", 1)[0];
     assertSafeRepositoryPath(path, `${descriptor.id} gate source location`);
   }
-  const expectedCompanions = descriptor.id === "pi" ? [
-    { id: "pi-ask-user", version: "0.13.0", required: false, fallbackId: "plain-text-question" },
-    { id: "pi-subagents", version: "0.34.0", required: true },
-  ] : [];
+  const expectedCompanions = [];
   if (!isDeepStrictEqual(descriptor.companions, expectedCompanions)) throw new Error(`${descriptor.id} companion declaration drift`);
   validateReviewedDescriptor(descriptor, activeEvidence);
   return descriptor;
@@ -167,9 +164,9 @@ export function generateExpectedKeys(featureIds, runtimeIds, options = {}) {
   assertCanonicalSet(featureIds, "feature IDs");
   assertCanonicalSet(runtimeIds, "runtime IDs");
   if (featureIds.length !== 29) throw new Error("expected-key planning requires exactly 29 feature IDs");
-  if (!isDeepStrictEqual([...runtimeIds].sort(), EXPECTED_RUNTIME_IDS)) throw new Error("expected-key planning requires the exact four runtime IDs");
+  if (!isDeepStrictEqual([...runtimeIds].sort(), EXPECTED_RUNTIME_IDS)) throw new Error("expected-key planning requires the exact three runtime IDs");
   const keys = cartesianExpectedKeys(featureIds, runtimeIds);
-  if (keys.length !== 116) throw new Error("expected-key cardinality must be 116");
+  if (keys.length !== 87) throw new Error("expected-key cardinality must be 87");
   return keys;
 }
 
@@ -178,7 +175,7 @@ export function verifyExpectedKeys(context, suppliedKeys) {
   if (suppliedKeys.some((key) => typeof key !== "string" || !KEY_PATTERN.test(key))) throw new Error("supplied expected keys contain a malformed key");
   assertUnique(suppliedKeys, "supplied expected keys");
   const canonical = generateExpectedKeys(context.featureIds, context.runtimeIds);
-  if (suppliedKeys.length !== 116) throw new Error("expected-key cardinality must be 116");
+  if (suppliedKeys.length !== 87) throw new Error("expected-key cardinality must be 87");
   if (JSON.stringify(suppliedKeys) !== JSON.stringify(canonical)) throw new Error("supplied expected keys differ in membership or canonical order");
   return true;
 }
@@ -195,7 +192,7 @@ export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {
   const adapterEntries = readdirSync(adapterRoot, { withFileTypes: true });
   const adapterFiles = adapterEntries.map(({ name }) => name).sort();
   const expectedAdapterFiles = EXPECTED_RUNTIME_IDS.map((id) => `${id}.json`);
-  if (!isDeepStrictEqual(adapterFiles, expectedAdapterFiles) || adapterEntries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) throw new Error("adapter directory must contain exactly four regular descriptor JSON files");
+  if (!isDeepStrictEqual(adapterFiles, expectedAdapterFiles) || adapterEntries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) throw new Error("adapter directory must contain exactly three regular descriptor JSON files");
   validateSchema(profile, profileSchema);
   assertSecretFree(profile);
   const lockPath = resolveOwnedRef(root, profilePath, profile.source.lockRef, "profile lockRef");
@@ -207,7 +204,7 @@ export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {
   const featureIds = validateSourceIdentity(profile, lock, inventory);
   const runtimeIds = profile.runtimes.map(({ id }) => id);
   assertCanonicalSet(runtimeIds, "profile runtime IDs");
-  if (runtimeIds.length !== 4 || !Object.keys(EXPECTED_VERSIONS).every((id) => runtimeIds.includes(id))) throw new Error("profile runtime coverage drift");
+  if (runtimeIds.length !== 3 || !Object.keys(EXPECTED_VERSIONS).every((id) => runtimeIds.includes(id))) throw new Error("profile runtime coverage drift");
   assertUnique(profile.platforms.map(({ id }) => id), "profile platform IDs");
   const profilePlatforms = Object.fromEntries(profile.platforms.map((platform) => [platform.id, platform]));
   const runtimes = [];
@@ -231,7 +228,7 @@ export async function loadRuntimeDescriptors({ repoRoot = MODULE_REPO_ROOT } = {
     runtimes.push(deepFreeze({ id: runtime.id, version: runtime.version, descriptorPath: relative(root, descriptorPath).split(sep).join("/"), descriptor }));
   }
   const expectedKeys = generateExpectedKeys(featureIds, runtimeIds);
-  if (expectedKeys.length !== 116) throw new Error(`expected-key cardinality drift: ${expectedKeys.length}`);
+  if (expectedKeys.length !== 87) throw new Error(`expected-key cardinality drift: ${expectedKeys.length}`);
   const result = { profileId: profile.id, source: structuredClone(profile.source), featureIds: [...featureIds], runtimeIds: [...runtimeIds].sort(), runtimes, tuples, expectedKeys, canonicalSha256: canonicalSha256({ profileId: profile.id, featureIds, runtimeIds: [...runtimeIds].sort(), tuples, expectedKeys }) };
   verifyExpectedKeys(result, expectedKeys);
   return deepFreeze(result);

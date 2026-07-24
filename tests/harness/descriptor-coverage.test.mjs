@@ -6,12 +6,12 @@ import { generateExpectedKeys, loadRuntimeDescriptors, verifyExpectedKeys } from
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
-test("expected planner returns canonical 29 by 4 Cartesian keys", async () => {
+test("expected planner returns canonical 29 by 3 Cartesian keys", async () => {
   const resolved = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
-  assert.equal(resolved.expectedKeys.length, 116);
-  assert.equal(new Set(resolved.expectedKeys).size, 116);
+  assert.equal(resolved.expectedKeys.length, 87);
+  assert.equal(new Set(resolved.expectedKeys).size, 87);
   assert.deepEqual(resolved.expectedKeys, [...resolved.expectedKeys].sort());
-  assert.ok(resolved.expectedKeys.every((key) => /^[a-z][a-z0-9-]*::(?:claude-code|codex|opencode|pi)$/.test(key)));
+  assert.ok(resolved.expectedKeys.every((key) => /^[a-z][a-z0-9-]*::(?:claude-code|codex|opencode)$/.test(key)));
   assert.doesNotThrow(() => verifyExpectedKeys(resolved, resolved.expectedKeys));
 });
 
@@ -33,8 +33,8 @@ test("runtime filters, duplicates, and non-production cardinality fail closed", 
   const context = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
   assert.throws(() => generateExpectedKeys(context.featureIds, context.runtimeIds, { runtimeFilter: ["pi"] }), /filter/i);
   assert.throws(() => generateExpectedKeys([...context.featureIds, context.featureIds[0]], context.runtimeIds), /duplicate/i);
-  assert.throws(() => generateExpectedKeys(context.featureIds, [...context.runtimeIds, "pi"]), /duplicate/i);
+  assert.throws(() => generateExpectedKeys(context.featureIds, [...context.runtimeIds, "unknown"]), /exact three runtime/i);
   assert.throws(() => generateExpectedKeys(context.featureIds.slice(1), context.runtimeIds), /29 feature/i);
-  assert.throws(() => generateExpectedKeys(context.featureIds, context.runtimeIds.slice(1)), /exact four runtime/i);
+  assert.throws(() => generateExpectedKeys(context.featureIds, context.runtimeIds.slice(1)), /exact three runtime/i);
   assert.throws(() => verifyExpectedKeys({ ...context, featureIds: context.featureIds.slice(1) }, context.expectedKeys), /29 feature/i);
 });

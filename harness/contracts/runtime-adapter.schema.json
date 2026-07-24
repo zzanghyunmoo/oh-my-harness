@@ -9,7 +9,7 @@
   "properties": {
     "$schema": { "const": "../contracts/runtime-adapter.schema.json" },
     "schemaVersion": { "const": "1.1.0" },
-    "id": { "type": "string", "enum": ["claude-code", "codex", "opencode", "pi"] },
+    "id": { "type": "string", "enum": ["claude-code", "codex", "opencode"] },
     "runtime": { "$ref": "#/$defs/runtime" },
     "platforms": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "$ref": "#/$defs/platformReceipt" }, "uniqueItems": true },
     "native": { "$ref": "#/$defs/native" },

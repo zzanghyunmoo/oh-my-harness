@@ -5,7 +5,7 @@ description: "Use installed GitHub gh or GitLab glab role-scoped tools for repos
 
 # Git Repository CLI
 
-Use `git_repository_github_cli` in Pi/Codex and
+Use `git_repository_github_cli` in Codex and
 `git_repository_gitlab_cli` in Claude Code/OpenCode. Only the current runtime
 profile's tool is exposed. Pass arguments without the `gh` or `glab` executable
 name. On MCP hosts, pass the absolute coding workspace as `cwd`.

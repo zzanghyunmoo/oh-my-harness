@@ -153,35 +153,35 @@ function adapterFixture() {
 	return {
 		$schema: "../contracts/runtime-adapter.schema.json",
 		schemaVersion: "1.1.0",
-		id: "pi",
-		runtime: { name: "pi", version: "0.80.7" },
+		id: "opencode",
+		runtime: { name: "opencode", version: "1.18.0" },
 		platforms: platforms.map(({ id, os, architecture }) => ({
 			id,
 			os,
 			architecture,
-			variant: "standalone",
+			variant: os === "win32" ? "windows" : os === "darwin" ? "darwin" : "baseline-glibc",
 			executable: {
 				id: "runtime",
-				memberPath: os === "win32" ? "pi.exe" : "pi/pi",
+				memberPath: os === "win32" ? "opencode.exe" : "opencode",
 				sha256: SHA256,
 			},
 			acquisition: {
-				kind: "release-archive", provider: "github", owner: "earendil-works", repository: "pi", tag: "v0.80.7",
-				asset: { id: 1, name: `pi-${id}.tar.gz`, apiUrl: "https://api.github.com/repos/earendil-works/pi/releases/assets/1", downloadUrl: `https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-${id}.tar.gz`, sha256: "b".repeat(64) },
+				kind: "release-archive", provider: "github", owner: "anomalyco", repository: "opencode", tag: "v1.18.0",
+				asset: { id: 1, name: `opencode-${id}.zip`, apiUrl: "https://api.github.com/repos/anomalyco/opencode/releases/assets/1", downloadUrl: `https://github.com/anomalyco/opencode/releases/download/v1.18.0/opencode-${id}.zip`, sha256: "b".repeat(64) },
 			},
 		})),
 		native: {
 			install: lifecycle("install-native-payload"),
 			discovery: lifecycle("verify-native-discovery"),
-			invocation: { executableId: "runtime", tokens: [{ kind: "literal", value: "--mode" }, { kind: "literal", value: "rpc" }] },
+			invocation: { executableId: "runtime", tokens: [{ kind: "literal", value: "run" }, { kind: "literal", value: "--format" }, { kind: "literal", value: "json" }] },
 			preModelGate: {
-				kind: "input-hook", phase: "pre-model", surfaceId: "input", configurationScope: "package-extension", status: "candidate",
-				sourceRef: { owner: "earendil-works", repository: "pi", commit: "a".repeat(40), locations: ["packages/coding-agent/src/core/extensions/types.ts::InputEvent"] },
+				kind: "extension-hook", phase: "pre-model", surfaceId: "experimental.chat.system.transform", configurationScope: "project-plugin", status: "candidate",
+				sourceRef: { owner: "anomalyco", repository: "opencode", commit: "a".repeat(40), locations: ["packages/plugin/src/index.ts::Hooks[\"experimental.chat.system.transform\"]"] },
 			},
-			headlessEvidence: { protocol: "rpc", version: "1.0.0" },
+			headlessEvidence: { protocol: "json", version: "1.0.0" },
 		},
-		companions: [{ id: "pi-subagents", version: "0.34.0", required: true }],
-		optionalExtensions: [{ id: "blocking-question", changesCommonContract: false }],
+		companions: [],
+		optionalExtensions: [],
 	};
 }
 
@@ -196,7 +196,7 @@ function resultFixture({
 		cell: {
 			profileId: "personal-v1",
 			featureId: "ce-plan",
-			runtimeId: "pi",
+			runtimeId: "opencode",
 			platformId: "linux-x64-release",
 			attempt: 1,
 		},
@@ -206,11 +206,11 @@ function resultFixture({
 		terminalReason:
 			terminalStatus === "passed" ? "completed" : `terminal-${terminalStatus}`,
 		execution: {
-			runtimeVersion: "0.80.7",
+			runtimeVersion: "1.18.0",
 			os: "linux",
 			architecture: "x64",
 			executableSha256: SHA256,
-			acquisitionIdentity: "npm:pi@0.80.7",
+			acquisitionIdentity: "github:anomalyco/opencode@v1.18.0",
 		},
 		evidenceIdentity: Object.fromEntries(
 			EVIDENCE_KEYS.map((key, index) => [key, index.toString(16).repeat(64)]),
@@ -328,7 +328,6 @@ function validateProfileReferences(profile) {
 		"claude-code": "2.1.210",
 		codex: "0.144.4",
 		opencode: "1.18.0",
-		pi: "0.80.7",
 	};
 	assert.deepEqual(
 		Object.fromEntries(
@@ -336,19 +335,9 @@ function validateProfileReferences(profile) {
 		),
 		expectedVersions,
 	);
-	const pi = profile.runtimes.find(({ id }) => id === "pi");
-	for (const runtime of profile.runtimes.filter(({ id }) => id !== "pi")) {
-		assert.deepEqual(runtime.companions, [], `${runtime.id} has no v1 companion`);
+	for (const runtime of profile.runtimes) {
+		assert.deepEqual(runtime.companions, [], `${runtime.id} has no companion`);
 	}
-	assert.deepEqual(pi.companions, [
-		{
-			id: "pi-ask-user",
-			version: "0.13.0",
-			required: false,
-			fallbackId: "plain-text-question",
-		},
-		{ id: "pi-subagents", version: "0.34.0", required: true },
-	]);
 
 	const lock = readJson(
 		join(
@@ -436,7 +425,7 @@ test("feature contract separates required capabilities and complete scenario kin
 	assert.throws(() => validate(nonReadyRequiredCapability, schema), /schema const/);
 
 	const runtimeSyntax = structuredClone(fixture);
-	runtimeSyntax.command = "pi /ce-plan";
+	runtimeSyntax.command = "runtime /ce-plan";
 	assert.throws(() => validate(runtimeSyntax, schema), /additional field/);
 });
 
@@ -450,7 +439,7 @@ test("runtime adapter contract requires immutable tuples and structured native s
 	assert.throws(() => validate(missingGate, schema), /required field/);
 
 	const shellCommand = structuredClone(fixture);
-	shellCommand.native.invocation.argv = ["pi --mode json"];
+	shellCommand.native.invocation.argv = ["opencode run --format json"];
 	assert.throws(() => validate(shellCommand, schema), /additional field/);
 
 	const legacy = structuredClone(fixture);
@@ -542,7 +531,9 @@ test("personal profile rejects duplicate and unknown stable references", () => {
 	assert.throws(() => validateProfileReferences(wrongSource));
 
 	const optionalWithoutFallback = structuredClone(profile);
-	delete optionalWithoutFallback.runtimes.find(({ id }) => id === "pi").companions[0].fallbackId;
+	optionalWithoutFallback.runtimes[0].companions = [
+		{ id: "optional-companion", version: "1.0.0", required: false },
+	];
 	assert.throws(
 		() => validate(optionalWithoutFallback, loadContracts().profile),
 		/required field/,

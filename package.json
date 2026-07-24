@@ -8,8 +8,7 @@
     "cli",
     "codex-plugin",
     "omh",
-    "opencode-plugin",
-    "pi-package"
+    "opencode-plugin"
   ],
   "type": "module",
   "main": ".opencode/plugins/oh-my-harness.js",
@@ -24,11 +23,6 @@
     "bin/omh.mjs",
     "catalogs/",
     "dist/",
-    "extensions/*.ts",
-    "extensions/*/*.ts",
-    "extensions/*/package.json",
-    "extensions/*/package-lock.json",
-    "!extensions/**/*.test.ts",
     "harness/",
     "omh",
     "omh.cmd",
@@ -58,8 +52,7 @@
     "tools:install": "node scripts/tools/manage.mjs",
     "tools:doctor": "node scripts/tools/manage.mjs doctor",
     "harness:upstream:generate": "node scripts/harness/upstream.mjs generate",
-    "harness:upstream:verify": "node scripts/harness/upstream.mjs verify",
-    "test:workspace-connectors": "node -e \"require('node:fs').rmSync('.tmp/workspace-connectors-test',{recursive:true,force:true})\" && tsc -p tsconfig.workspace-connectors-tests.json && node -e \"require('node:fs').cpSync('plugins/oh-my-harness/profiles','.tmp/workspace-connectors-test/plugins/oh-my-harness/profiles',{recursive:true})\" && node --test .tmp/workspace-connectors-test/extensions/workspace-connectors/*.test.js .tmp/workspace-connectors-test/extensions/workspace-cli-tools/*.test.js .tmp/workspace-connectors-test/extensions/setup-doctor/*.test.js .tmp/workspace-connectors-test/extensions/provider-adapter-kit/*.test.js"
+    "harness:upstream:verify": "node scripts/harness/upstream.mjs verify"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.0",
@@ -70,31 +63,7 @@
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@types/node": "^25.8.0",
     "typescript": "^6.0.3"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-  "pi": {
-    "extensions": [
-      "./extensions/env-loader",
-      "./extensions/litellm-provider",
-      "./extensions/quotio-provider",
-      "./extensions/ccs-provider",
-      "./extensions/workspace-connectors",
-      "./extensions/workspace-cli-tools",
-      "./extensions/setup-doctor"
-    ],
-    "skills": [
-      "./plugins/oh-my-harness/skills"
-    ],
-    "prompts": [
-      "./prompts"
-    ],
-    "themes": [
-      "./themes"
-    ]
   }
 }

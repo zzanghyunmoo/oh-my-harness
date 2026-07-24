@@ -28,7 +28,7 @@ export interface RuntimeToolProfile {
 }
 
 export interface RuntimeToolProfileAssignment {
-  readonly runtimeId: "pi" | "claude-code" | "opencode" | "codex";
+  readonly runtimeId: "claude-code" | "opencode" | "codex";
   readonly profileId: string;
   readonly bindings: RuntimeToolProfile;
 }

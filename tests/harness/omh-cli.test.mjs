@@ -1,182 +1,85 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import {
-  formatOmhResult,
-  parseOmhArguments,
-  runOmh,
-} from "../../dist/cli/main.js";
+import { parseOmhArguments } from "../../dist/cli/main.js";
 
-const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
-test("omh exposes one preview-first command surface with friendly aliases", () => {
-  const setup = parseOmhArguments([
-    "setup", "--agents", "claude,codex", "--tools", "gh,cr", "--root", "/tmp/omh-test", "--json",
-  ]);
-  assert.deepEqual(setup.agents, ["claude-code", "codex"]);
-  assert.deepEqual(setup.tools, ["github", "coderabbit"]);
+test("legacy omh parser coverage follows the Claude-first v2 selection contract", () => {
+  const setup = parseOmhArguments(["setup", "--root", "/tmp/omh-test", "--json"]);
+  assert.deepEqual(setup.agents, ["claude-code"]);
+  assert.deepEqual(
+    setup.tools,
+    ["notion", "linear", "jira", "confluence", "github", "gitlab"],
+  );
   assert.equal(setup.apply, false);
+  assert.equal(setup.digest, undefined);
+  assert.equal(setup.profile, "personal");
   assert.equal(setup.json, true);
 
-  const agents = parseOmhArguments(["agents", "install", "--only", "pi", "--apply"]);
-  assert.deepEqual(agents.agents, ["pi"]);
-  assert.equal(agents.apply, true);
-
-  const tools = parseOmhArguments(["tools", "doctor", "--only", "ntn,glab"]);
-  assert.deepEqual(tools.tools, ["notion", "gitlab"]);
-  assert.equal(tools.apply, false);
-
-  const proxies = parseOmhArguments(["proxies", "configure", "--only", "litellm,ccs", "--apply"]);
-  assert.deepEqual(proxies.proxies, ["litellm", "ccs"]);
-  assert.equal(proxies.apply, true);
-});
-
-test("omh derives default CLI installs from the selected runtime profiles", () => {
-  assert.deepEqual(
-    parseOmhArguments(["setup"]).tools,
-    ["jira", "confluence", "gitlab", "linear", "notion", "github"],
-  );
-  assert.deepEqual(
-    parseOmhArguments(["setup", "--agents", "codex,pi"]).tools,
-    ["linear", "notion", "github"],
-  );
-  assert.deepEqual(
-    parseOmhArguments(["setup", "--agents", "claude,opencode"]).tools,
-    ["jira", "confluence", "gitlab"],
-  );
-  assert.deepEqual(
-    parseOmhArguments(["tools", "doctor"]).tools,
-    ["jira", "confluence", "gitlab", "linear", "notion", "github"],
-  );
-});
-
-test("omh rejects ambiguous or mutating status and doctor options", () => {
-  assert.throws(() => parseOmhArguments(["setup", "--agents", "codex,codex"]), /duplicate/);
-  assert.throws(() => parseOmhArguments(["setup", "--tools", "unknown"]), /must contain ids/);
-  assert.throws(() => parseOmhArguments(["status", "--apply"]), /not valid/);
-  assert.throws(() => parseOmhArguments(["tools", "doctor", "--apply"]), /not valid/);
-  assert.throws(() => parseOmhArguments(["agents", "status", "--skip-registration"]), /not valid/);
-  assert.throws(() => parseOmhArguments(["agents", "status", "--tools", "github"]), /tool selection/);
-  assert.throws(() => parseOmhArguments(["setup", "--skip-registration"]), /requires --apply/);
-  assert.deepEqual(parseOmhArguments(["setup", "--help"]), { command: "help", topic: "setup", json: false });
-  assert.deepEqual(parseOmhArguments(["agents", "install", "--help"]), { command: "help", topic: "agents", json: false });
-});
-
-test("omh setup preview is read-only and explains agent versus machine scope", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "omh-cli-preview-"));
-  const installRoot = join(parent, "managed-root");
-  try {
-    const result = await runOmh([
-      "setup", "--agents", "codex,pi", "--tools", "github,coderabbit", "--root", installRoot,
-    ], { env: { ...process.env, PATH: "" } });
-    assert.equal(result.apply, false);
-    assert.deepEqual(result.agents.runtimes.map(({ id }) => id), ["codex", "pi"]);
-    assert.deepEqual(result.tools.map(({ id }) => id), ["github", "coderabbit"]);
-    assert.equal(existsSync(installRoot), false);
-    const output = formatOmhResult(result);
-    assert.match(output, /selected per agent/);
-    assert.match(output, /codex \[personal\]: issue-tracker=linear, wiki=notion, git=github/);
-    assert.match(output, /installed once per machine/);
-    assert.match(output, /Machine proxy applications and CLIs/);
-    assert.match(output, /secret values are never printed/);
-    assert.match(output, /No changes were made/);
-  } finally {
-    rmSync(parent, { recursive: true, force: true });
-  }
-});
-
-test("omh setup preview installs only the selected runtimes' default backend union", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "omh-cli-profile-preview-"));
-  const installRoot = join(parent, "managed-root");
-  try {
-    const result = await runOmh([
-      "setup", "--agents", "claude,opencode", "--root", installRoot,
-    ], { env: { ...process.env, PATH: "" } });
-    assert.deepEqual(result.tools.map(({ id }) => id), ["jira", "confluence", "gitlab"]);
-    assert.deepEqual(result.toolProfiles, [
-      { runtimeId: "claude-code", profileId: "company", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
-      { runtimeId: "opencode", profileId: "company", "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
-    ]);
-    assert.equal(existsSync(installRoot), false);
-  } finally {
-    rmSync(parent, { recursive: true, force: true });
-  }
-});
-
-test("omh setup preflights tool managers before any agent mutation", async () => {
-  let agentApplied = false;
-  const dependencies = {
-    buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
-    buildTools: () => [{ id: "github", status: "manager-missing", installer: { command: "brew", args: [] } }],
-    applyAgentPlan: async () => { agentApplied = true; return { applied: true, runtimes: [] }; },
-    applyTools: () => [],
-  };
-  await assert.rejects(
-    runOmh(["setup", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed", "--apply"], { dependencies }),
-    /package manager missing/,
-  );
-  assert.equal(agentApplied, false);
-});
-
-test("omh setup apply composes the existing agent and tool installers", async () => {
-  const calls = [];
-  const dependencies = {
-    buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
-    buildTools: () => [{ id: "github", status: "installed", installer: { command: "brew", args: [] } }],
-    buildProxyInstall: () => [{ id: "ccs", status: "installed", installer: { command: "npm", args: [] } }],
-    buildProxyConfiguration: () => [],
-    applyAgentPlan: async (_plan, { environment, register }) => { calls.push(["agents", register, environment.TEST_MARKER]); return { applied: true, runtimes: [] }; },
-    applyTools: (_plan, { env, run }) => { calls.push(["tools", env.TEST_MARKER, typeof run]); return []; },
-    applyProxyInstall: async (_plan, { env, run }) => { calls.push(["proxies", env.TEST_MARKER, typeof run]); return []; },
-    applyProxyConfiguration: () => [],
-  };
-  const result = await runOmh([
-    "setup", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed", "--apply", "--json",
-  ], { env: { TEST_MARKER: "kept" }, dependencies });
-  assert.deepEqual(calls, [["agents", true, "kept"], ["tools", "kept", "function"], ["proxies", "kept", "function"]]);
-  assert.equal(result.apply, true);
-});
-
-test("omh status and doctor combine managed-agent and shared-tool state", async () => {
-  const dependencies = {
-    buildAgentPlan: async () => ({ installRoot: "/tmp/managed", platform: {}, runtimes: [] }),
-    inspectAgents: async (_plan, { environment }) => {
-      assert.equal(environment.TEST_MARKER, "kept");
-      return { installRoot: "/tmp/managed", runtimes: [{ id: "codex", expectedVersion: "1.0.0", state: "missing" }] };
-    },
-    buildTools: () => [{ id: "github", status: "installable", installer: { command: "brew", args: ["install", "gh"] } }],
-    buildProxyInstall: () => [
-      { id: "ccs", status: "installed", installer: { command: "npm", args: [] } },
-      { id: "litellm", status: "external", installer: { kind: "external" } },
-    ],
-    buildProxyConfiguration: () => [
-      { id: "ccs", label: "CCS", status: "configured" },
-      { id: "litellm", label: "LiteLLM", status: "awaiting-credentials", missing: ["LITELLM_BASE_URL", "LITELLM_API_KEY"] },
-    ],
-  };
-  const result = await runOmh(["doctor", "--agents", "codex", "--tools", "github", "--root", "/tmp/managed"], { env: { TEST_MARKER: "kept" }, dependencies });
-  assert.deepEqual(result.nextActions, [
-    "omh agents install --only codex --apply",
-    "omh tools install --only github --apply",
-    "LiteLLM: provide LITELLM_BASE_URL and LITELLM_API_KEY through the CWD .env or process environment, then run omh proxies configure --only litellm --apply",
-    "Authenticate each selected external CLI in a human-visible terminal; doctor does not inspect credentials.",
+  const selected = parseOmhArguments([
+    "agents",
+    "install",
+    "--only",
+    "claude,codex,opencode",
   ]);
+  assert.deepEqual(
+    selected.agents,
+    ["claude-code", "codex", "opencode"],
+  );
+  assert.throws(
+    () => parseOmhArguments(["setup", "--agents", "pi"]),
+    /must contain ids/,
+  );
+});
+
+test("legacy omh parser coverage preserves preview-first digest safety", () => {
+  const digest = "a".repeat(64);
+  assert.throws(
+    () => parseOmhArguments(["setup", "--apply"]),
+    /requires the exact --digest/,
+  );
+  const apply = parseOmhArguments([
+    "setup",
+    "--agents",
+    "claude-code",
+    "--apply",
+    "--digest",
+    digest,
+  ]);
+  assert.equal(apply.apply, true);
+  assert.equal(apply.digest, digest);
+  assert.throws(
+    () => parseOmhArguments(["status", "--apply"]),
+    /unknown option/,
+  );
 });
 
 test("root launcher and package bin metadata expose omh", () => {
   const launched = process.platform === "win32"
-    ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "omh.cmd --version"], { cwd: REPO_ROOT, encoding: "utf8" })
-    : spawnSync(join(REPO_ROOT, "omh"), ["--version"], { cwd: REPO_ROOT, encoding: "utf8" });
+    ? spawnSync(
+        process.env.ComSpec ?? "cmd.exe",
+        ["/d", "/s", "/c", "omh.cmd --version"],
+        { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+      )
+    : spawnSync(
+        join(REPOSITORY_ROOT, "omh"),
+        ["--version"],
+        { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+      );
   assert.equal(launched.status, 0, launched.stderr);
   assert.match(launched.stdout, /^omh 0\.2\.0/m);
-  if (process.platform !== "win32") assert.notEqual(statSync(join(REPO_ROOT, "omh")).mode & 0o111, 0);
-  assert.equal(existsSync(join(REPO_ROOT, "omh.cmd")), true);
-  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+  if (process.platform !== "win32") {
+    assert.notEqual(statSync(join(REPOSITORY_ROOT, "omh")).mode & 0o111, 0);
+  }
+  assert.equal(existsSync(join(REPOSITORY_ROOT, "omh.cmd")), true);
+  const manifest = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, "package.json"), "utf8"),
+  );
   assert.equal(manifest.bin.omh, "./omh");
   assert.equal(manifest.bin["oh-my-harness"], "./omh");
 });

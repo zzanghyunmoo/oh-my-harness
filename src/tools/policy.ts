@@ -450,7 +450,7 @@ export function toolPolicyStatus(
 // Legacy preview/install compatibility. Runtime registration must use
 // loadToolPolicySnapshot and never these static assignments.
 export interface RuntimeToolProfileAssignment {
-  readonly runtimeId: "pi" | AgentId;
+  readonly runtimeId: AgentId;
   readonly profileId: string;
   readonly bindings: RuntimeToolProfile;
 }
@@ -468,11 +468,10 @@ export interface RuntimeToolProfileManifest {
   }[];
 }
 
-const LEGACY_RUNTIME_IDS = Object.freeze([
+const RUNTIME_IDS = Object.freeze([
   "claude-code",
   "codex",
   "opencode",
-  "pi",
 ] as const);
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -519,10 +518,10 @@ export function validateRuntimeToolProfileManifest(
   }
   if (
     !Array.isArray(manifest.runtimes)
-    || manifest.runtimes.length !== LEGACY_RUNTIME_IDS.length
+    || manifest.runtimes.length !== RUNTIME_IDS.length
   ) {
     throw new Error(
-      `runtime tool assignments must contain exactly ${LEGACY_RUNTIME_IDS.length} entries`,
+      `runtime tool assignments must contain exactly ${RUNTIME_IDS.length} entries`,
     );
   }
 
@@ -571,8 +570,8 @@ export function validateRuntimeToolProfileManifest(
   const runtimes = manifest.runtimes.map((entry, index) => {
     const assignment = record(entry, `runtimes[${index}]`);
     exactKeys(assignment, ["runtimeId", "profileId"], `runtimes[${index}]`);
-    if (!LEGACY_RUNTIME_IDS.includes(
-      assignment.runtimeId as (typeof LEGACY_RUNTIME_IDS)[number],
+    if (!RUNTIME_IDS.includes(
+      assignment.runtimeId as (typeof RUNTIME_IDS)[number],
     )) {
       throw new Error(
         `unknown runtime tool assignment: ${String(assignment.runtimeId)}`,
@@ -599,7 +598,7 @@ export function validateRuntimeToolProfileManifest(
       profileId: assignment.profileId,
     });
   });
-  if (LEGACY_RUNTIME_IDS.some((runtimeId) => !runtimeIds.has(runtimeId))) {
+  if (RUNTIME_IDS.some((runtimeId) => !runtimeIds.has(runtimeId))) {
     throw new Error(
       "runtime tool assignments do not cover every supported runtime",
     );

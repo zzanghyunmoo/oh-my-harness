@@ -5,7 +5,7 @@ description: "Use installed role-scoped CLI tools to inspect or update Jira, Lin
 
 # Issue Tracker CLI
 
-Use the one backend exposed by the current runtime profile. Pi/Codex expose
+Use the one backend exposed by the current runtime profile. Codex exposes
 Linear; Claude Code/OpenCode expose Jira. Do not try to call a hidden catalog
 tool or silently switch backend.
 
@@ -18,7 +18,7 @@ tool or silently switch backend.
 
 Use list, query, search, and view operations first. Pass arguments as an array
 without the executable name. On MCP hosts, also pass the absolute coding
-workspace as `cwd`; Pi and OpenCode provide it automatically.
+workspace as `cwd`; OpenCode provides it automatically.
 
 Remote mutations require exact user intent. Set `confirmedWrite=true` only when
 the user explicitly requested or confirmed the particular create, update,
@@ -27,4 +27,4 @@ the CLI outside the tool and never put a token, password, cookie, or auth header
 in tool arguments.
 
 If the selected backend executable is unavailable, use `workspace_cli_status`
-(or Pi's `/workspace-cli-status`) and follow its install guidance.
+and follow its install guidance.

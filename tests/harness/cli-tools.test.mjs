@@ -129,21 +129,18 @@ test("runtime profiles bind one requested backend to each issue, wiki, and git r
     { runtimeId: "claude-code", profileId: "company" },
     { runtimeId: "codex", profileId: "personal" },
     { runtimeId: "opencode", profileId: "company" },
-    { runtimeId: "pi", profileId: "personal" },
   ]);
   assert.deepEqual(RUNTIME_TOOL_PROFILES, {
-    pi: { "issue-tracker": "linear", wiki: "notion", git: "github" },
     codex: { "issue-tracker": "linear", wiki: "notion", git: "github" },
     "claude-code": { "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
     opencode: { "issue-tracker": "jira", wiki: "confluence", git: "gitlab" },
   });
   const personal = ["issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli"];
   const company = ["issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli"];
-  assert.deepEqual(cliToolDefinitionsForRuntime("pi").map(({ name }) => name), personal);
   assert.deepEqual(cliToolDefinitionsForRuntime("codex").map(({ name }) => name), personal);
   assert.deepEqual(cliToolDefinitionsForRuntime("claude-code").map(({ name }) => name), company);
   assert.deepEqual(cliToolDefinitionsForRuntime("opencode").map(({ name }) => name), company);
-  assert.deepEqual(cliToolServiceIdsForRuntimes(["codex", "pi"]), ["linear", "notion", "github"]);
+  assert.deepEqual(cliToolServiceIdsForRuntimes(["codex"]), ["linear", "notion", "github"]);
   assert.deepEqual(cliToolServiceIdsForRuntimes(["claude-code", "opencode"]), ["jira", "confluence", "gitlab"]);
   assert.deepEqual(getRuntimeToolProfileAssignment("codex"), {
     runtimeId: "codex",
@@ -155,7 +152,7 @@ test("runtime profiles bind one requested backend to each issue, wiki, and git r
 
 test("runtime tool profile manifest validation fails closed on drift", () => {
   const duplicateRuntime = structuredClone(RUNTIME_TOOL_PROFILE_MANIFEST);
-  duplicateRuntime.runtimes[1].runtimeId = "pi";
+  duplicateRuntime.runtimes[1].runtimeId = "claude-code";
   assert.throws(() => validateRuntimeToolProfileManifest(duplicateRuntime), /duplicate runtime tool assignment/);
 
   const unknownBackend = structuredClone(RUNTIME_TOOL_PROFILE_MANIFEST);

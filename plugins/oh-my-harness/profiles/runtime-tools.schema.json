@@ -16,8 +16,8 @@
     },
     "runtimes": {
       "type": "array",
-      "minItems": 4,
-      "maxItems": 4,
+      "minItems": 3,
+      "maxItems": 3,
       "items": { "$ref": "#/$defs/runtime" }
     }
   },
@@ -47,7 +47,7 @@
       "additionalProperties": false,
       "required": ["runtimeId", "profileId"],
       "properties": {
-        "runtimeId": { "enum": ["claude-code", "codex", "opencode", "pi"] },
+        "runtimeId": { "enum": ["claude-code", "codex", "opencode"] },
         "profileId": { "$ref": "#/$defs/stableId" }
       }
     }

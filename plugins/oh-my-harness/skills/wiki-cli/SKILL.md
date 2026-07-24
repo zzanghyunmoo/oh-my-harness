@@ -5,7 +5,7 @@ description: "Use installed role-scoped CLI tools to find, read, or update Confl
 
 # Wiki CLI
 
-Use the one backend exposed by the current runtime profile: Pi/Codex expose
+Use the one backend exposed by the current runtime profile: Codex exposes
 Notion, while Claude Code/OpenCode expose Confluence. The remaining entries are
 catalog references and must not be called when hidden by the adapter.
 

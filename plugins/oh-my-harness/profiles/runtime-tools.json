@@ -31,10 +31,6 @@
     {
       "runtimeId": "opencode",
       "profileId": "company"
-    },
-    {
-      "runtimeId": "pi",
-      "profileId": "personal"
     }
   ]
 }

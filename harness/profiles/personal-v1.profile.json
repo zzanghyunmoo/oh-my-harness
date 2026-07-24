@@ -76,25 +76,6 @@
       "descriptorRef": "../adapters/opencode.json",
       "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
       "companions": []
-    },
-    {
-      "id": "pi",
-      "version": "0.80.7",
-      "descriptorRef": "../adapters/pi.json",
-      "platformRefs": ["darwin-arm64-personal", "darwin-x64-release", "linux-x64-release", "win32-arm64-release", "win32-x64-release"],
-      "companions": [
-        {
-          "id": "pi-ask-user",
-          "version": "0.13.0",
-          "required": false,
-          "fallbackId": "plain-text-question"
-        },
-        {
-          "id": "pi-subagents",
-          "version": "0.34.0",
-          "required": true
-        }
-      ]
     }
   ],
   "tiers": {

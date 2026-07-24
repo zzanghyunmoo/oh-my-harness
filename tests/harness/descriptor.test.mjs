@@ -76,11 +76,11 @@ async function withZip(name, body, callback) {
   }
 }
 
-test("runtime descriptors cover macOS, Linux, and Windows with twenty reviewed tuples", async () => {
-  assert.deepEqual(readdirSync(ADAPTER_ROOT).sort(), ["claude-code.json", "codex.json", "opencode.json", "pi.json"]);
+test("runtime descriptors cover macOS, Linux, and Windows with fifteen reviewed tuples", async () => {
+  assert.deepEqual(readdirSync(ADAPTER_ROOT).sort(), ["claude-code.json", "codex.json", "opencode.json"]);
   const resolved = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
-  assert.deepEqual(resolved.runtimes.map(({ id }) => id), ["claude-code", "codex", "opencode", "pi"]);
-  assert.equal(resolved.tuples.length, 20);
+  assert.deepEqual(resolved.runtimes.map(({ id }) => id), ["claude-code", "codex", "opencode"]);
+  assert.equal(resolved.tuples.length, 15);
   for (const runtime of resolved.runtimes) {
     assert.equal(existsSync(join(ADAPTER_ROOT, `${runtime.id}.json`)), true);
     assert.doesNotThrow(() => validateDescriptor(runtime.descriptor));
@@ -89,17 +89,17 @@ test("runtime descriptors cover macOS, Linux, and Windows with twenty reviewed t
 
 test("descriptor semantic validation rejects declaration drift and hostile strings", async () => {
   const { runtimes } = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
-  const baseline = runtimes.find(({ id }) => id === "pi").descriptor;
+  const baseline = runtimes.find(({ id }) => id === "opencode").descriptor;
   const mutations = [
-    ["version", (value) => { value.runtime.version = "0.80.8"; }],
+    ["version", (value) => { value.runtime.version = "1.18.1"; }],
     ["platform", (value) => { value.platforms[0].architecture = "x64"; }],
     ["valid executable digest drift", (value) => { value.platforms[0].executable.sha256 = "f".repeat(64); }],
     ["valid archive digest drift", (value) => { value.platforms[0].acquisition.asset.sha256 = "e".repeat(64); }],
-    ["valid member drift", (value) => { value.platforms[0].executable.memberPath = "pi/other"; }],
+    ["valid member drift", (value) => { value.platforms[0].executable.memberPath = "opencode-other"; }],
     ["valid variant drift", (value) => { value.platforms[0].variant = "other"; }],
     ["valid asset identity drift", (value) => {
       value.platforms[0].acquisition.asset.id += 1;
-      value.platforms[0].acquisition.asset.apiUrl = `https://api.github.com/repos/earendil-works/pi/releases/assets/${value.platforms[0].acquisition.asset.id}`;
+      value.platforms[0].acquisition.asset.apiUrl = `https://api.github.com/repos/anomalyco/opencode/releases/assets/${value.platforms[0].acquisition.asset.id}`;
     }],
     ["release", (value) => { value.platforms[0].acquisition.tag = "main"; }],
     ["valid invocation drift", (value) => { value.native.invocation.tokens[1].value = "json"; }],
@@ -108,7 +108,7 @@ test("descriptor semantic validation rejects declaration drift and hostile strin
     ["gate", (value) => { value.native.preModelGate.status = "passed"; }],
     ["valid gate source drift", (value) => { value.native.preModelGate.sourceRef.commit = "f".repeat(40); }],
     ["valid surface drift", (value) => { value.native.preModelGate.surfaceId = "before-input"; }],
-    ["companion", (value) => { value.companions = []; }],
+    ["companion", (value) => { value.companions = [{ id: "unexpected", version: "1.0.0", required: true }]; }],
     ["skill body", (value) => { value.skillBody = "copied"; }],
   ];
   for (const [label, mutate] of mutations) {
@@ -120,19 +120,19 @@ test("descriptor semantic validation rejects declaration drift and hostile strin
 
 test("offline tar derivation is deterministic and rejects unsafe members", async () => {
   const executable = Buffer.from("fixture executable\n");
-  await withArchive([{ header: { name: "bin/pi", mode: 0o755, type: "file" }, body: executable }], async (path) => {
-    const first = await inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" });
-    const second = await inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" });
+  await withArchive([{ header: { name: "bin/codex", mode: 0o755, type: "file" }, body: executable }], async (path) => {
+    const first = await inspectArchive(path, { format: "tar.gz", expectedBasename: "codex" });
+    const second = await inspectArchive(path, { format: "tar.gz", expectedBasename: "codex" });
     assert.deepEqual(second, first);
-    assert.equal(first.memberPath, "bin/pi");
+    assert.equal(first.memberPath, "bin/codex");
     assert.match(first.executableSha256, /^[0-9a-f]{64}$/);
-    const destinationPath = join(dirname(path), "extracted-pi");
+    const destinationPath = join(dirname(path), "extracted-codex");
     const extracted = await extractArchiveExecutable(path, {
       destinationPath,
       expectedArchiveSha256: first.archiveSha256,
-      expectedBasename: "pi",
+      expectedBasename: "codex",
       expectedExecutableSha256: first.executableSha256,
-      expectedMemberPath: "bin/pi",
+      expectedMemberPath: "bin/codex",
       format: "tar.gz",
     });
     assert.equal(readFileSync(destinationPath, "utf8"), executable.toString("utf8"));
@@ -140,25 +140,25 @@ test("offline tar derivation is deterministic and rejects unsafe members", async
   });
 
   for (const header of [
-    { name: "../pi", mode: 0o755, type: "file" },
-    { name: "dir/../pi", mode: 0o755, type: "file" },
-    { name: "/pi", mode: 0o755, type: "file" },
-    { name: "pi", mode: 0o777, type: "file" },
-    { name: "pi", mode: 0o755, type: "symlink", linkname: "other" },
-    { name: "pi", mode: 0o755, type: "link", linkname: "other" },
-    { name: "pi", mode: 0o755, type: "character-device" },
-    { name: "pi", mode: 0o755, type: "fifo" },
+    { name: "../codex", mode: 0o755, type: "file" },
+    { name: "dir/../codex", mode: 0o755, type: "file" },
+    { name: "/codex", mode: 0o755, type: "file" },
+    { name: "codex", mode: 0o777, type: "file" },
+    { name: "codex", mode: 0o755, type: "symlink", linkname: "other" },
+    { name: "codex", mode: 0o755, type: "link", linkname: "other" },
+    { name: "codex", mode: 0o755, type: "character-device" },
+    { name: "codex", mode: 0o755, type: "fifo" },
   ]) {
-    await withArchive([{ header }], async (path) => assert.rejects(inspectArchive(path, { format: "tar.gz", expectedBasename: "pi" })));
+    await withArchive([{ header }], async (path) => assert.rejects(inspectArchive(path, { format: "tar.gz", expectedBasename: "codex" })));
   }
 
   const bomb = Buffer.alloc(128 * 1024, 0x41);
   await withArchive([
-    { header: { name: "bin/pi", mode: 0o755, type: "file" }, body: executable },
+    { header: { name: "bin/codex", mode: 0o755, type: "file" }, body: executable },
     { header: { name: "share/padding", mode: 0o644, type: "file" }, body: bomb },
   ], async (path) => assert.rejects(inspectArchive(path, {
     format: "tar.gz",
-    expectedBasename: "pi",
+    expectedBasename: "codex",
     limits: { compressedBytes: 1024 * 1024, entries: 8, uncompressedBytes: 1024 * 1024, selectedBytes: 1024, ratio: 2 },
   }), /ratio/i));
 });
@@ -189,7 +189,7 @@ test("loader rejects extra adapter files and duplicate profile platforms", async
   try {
     cpSync(join(REPO_ROOT, "harness"), join(root, "harness"), { recursive: true });
     writeFileSync(join(root, "harness", "adapters", "extra.json"), "{}\n");
-    await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /exactly four regular descriptor/i);
+    await assert.rejects(loadRuntimeDescriptors({ repoRoot: root }), /exactly three regular descriptor/i);
     rmSync(join(root, "harness", "adapters", "extra.json"));
     const profilePath = join(root, "harness", "profiles", "personal-v1.profile.json");
     const profile = JSON.parse(readFileSync(profilePath, "utf8"));
@@ -211,8 +211,8 @@ test("loader rejects extra adapter files and duplicate profile platforms", async
 });
 
 test("release downloads require a digest and stop on a bounded timeout", async () => {
-  const identity = { owner: "earendil-works", repository: "pi", tag: "v0.80.7", assetName: "pi-linux-x64.tar.gz" };
-  const url = "https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz";
+  const identity = { owner: "openai", repository: "codex", tag: "rust-v0.144.4", assetName: "codex-linux-x64.tar.gz" };
+  const url = "https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-linux-x64.tar.gz";
   await assert.rejects(downloadReleaseArchive(url, identity), /expected SHA-256/i);
   await assert.rejects(downloadReleaseArchive(url, identity, { expectedSha256: "0".repeat(64), timeoutMs: 0 }), /timeout/i);
 
@@ -237,22 +237,22 @@ test("release downloads require a digest and stop on a bounded timeout", async (
 });
 
 test("release URL policy rejects mutable or unreviewed identities", () => {
-  const identity = { owner: "earendil-works", repository: "pi", tag: "v0.80.7", assetName: "pi-linux-x64.tar.gz" };
-  assert.doesNotThrow(() => validateReleaseUrl("https://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz", identity));
-  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=opaque", identity, { redirected: true }));
-  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=opaque&jwt=opaque&response-content-disposition=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&response-content-type=application%2Foctet-stream", identity, { redirected: true }));
+  const identity = { owner: "openai", repository: "codex", tag: "rust-v0.144.4", assetName: "codex-linux-x64.tar.gz" };
+  assert.doesNotThrow(() => validateReleaseUrl("https://github.com/openai/codex/releases/download/rust-v0.144.4/codex-linux-x64.tar.gz", identity));
+  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz&sig=opaque", identity, { redirected: true }));
+  assert.doesNotThrow(() => validateReleaseUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz&sig=opaque&jwt=opaque&response-content-disposition=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz&response-content-type=application%2Foctet-stream", identity, { redirected: true }));
   for (const url of [
-    "http://github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
-    "https://evil.example/pi-linux-x64.tar.gz",
-    "https://user@github.com/earendil-works/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
-    "https://github.com/earendil-works/pi/releases/latest/download/pi-linux-x64.tar.gz",
-    "file:///tmp/pi.tar.gz",
+    "http://github.com/openai/codex/releases/download/rust-v0.144.4/codex-linux-x64.tar.gz",
+    "https://evil.example/codex-linux-x64.tar.gz",
+    "https://user@github.com/openai/codex/releases/download/rust-v0.144.4/codex-linux-x64.tar.gz",
+    "https://github.com/openai/codex/releases/latest/download/codex-linux-x64.tar.gz",
+    "file:///tmp/codex.tar.gz",
   ]) assert.throws(() => validateReleaseUrl(url, identity));
   for (const url of [
-    "https://github.com/other/pi/releases/download/v0.80.7/pi-linux-x64.tar.gz",
-    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?authorization=secret&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz",
-    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz",
-    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dother-pi-linux-x64.tar.gz&sig=opaque",
-    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dpi-linux-x64.tar.gz&sig=one&sig=two",
+    "https://github.com/other/codex/releases/download/rust-v0.144.4/codex-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?authorization=secret&rscd=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dother-codex-linux-x64.tar.gz&sig=opaque",
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/opaque?sp=r&rscd=attachment%3B%20filename%3Dcodex-linux-x64.tar.gz&sig=one&sig=two",
   ]) assert.throws(() => validateReleaseUrl(url, identity, { redirected: true }));
 });
