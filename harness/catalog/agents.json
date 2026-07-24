@@ -1,0 +1,52 @@
+{
+  "$schema": "../contracts/capability-catalog.schema.json#/$defs/agentCatalog",
+  "schemaVersion": "2.0.0",
+  "kind": "agent-catalog",
+  "agents": [
+    {
+      "id": "claude-code",
+      "displayName": "Claude Code",
+      "command": "claude",
+      "version": "2.1.210",
+      "versionPolicy": "exact-reviewed-version",
+      "sourceId": "agent-claude-code",
+      "supportedPlatforms": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-arm64",
+        "win32-x64"
+      ]
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "command": "opencode",
+      "version": "1.18.0",
+      "versionPolicy": "exact-reviewed-version",
+      "sourceId": "agent-opencode",
+      "supportedPlatforms": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-arm64",
+        "win32-x64"
+      ]
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "command": "codex",
+      "version": "0.144.4",
+      "versionPolicy": "exact-reviewed-version",
+      "sourceId": "agent-codex",
+      "supportedPlatforms": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-x64",
+        "win32-arm64",
+        "win32-x64"
+      ]
+    }
+  ]
+}

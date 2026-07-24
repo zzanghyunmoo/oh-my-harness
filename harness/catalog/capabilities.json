@@ -1,0 +1,552 @@
+{
+  "$schema": "../contracts/capability-catalog.schema.json",
+  "schemaVersion": "2.0.0",
+  "kind": "capability-catalog",
+  "capabilities": [
+    {
+      "id": "lsp-jdtls",
+      "displayName": "Java LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "Java source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware Java navigation, symbols, references, and diagnostics.",
+        "inputs": ["Java workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the jdtls executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["jdtls"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-kotlin",
+      "displayName": "Kotlin LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "Kotlin source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware Kotlin navigation, symbols, references, and diagnostics.",
+        "inputs": ["Kotlin workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the Kotlin language-server executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["kotlin-language-server"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-csharp",
+      "displayName": "C# LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "C# source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware C# navigation, symbols, references, and diagnostics.",
+        "inputs": ["C# workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and a declared C# language-server executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["csharp-ls", "omnisharp"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-clangd",
+      "displayName": "C and C++ LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "C or C++ source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware C and C++ navigation, symbols, references, and diagnostics.",
+        "inputs": ["C or C++ workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the clangd executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["clangd"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-gopls",
+      "displayName": "Go LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "Go source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware Go navigation, symbols, references, and diagnostics.",
+        "inputs": ["Go workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the gopls executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["gopls"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-pyright",
+      "displayName": "Python LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "Python source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware Python navigation, symbols, references, and diagnostics.",
+        "inputs": ["Python workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the Pyright language-server executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["pyright-langserver"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "lsp-typescript",
+      "displayName": "TypeScript LSP",
+      "kind": "lsp",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "TypeScript or JavaScript source navigation or diagnostics are requested.",
+        "intent": "Provide language-aware TypeScript and JavaScript navigation, symbols, references, and diagnostics.",
+        "inputs": ["TypeScript or JavaScript workspace and source files"],
+        "outputs": ["Language-server navigation and diagnostics"],
+        "safety": "Do not report readiness unless both agent configuration and the TypeScript language-server executable are verified."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-plugin",
+          "sourceId": "anthropic-official-plugins"
+        }
+      },
+      "languageServer": {
+        "executables": ["typescript-language-server"],
+        "supportedPlatforms": ["darwin", "linux", "win32"],
+        "configurationRequired": true
+      }
+    },
+    {
+      "id": "goal",
+      "displayName": "Goal",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "The operator explicitly starts or manages a durable goal.",
+        "intent": "Track a concrete objective until it is achieved or genuinely blocked.",
+        "inputs": ["Objective and optional explicit budget"],
+        "outputs": ["Goal state and completion evidence"],
+        "safety": "Never infer a durable goal from an ordinary task or mark incomplete work complete."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "deep-research",
+      "displayName": "Deep Research",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "The operator requests a sourced, multi-step research answer.",
+        "intent": "Gather authoritative evidence and synthesize a traceable answer.",
+        "inputs": ["Research question and constraints"],
+        "outputs": ["Evidence-backed synthesis with source attribution"],
+        "safety": "Distinguish source facts from inference and avoid unsupported claims."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "ideation",
+      "displayName": "Ideation",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "The operator asks for grounded options or improvement ideas.",
+        "intent": "Generate and compare project-relevant directions before selection.",
+        "inputs": ["Problem context and constraints"],
+        "outputs": ["Ranked ideas with tradeoffs"],
+        "safety": "Keep speculative ideas labeled and grounded in available project evidence."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "brainstorm",
+      "displayName": "Brainstorm",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "A product or implementation idea needs requirements framing.",
+        "intent": "Turn an ambiguous idea into a bounded product contract.",
+        "inputs": ["Idea, users, constraints, and known decisions"],
+        "outputs": ["Requirements, flows, acceptance examples, and scope boundaries"],
+        "safety": "Do not silently convert undecided product choices into implementation facts."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "displayName": "Plan",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "An accepted product contract needs implementation planning.",
+        "intent": "Produce dependency-ordered implementation units and verification evidence.",
+        "inputs": ["Product contract and repository context"],
+        "outputs": ["Implementation-ready plan"],
+        "safety": "Preserve accepted product scope and surface unresolved implementation blockers."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "code-review",
+      "displayName": "Code Review",
+      "kind": "workflow",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "A change set requires correctness and regression review.",
+        "intent": "Report actionable bugs, regressions, and missing safety coverage.",
+        "inputs": ["Diff, repository context, and relevant plan"],
+        "outputs": ["Prioritized findings with evidence"],
+        "safety": "Review is read-only unless the operator separately authorizes fixes."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        }
+      }
+    },
+    {
+      "id": "doc-review",
+      "displayName": "Document Review",
+      "kind": "workflow",
+      "sourceId": "oh-my-harness-managed",
+      "semanticContract": {
+        "trigger": "A requirements or planning document needs structured review.",
+        "intent": "Identify concrete blockers, contradictions, and missing decisions.",
+        "inputs": ["Document and reviewer persona"],
+        "outputs": ["Prioritized document findings"],
+        "safety": "Do not relitigate accepted scope or report stylistic preferences as blockers."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "oh-my-harness-managed"
+        }
+      }
+    },
+    {
+      "id": "skill-creator",
+      "displayName": "Skill Creator",
+      "kind": "workflow",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "The operator asks to create or update an agent skill.",
+        "intent": "Create a focused, reusable skill with clear triggers and workflow.",
+        "inputs": ["Skill purpose, constraints, and target runtime"],
+        "outputs": ["Validated skill package"],
+        "safety": "Keep triggers narrow and do not embed credentials or unreviewed executable behavior."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        }
+      }
+    },
+    {
+      "id": "ralph-loop",
+      "displayName": "Ralph Loop",
+      "kind": "workflow",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "A bounded autonomous iteration loop is explicitly requested.",
+        "intent": "Repeat implementation and verification until a declared condition is met.",
+        "inputs": ["Objective, stop conditions, and verification command"],
+        "outputs": ["Iteration results and terminal evidence"],
+        "safety": "Honor explicit stop conditions and never broaden mutation authority."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        }
+      }
+    },
+    {
+      "id": "security-guidance",
+      "displayName": "Security Guidance",
+      "kind": "workflow",
+      "sourceId": "anthropic-official-plugins",
+      "semanticContract": {
+        "trigger": "A change needs security-specific implementation or review guidance.",
+        "intent": "Identify concrete security boundaries, threats, and mitigations.",
+        "inputs": ["Code, architecture, or proposed change"],
+        "outputs": ["Prioritized security guidance"],
+        "safety": "Avoid credential exposure and distinguish exploitable findings from theoretical concerns."
+      },
+      "runtimeReadiness": {
+        "claude-code": {
+          "state": "pending",
+          "packaging": "official-plugin",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "opencode": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        },
+        "codex": {
+          "state": "pending",
+          "packaging": "native-skill",
+          "sourceId": "anthropic-official-plugins"
+        }
+      }
+    }
+  ]
+}

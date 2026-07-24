@@ -1,0 +1,14 @@
+{
+  "$schema": "../contracts/release-catalog.schema.json#/$defs/channelPolicy",
+  "schemaVersion": "2.0.0",
+  "kind": "release-channel-policy",
+  "id": "stable",
+  "audience": "oh-my-harness-v2",
+  "bootstrapTrust": {
+    "kind": "embedded",
+    "sourceId": "oh-my-harness-managed"
+  },
+  "automaticAdditions": ["managed-skill"],
+  "requireExactDigest": true,
+  "allowMutableReferences": false
+}

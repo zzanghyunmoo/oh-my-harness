@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-harness.dev/contracts/v2/capability-catalog.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "kind", "capabilities"],
+  "properties": {
+    "$schema": {
+      "const": "../contracts/capability-catalog.schema.json"
+    },
+    "schemaVersion": {
+      "const": "2.0.0"
+    },
+    "kind": {
+      "const": "capability-catalog"
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "agentId": {
+      "enum": ["claude-code", "opencode", "codex"]
+    },
+    "platformId": {
+      "enum": [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-x64",
+        "win32-arm64",
+        "win32-x64"
+      ]
+    },
+    "operatingSystem": {
+      "enum": ["darwin", "linux", "win32"]
+    },
+    "agentCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "schemaVersion", "kind", "agents"],
+      "properties": {
+        "$schema": {
+          "const": "../contracts/capability-catalog.schema.json#/$defs/agentCatalog"
+        },
+        "schemaVersion": {
+          "const": "2.0.0"
+        },
+        "kind": {
+          "const": "agent-catalog"
+        },
+        "agents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/agent"
+          }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "command",
+        "version",
+        "versionPolicy",
+        "sourceId",
+        "supportedPlatforms"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/agentId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "versionPolicy": {
+          "const": "exact-reviewed-version"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "supportedPlatforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/platformId"
+          }
+        }
+      }
+    },
+    "packageCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "schemaVersion", "kind", "packages"],
+      "properties": {
+        "$schema": {
+          "const": "../contracts/capability-catalog.schema.json#/$defs/packageCatalog"
+        },
+        "schemaVersion": {
+          "const": "2.0.0"
+        },
+        "kind": {
+          "const": "package-catalog"
+        },
+        "packages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/package"
+          }
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "description",
+        "executables",
+        "supportedPlatforms",
+        "installationSources",
+        "authentication",
+        "versionPolicy",
+        "profileImportance"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executables": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "supportedPlatforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/operatingSystem"
+          }
+        },
+        "installationSources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/packageInstallationSource"
+          }
+        },
+        "authentication": {
+          "$ref": "#/$defs/authentication"
+        },
+        "versionPolicy": {
+          "enum": [
+            "exact-package-version",
+            "exact-release-artifact",
+            "reviewed-package-manager-source"
+          ]
+        },
+        "profileImportance": {
+          "$ref": "#/$defs/profileImportance"
+        }
+      }
+    },
+    "packageInstallationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "kind", "platforms"],
+      "properties": {
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "kind": {
+          "enum": ["npm", "archive", "package-manager"]
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/operatingSystem"
+          }
+        }
+      }
+    },
+    "authentication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "guidance"],
+      "properties": {
+        "owner": {
+          "const": "external-cli"
+        },
+        "guidance": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "profileImportance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["personal", "company"],
+      "properties": {
+        "personal": {
+          "enum": ["required", "optional"]
+        },
+        "company": {
+          "enum": ["required", "optional"]
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "kind",
+        "sourceId",
+        "semanticContract",
+        "runtimeReadiness"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["lsp", "workflow"]
+        },
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "semanticContract": {
+          "$ref": "#/$defs/semanticContract"
+        },
+        "runtimeReadiness": {
+          "$ref": "#/$defs/runtimeReadiness"
+        },
+        "languageServer": {
+          "$ref": "#/$defs/languageServer"
+        }
+      }
+    },
+    "semanticContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "intent", "inputs", "outputs", "safety"],
+      "properties": {
+        "trigger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "safety": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runtimeReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claude-code", "opencode", "codex"],
+      "properties": {
+        "claude-code": {
+          "$ref": "#/$defs/runtimeReadinessEntry"
+        },
+        "opencode": {
+          "$ref": "#/$defs/runtimeReadinessEntry"
+        },
+        "codex": {
+          "$ref": "#/$defs/runtimeReadinessEntry"
+        }
+      }
+    },
+    "runtimeReadinessEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "packaging", "sourceId"],
+      "properties": {
+        "state": {
+          "enum": ["ready", "pending", "unsupported", "unverifiable"]
+        },
+        "packaging": {
+          "enum": [
+            "official-plugin",
+            "managed-skill",
+            "native-plugin",
+            "native-skill"
+          ]
+        },
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        }
+      }
+    },
+    "languageServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executables",
+        "supportedPlatforms",
+        "configurationRequired"
+      ],
+      "properties": {
+        "executables": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "supportedPlatforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/operatingSystem"
+          }
+        },
+        "configurationRequired": {
+          "const": true
+        }
+      }
+    },
+    "upstreamCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "schemaVersion", "kind", "sources"],
+      "properties": {
+        "$schema": {
+          "const": "../../contracts/capability-catalog.schema.json#/$defs/upstreamCatalog"
+        },
+        "schemaVersion": {
+          "const": "2.0.0"
+        },
+        "kind": {
+          "const": "upstream-catalog"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/upstreamSource"
+          }
+        }
+      }
+    },
+    "upstreamSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "provider",
+        "identity",
+        "locator",
+        "provenancePolicy",
+        "reviewStatus"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "kind": {
+          "enum": ["official", "community", "repository-managed"]
+        },
+        "provider": {
+          "enum": ["github", "gitlab", "npm", "vendor"]
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locator": {
+          "type": "string",
+          "format": "uri"
+        },
+        "provenancePolicy": {
+          "enum": [
+            "exact-release-artifact",
+            "exact-package-version",
+            "exact-commit-tree-content",
+            "reviewed-package-manager-source"
+          ]
+        },
+        "reviewStatus": {
+          "enum": ["approved", "unresolved"]
+        }
+      }
+    }
+  }
+}

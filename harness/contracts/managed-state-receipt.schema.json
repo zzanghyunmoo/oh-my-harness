@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-harness.dev/contracts/v2/managed-state-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "kind",
+    "catalogRevision",
+    "desiredState",
+    "startupConsent",
+    "runtimeReadiness",
+    "ownership"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "../contracts/managed-state-receipt.schema.json"
+    },
+    "schemaVersion": {
+      "const": "2.0.0"
+    },
+    "kind": {
+      "const": "managed-state-receipt"
+    },
+    "catalogRevision": {
+      "$ref": "#/$defs/sha256"
+    },
+    "desiredState": {
+      "$ref": "#/$defs/desiredState"
+    },
+    "startupConsent": {
+      "$ref": "#/$defs/startupConsent"
+    },
+    "runtimeReadiness": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/runtimeReadiness"
+      }
+    },
+    "ownership": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ownership"
+      }
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "agentId": {
+      "enum": ["claude-code", "opencode", "codex"]
+    },
+    "desiredState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "selectedAgents"],
+      "properties": {
+        "profileId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "selectedAgents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/agentId"
+          }
+        }
+      }
+    },
+    "startupConsent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repairPinned", "addReviewedContent", "channelId"],
+      "properties": {
+        "repairPinned": {
+          "type": "boolean"
+        },
+        "addReviewedContent": {
+          "type": "boolean"
+        },
+        "channelId": {
+          "$ref": "#/$defs/stableId"
+        }
+      }
+    },
+    "runtimeReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "state"],
+      "properties": {
+        "agentId": {
+          "$ref": "#/$defs/agentId"
+        },
+        "state": {
+          "enum": ["ready", "pending", "unsupported", "unverifiable"]
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "target", "digest"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "kind": {
+          "enum": ["file", "directory", "registration", "executable"]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

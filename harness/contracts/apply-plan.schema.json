@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oh-my-harness.dev/contracts/v2/apply-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "kind",
+    "catalogRevision",
+    "profileId",
+    "selectedAgents",
+    "platform",
+    "observations",
+    "actions",
+    "digest"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "../contracts/apply-plan.schema.json"
+    },
+    "schemaVersion": {
+      "const": "2.0.0"
+    },
+    "kind": {
+      "const": "apply-plan"
+    },
+    "catalogRevision": {
+      "$ref": "#/$defs/sha256"
+    },
+    "profileId": {
+      "$ref": "#/$defs/stableId"
+    },
+    "selectedAgents": {
+      "$ref": "#/$defs/selectedAgents"
+    },
+    "platform": {
+      "$ref": "#/$defs/platform"
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "digest": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "selectedAgents": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["claude-code", "opencode", "codex"]
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture"],
+      "properties": {
+        "os": {
+          "enum": ["darwin", "linux", "win32"]
+        },
+        "architecture": {
+          "enum": ["arm64", "x64"]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "target", "state"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "kind": {
+          "enum": ["file", "executable", "registration", "package"]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": ["absent", "managed", "external", "conflict"]
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "target", "observationId"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "kind": {
+          "enum": ["acquire", "register", "write", "remove"]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observationId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "sourceDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

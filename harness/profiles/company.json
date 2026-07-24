@@ -1,0 +1,39 @@
+{
+  "$schema": "../contracts/environment-profile.schema.json",
+  "schemaVersion": "2.0.0",
+  "kind": "environment-profile",
+  "id": "company",
+  "displayName": "Company",
+  "selectedAgents": ["claude-code"],
+  "packages": {
+    "required": ["jira", "confluence", "gitlab"],
+    "optional": ["linear", "notion", "github"]
+  },
+  "capabilities": [
+    "lsp-jdtls",
+    "lsp-kotlin",
+    "lsp-csharp",
+    "lsp-clangd",
+    "lsp-gopls",
+    "lsp-pyright",
+    "lsp-typescript",
+    "goal",
+    "deep-research",
+    "ideation",
+    "brainstorm",
+    "plan",
+    "code-review",
+    "doc-review",
+    "skill-creator",
+    "ralph-loop",
+    "security-guidance"
+  ],
+  "platformConditions": [],
+  "startupSync": {
+    "mode": "approved-additive",
+    "repairPinned": true,
+    "addReviewedContent": true,
+    "allowUpgrades": false,
+    "allowRemovals": false
+  }
+}

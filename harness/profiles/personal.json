@@ -1,0 +1,50 @@
+{
+  "$schema": "../contracts/environment-profile.schema.json",
+  "schemaVersion": "2.0.0",
+  "kind": "environment-profile",
+  "id": "personal",
+  "displayName": "Personal",
+  "selectedAgents": ["claude-code"],
+  "packages": {
+    "required": ["linear", "notion", "github"],
+    "optional": ["jira", "confluence", "gitlab"]
+  },
+  "capabilities": [
+    "lsp-jdtls",
+    "lsp-kotlin",
+    "lsp-csharp",
+    "lsp-clangd",
+    "lsp-gopls",
+    "lsp-pyright",
+    "lsp-typescript",
+    "goal",
+    "deep-research",
+    "ideation",
+    "brainstorm",
+    "plan",
+    "code-review",
+    "doc-review",
+    "skill-creator",
+    "ralph-loop",
+    "security-guidance"
+  ],
+  "platformConditions": [
+    {
+      "platform": "win32-arm64",
+      "supported": false,
+      "guidance": "Notion CLI is required by personal but is not currently supported on Windows."
+    },
+    {
+      "platform": "win32-x64",
+      "supported": false,
+      "guidance": "Notion CLI is required by personal but is not currently supported on Windows."
+    }
+  ],
+  "startupSync": {
+    "mode": "approved-additive",
+    "repairPinned": true,
+    "addReviewedContent": true,
+    "allowUpgrades": false,
+    "allowRemovals": false
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "$schema": "../../contracts/capability-catalog.schema.json#/$defs/upstreamCatalog",
+  "schemaVersion": "2.0.0",
+  "kind": "upstream-catalog",
+  "sources": [
+    {
+      "id": "agent-claude-code",
+      "kind": "official",
+      "provider": "github",
+      "identity": "anthropics/claude-code@2.1.210",
+      "locator": "https://github.com/anthropics/claude-code",
+      "provenancePolicy": "exact-release-artifact",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "agent-opencode",
+      "kind": "official",
+      "provider": "github",
+      "identity": "anomalyco/opencode@1.18.0",
+      "locator": "https://github.com/anomalyco/opencode",
+      "provenancePolicy": "exact-release-artifact",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "agent-codex",
+      "kind": "official",
+      "provider": "github",
+      "identity": "openai/codex@0.144.4",
+      "locator": "https://github.com/openai/codex",
+      "provenancePolicy": "exact-release-artifact",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-notion-cli",
+      "kind": "official",
+      "provider": "vendor",
+      "identity": "ntn@0.19.0",
+      "locator": "https://developers.notion.com/cli/get-started/installation",
+      "provenancePolicy": "exact-package-version",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-linear-cli",
+      "kind": "community",
+      "provider": "github",
+      "identity": "schpet/linear-cli@2.0.0",
+      "locator": "https://github.com/schpet/linear-cli",
+      "provenancePolicy": "exact-package-version",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-jira-cli",
+      "kind": "community",
+      "provider": "github",
+      "identity": "ankitpokhrel/jira-cli@1.7.0",
+      "locator": "https://github.com/ankitpokhrel/jira-cli",
+      "provenancePolicy": "exact-release-artifact",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-confluence-cli",
+      "kind": "community",
+      "provider": "npm",
+      "identity": "confluence-cli@2.18.0",
+      "locator": "https://www.npmjs.com/package/confluence-cli",
+      "provenancePolicy": "exact-package-version",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-github-cli",
+      "kind": "official",
+      "provider": "github",
+      "identity": "cli/cli",
+      "locator": "https://github.com/cli/cli",
+      "provenancePolicy": "reviewed-package-manager-source",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "package-gitlab-cli",
+      "kind": "official",
+      "provider": "gitlab",
+      "identity": "gitlab-org/cli",
+      "locator": "https://gitlab.com/gitlab-org/cli",
+      "provenancePolicy": "reviewed-package-manager-source",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "anthropic-official-plugins",
+      "kind": "official",
+      "provider": "github",
+      "identity": "anthropics/claude-plugins-official",
+      "locator": "https://github.com/anthropics/claude-plugins-official",
+      "provenancePolicy": "exact-commit-tree-content",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "oh-my-harness-managed",
+      "kind": "repository-managed",
+      "provider": "github",
+      "identity": "zzanghyunmoo/oh-my-harness",
+      "locator": "https://github.com/zzanghyunmoo/oh-my-harness",
+      "provenancePolicy": "exact-commit-tree-content",
+      "reviewStatus": "approved"
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "../contracts/capability-catalog.schema.json#/$defs/packageCatalog",
+  "schemaVersion": "2.0.0",
+  "kind": "package-catalog",
+  "packages": [
+    {
+      "id": "notion",
+      "displayName": "Notion CLI",
+      "description": "Official Notion command-line client for workspace API operations.",
+      "executables": ["ntn"],
+      "supportedPlatforms": ["darwin", "linux"],
+      "installationSources": [
+        {
+          "sourceId": "package-notion-cli",
+          "kind": "npm",
+          "platforms": ["darwin", "linux"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `ntn login`; Notion owns and stores its authentication state."
+      },
+      "versionPolicy": "exact-package-version",
+      "profileImportance": {
+        "personal": "required",
+        "company": "optional"
+      }
+    },
+    {
+      "id": "linear",
+      "displayName": "Linear CLI",
+      "description": "Community Linear command-line client for issue and workspace operations.",
+      "executables": ["linear"],
+      "supportedPlatforms": ["darwin", "linux", "win32"],
+      "installationSources": [
+        {
+          "sourceId": "package-linear-cli",
+          "kind": "npm",
+          "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `linear auth login` and `linear config`; Linear CLI owns its credentials."
+      },
+      "versionPolicy": "exact-package-version",
+      "profileImportance": {
+        "personal": "required",
+        "company": "optional"
+      }
+    },
+    {
+      "id": "jira",
+      "displayName": "Jira CLI",
+      "description": "Community Jira command-line client for issue and project workflows.",
+      "executables": ["jira"],
+      "supportedPlatforms": ["darwin", "linux", "win32"],
+      "installationSources": [
+        {
+          "sourceId": "package-jira-cli",
+          "kind": "package-manager",
+          "platforms": ["darwin", "linux"]
+        },
+        {
+          "sourceId": "package-jira-cli",
+          "kind": "archive",
+          "platforms": ["win32"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `jira init`; Jira CLI owns its authentication configuration."
+      },
+      "versionPolicy": "exact-release-artifact",
+      "profileImportance": {
+        "personal": "optional",
+        "company": "required"
+      }
+    },
+    {
+      "id": "confluence",
+      "displayName": "Confluence CLI",
+      "description": "Community Confluence command-line client for page and space operations.",
+      "executables": ["confluence"],
+      "supportedPlatforms": ["darwin", "linux", "win32"],
+      "installationSources": [
+        {
+          "sourceId": "package-confluence-cli",
+          "kind": "npm",
+          "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `confluence init --read-only`; Confluence CLI owns its credentials."
+      },
+      "versionPolicy": "exact-package-version",
+      "profileImportance": {
+        "personal": "optional",
+        "company": "required"
+      }
+    },
+    {
+      "id": "github",
+      "displayName": "GitHub CLI",
+      "description": "Official GitHub command-line client for repositories, issues, and pull requests.",
+      "executables": ["gh"],
+      "supportedPlatforms": ["darwin", "linux", "win32"],
+      "installationSources": [
+        {
+          "sourceId": "package-github-cli",
+          "kind": "package-manager",
+          "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `gh auth login`; GitHub CLI owns and stores its authentication state."
+      },
+      "versionPolicy": "reviewed-package-manager-source",
+      "profileImportance": {
+        "personal": "required",
+        "company": "optional"
+      }
+    },
+    {
+      "id": "gitlab",
+      "displayName": "GitLab CLI",
+      "description": "Official GitLab command-line client for projects, issues, and merge requests.",
+      "executables": ["glab"],
+      "supportedPlatforms": ["darwin", "linux", "win32"],
+      "installationSources": [
+        {
+          "sourceId": "package-gitlab-cli",
+          "kind": "package-manager",
+          "platforms": ["darwin", "linux", "win32"]
+        }
+      ],
+      "authentication": {
+        "owner": "external-cli",
+        "guidance": "Run `glab auth login`; GitLab CLI owns and stores its authentication state."
+      },
+      "versionPolicy": "reviewed-package-manager-source",
+      "profileImportance": {
+        "personal": "optional",
+        "company": "required"
+      }
+    }
+  ]
+}
