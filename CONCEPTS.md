@@ -4,7 +4,69 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
-## Workspace Connector Auth
+## Harness v2
+
+### Environment Profile
+
+A versioned declaration of the coding agents, required and optional machine-shared CLI packages, enabled capabilities, platform conditions, and startup synchronization policy that make up one desired environment.
+
+`personal` and `company` are built-in Environment Profiles. A custom Environment Profile is validated and previewed locally, then becomes reusable only after its repository change is reviewed, merged, and distributed.
+
+### Capability Catalog
+
+The runtime-neutral source of truth for the skills, plugins, hooks, language-server integrations, and external CLI packages known to Oh My Harness.
+
+The Capability Catalog records semantic intent, provenance, platform support, and per-runtime readiness. Claude Code is the first delivery target and preferred official-plugin source, but its manifest format is not the catalog schema.
+
+### Claude-first Delivery
+
+The sequencing rule that makes the Claude Code Environment Profile path the first complete, releasable implementation before OpenCode and Codex parity.
+
+Claude-first Delivery does not make Claude Code behavior canonical for other agents. Each Runtime Adapter must preserve the Capability Catalog contract through its runtime's native surfaces and report unsupported behavior honestly.
+
+### Approved Startup Synchronization
+
+An idempotent agent-start reconciliation against the operator's selected Environment Profile, pinned Catalog Revision, managed-state receipt, and recorded additive-sync consent.
+
+Approved Startup Synchronization may restore missing pinned content and apply reviewed additive profile content covered by that consent. It cannot silently remove content, overwrite user-owned files, change a pin, or execute unreviewed remote code.
+
+### Catalog Revision
+
+The immutable identity of the exact Capability Catalog and Environment Profile content used to preview, install, synchronize, and diagnose an environment.
+
+Receipts and readiness output name the Catalog Revision so a change can be reproduced and startup repair cannot drift to an unspecified latest state.
+
+### Managed-state Receipt
+
+A secret-free local record of the Catalog Revision, selected Environment Profile, installed agents, managed artifacts, provenance pins, ownership boundaries, and synchronization consent approved by the operator.
+
+The receipt supports drift detection, repair, migration, and removal previews. It never grants ownership of unrelated user configuration.
+
+### Exact Apply Plan
+
+An immutable preview of the desired Environment Profile, selected agents, Catalog Revision, platform, observed managed-state pre-images, preflight results, and ordered actions.
+
+The operator applies an Exact Apply Plan by presenting its digest together with `--apply`. The CLI rebuilds and re-observes the plan before the first mutation and rejects it as stale when any bound fact changed.
+
+### Authenticated Catalog Release
+
+A published catalog manifest whose repository, release, commit/tree identity, compatibility range, artifact digests, and publisher provenance can be verified from an installed trust root.
+
+Approved Startup Synchronization may discover future managed capabilities only through an Authenticated Catalog Release. A mutable branch, unqualified latest payload, changed pin, removal, or unknown lineage never receives automatic execution authority.
+
+### Reconciliation Outcome
+
+The structured result of comparing an Environment Profile with managed runtime state.
+
+Outcomes distinguish at least no drift, repaired content, pending approval, user-owned conflict, unverifiable state, and failure. The managed launcher, native runtime integration, `omh status`, `omh doctor`, and agent context read the same outcome rather than deriving competing status labels.
+
+### Milestone Readiness
+
+The distinction between a runtime delivery gate and full Harness v2 parity.
+
+Claude milestone readiness is true only after the Claude Code vertical slice passes native verification. Harness v2 parity is true only after Claude Code, OpenCode, and Codex all pass the shared semantic, lifecycle, and safety contracts.
+
+## Legacy v1: Workspace Connector Auth
 
 ### Workspace Connector
 
@@ -66,11 +128,13 @@ A runtime-neutral set of external CLI affordances named by capability and backen
 
 The shared catalog preserves all 13 reviewed role/backend mappings and one execution policy. Runtime adapters select from that catalog while retaining the same argument allowlists, write-confirmation boundary, trusted executable resolution, timeout, and output redaction.
 
-### Runtime Tool Profile
+### Legacy Runtime Tool Profile
 
 The exact issue-tracker, wiki, and git backend bindings exposed by one coding-agent runtime. The secret-free `runtime-tools.json` manifest is the single source of truth: reusable named profiles contain bindings and runtime assignments reference those profile IDs.
 
 Pi and Codex reference the `personal` profile for Linear, Notion, and GitHub. Claude Code and OpenCode reference the `company` profile for Jira, Confluence, and GitLab. Adapters expose exactly one catalog tool per role and reject direct calls to hidden backends. `omh setup` resolves the selected runtimes' profile union automatically. External CLI executables remain machine-shared and deduplicated, so installing an extra executable does not mutate a runtime's profile.
+
+This is historical v1 vocabulary. Harness v2 replaces per-runtime assignments with an operator-selected Environment Profile.
 
 ### CLI-owned Authentication
 
@@ -102,17 +166,17 @@ Connector Setup State may store mode, tenant, capability, service, schema versio
 
 ## Harness Portability
 
-### Runtime-Neutral Harness Core
+### Runtime-neutral Catalog
 
-The canonical Compound Engineering workflow, guardrail, capability, and artifact contract that is independent of any single coding-agent runtime.
+The canonical Environment Profile and Capability Catalog contract that is independent of any single coding-agent runtime.
 
-The core owns the shared product promise and conformance criteria. Runtime-specific commands and configuration are derived surfaces rather than competing sources of truth.
+The catalog owns the shared product promise and readiness criteria. Runtime-specific commands and configuration are derived surfaces rather than competing sources of truth.
 
 ### Runtime Adapter
 
-A compatibility boundary that exposes the Runtime-Neutral Harness Core through one coding agent's native command, skill, instruction, approval, and tool surfaces.
+A compatibility boundary that exposes the runtime-neutral catalog through one coding agent's native command, skill, plugin, hook, approval, and tool surfaces.
 
-A Runtime Adapter may use native capabilities as optional extensions, but it must not weaken or silently change the common workflow and artifact contract.
+A Runtime Adapter may use native capabilities, but it must preserve semantic intent and report unsupported behavior instead of weakening or silently changing the catalog contract.
 
 ### Upstream Trust Receipt
 
@@ -120,28 +184,30 @@ A secret-free immutable binding between an upstream release's repository identit
 
 An Upstream Trust Receipt separates content identity from authenticated acquisition: offline verification can prove pinned objects and expected origin configuration, while acquisition provenance remains a separately reviewed claim.
 
-### Source-derived Feature Inventory
+### Legacy Source-derived Feature Inventory
 
 The deterministic list of upstream capabilities discovered from immutable source objects, with each entry bound to content identity rather than copied behavior.
 
 The inventory is runtime-neutral. Runtime support is evaluated later by the Conformance Matrix instead of filtering capabilities out during derivation.
 
-### Conformance Matrix
+This is historical v1 vocabulary for the full Compound Engineering snapshot. Harness v2 catalogs only its curated Capability Catalog.
+
+### Legacy Conformance Matrix
 
 The automated cross-product of the version-pinned Source-derived Feature Inventory and the supported coding-agent runtimes.
 
 Every required cell must produce an explicit pass or fail with execution evidence. Missing capabilities, skipped scenarios, and silent degradation cannot satisfy the release gate.
 
+This is historical v1 vocabulary for the four-runtime, 116-cell release model. Harness v2 uses capability-level readiness and staged Claude Code, OpenCode, and Codex milestones.
+
 ### Managed Runtime Installation
 
-A preview-first installation that materializes reviewed runtime executables and content-addressed package snapshots under one local root, then registers those immutable local sources through each runtime's native package surface.
+A preview-first operation that installs only the operator-selected coding agents and registers reviewed, pinned catalog content through each runtime's native package surface.
 
-Managed Runtime Installation binds runtime archives, executables, the Oh My Harness package archive, and Compound Engineering source identity in local receipts. It does not overwrite an unrelated tool-manager executable. The managed `bin` directory is the explicit command-selection boundary.
-
-For Pi, migration replaces only known mutable or unpinned sources with exact local payloads and exact npm companion versions. Other user packages remain outside the installation's ownership boundary.
+Managed Runtime Installation records exact agent, catalog, provenance, and ownership identities in a Managed-state Receipt. Migration and removal remain separate previews and never claim unrelated user files.
 
 ### OMH Management CLI
 
-The human-facing `omh` executable that unifies runtime/plugin installation, machine-shared external CLI and proxy installation, local proxy activation, status, diagnostics, and Pi profile planning without merging their ownership boundaries.
+The strict TypeScript, Node.js-based `omh` executable that selects an Environment Profile and coding agents, installs machine-shared external CLI packages, applies runtime-native capabilities, and reports synchronization and readiness without merging ownership boundaries.
 
-`omh setup` composes agent and tool plans for onboarding, while `omh agents` and `omh tools` retain precise control. Every install command is preview-only without `--apply`. Agent selection controls which runtime receives the harness plugin and derives the default union of required CLI executables. Explicit CLI selection controls only executables installed once on the machine and shared through `PATH`; it does not change Runtime Tool Profiles.
+`omh setup` composes agent, package, and capability plans for onboarding, while focused commands retain precise control. Every mutating command is preview-only without `--apply`. External CLI executables are installed once on the machine and shared through trusted `PATH`; selecting an extra agent does not duplicate them.
