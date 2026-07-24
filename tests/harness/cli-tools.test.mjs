@@ -13,6 +13,7 @@ import {
   classifyCliInvocation,
   cliToolDefinitionsForRuntime,
   cliToolServiceIdsForRuntimes,
+  deriveToolPolicy,
   executeCliTool,
   getRuntimeToolProfileAssignment,
   listCliToolStatus,
@@ -20,10 +21,50 @@ import {
   resolveCliExecutable,
   validateRuntimeToolProfileManifest,
 } from "../../plugins/oh-my-harness/mcp/cli-tools-core.mjs";
+import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import { buildToolInstallPlan, parseToolArguments } from "../../scripts/tools/manage.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const MCP_SERVER = join(REPO_ROOT, "plugins", "oh-my-harness", "mcp", "cli-tools-server.mjs");
+const CATALOG = loadCatalogBundle(REPO_ROOT);
+const RUNTIME_IDS = ["claude-code", "opencode", "codex"];
+
+function approvedReceipt(profileId) {
+  return {
+    $schema: "../contracts/managed-state-receipt.schema.json",
+    schemaVersion: "2.0.0",
+    kind: "managed-state-receipt",
+    catalogRevision: CATALOG.revision,
+    desiredState: { profileId, selectedAgents: RUNTIME_IDS },
+    startupConsent: {
+      repairPinned: true,
+      addReviewedContent: true,
+      channelId: "stable",
+    },
+    runtimeReadiness: RUNTIME_IDS.map((agentId) => ({ agentId, state: "ready" })),
+    ownership: [],
+  };
+}
+
+function approvedPolicy(runtimeId = "codex", profileId = "personal") {
+  return deriveToolPolicy({
+    runtimeId,
+    receipt: approvedReceipt(profileId),
+    catalogRevision: CATALOG.revision,
+    profiles: CATALOG.profiles,
+    repositoryRoot: REPO_ROOT,
+  });
+}
+
+function writeApprovedReceipt(root, profileId) {
+  const home = join(root, "managed");
+  mkdirSync(join(home, "receipts"), { recursive: true });
+  writeFileSync(
+    join(home, "receipts", "environment.json"),
+    `${JSON.stringify(approvedReceipt(profileId), null, 2)}\n`,
+  );
+  return home;
+}
 
 function fakeExecutable(directory, name, body = "printf '%s\\n' \"$*\"") {
   const path = join(directory, name);
@@ -44,7 +85,11 @@ function fixture() {
 async function runMcp(messages, env, runtimeId) {
   const child = spawn(process.execPath, [MCP_SERVER], {
     cwd: join(REPO_ROOT, "plugins", "oh-my-harness"),
-    env: { ...env, OH_MY_HARNESS_RUNTIME: runtimeId },
+    env: {
+      ...env,
+      OH_MY_HARNESS_REPOSITORY_ROOT: REPO_ROOT,
+      OH_MY_HARNESS_RUNTIME: runtimeId,
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
@@ -147,19 +192,31 @@ test("CLI execution uses a trusted non-workspace executable, requires write conf
   try {
     const gh = fakeExecutable(bin, "gh", "printf 'github_pat_secret\\n%s\\n' \"$*\"");
     const env = { ...process.env, PATH: bin };
-    const read = await executeCliTool("issue_tracker_github_cli", { args: ["issue", "view", "7"] }, { cwd: workspace, env });
+    const policy = approvedPolicy();
+    const read = await executeCliTool(
+      "git_repository_github_cli",
+      { args: ["repo", "view", "OWNER/REPO"] },
+      { cwd: workspace, env, policy },
+    );
     assert.equal(read.executablePath, realpathSync(gh));
     assert.equal(read.access, "read");
     assert.match(read.stdout, /github_pat_…/);
-    assert.match(read.stdout, /issue view 7/);
+    assert.match(read.stdout, /repo view OWNER\/REPO/);
     await assert.rejects(
-      executeCliTool("issue_tracker_github_cli", { args: ["issue", "close", "7"] }, { cwd: workspace, env }),
+      executeCliTool(
+        "git_repository_github_cli",
+        { args: ["repo", "create", "OWNER/NEW"] },
+        { cwd: workspace, env, policy },
+      ),
       /confirmedWrite=true/,
     );
     const write = await executeCliTool(
-      "issue_tracker_github_cli",
-      { args: ["issue", "close", "7"], confirmedWrite: true },
-      { cwd: workspace, env },
+      "git_repository_github_cli",
+      {
+        args: ["repo", "create", "OWNER/NEW"],
+        confirmedWrite: true,
+      },
+      { cwd: workspace, env, policy },
     );
     assert.equal(write.access, "write");
     assert.equal(write.code, 0);
@@ -174,9 +231,44 @@ test("workspace-local executable shims are rejected", async (t) => {
   try {
     fakeExecutable(workspace, "gh");
     await assert.rejects(
-      executeCliTool("issue_tracker_github_cli", { args: ["issue", "list"] }, { cwd: workspace, env: { ...process.env, PATH: workspace } }),
+      executeCliTool(
+        "git_repository_github_cli",
+        { args: ["repo", "list"] },
+        {
+          cwd: workspace,
+          env: { ...process.env, PATH: workspace },
+          policy: approvedPolicy(),
+        },
+      ),
       /trusted PATH outside the workspace/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI execution bounds output and enforces the timeout ceiling", async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX fixture");
+  const { root, bin, workspace } = fixture();
+  try {
+    const policy = approvedPolicy();
+    fakeExecutable(bin, "linear", `printf '${"x".repeat(70_000)}'`);
+    const env = { ...process.env, PATH: bin };
+    const output = await executeCliTool(
+      "issue_tracker_linear_cli",
+      { args: ["issue", "query"] },
+      { cwd: workspace, env, policy },
+    );
+    assert.match(output.stdout, /truncated at least/);
+    assert.ok(output.stdout.length < 65_000);
+
+    fakeExecutable(bin, "linear", "/bin/sleep 2");
+    const timed = await executeCliTool(
+      "issue_tracker_linear_cli",
+      { args: ["issue", "query"] },
+      { cwd: workspace, env, policy, timeoutMs: 20 },
+    );
+    assert.equal(timed.timedOut, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -217,24 +309,34 @@ test("relative PATH entries are not trusted even when they resolve outside the w
 test("MCP server exposes only the selected runtime profile and rejects hidden tools", async () => {
   const { root, workspace } = fixture();
   try {
+    const home = writeApprovedReceipt(root, "personal");
     const messages = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "issue_tracker_jira_cli", arguments: { args: ["issue", "list"], cwd: workspace } } },
       { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "workspace_cli_status", arguments: { cwd: workspace } } },
     ];
-    const codex = await runMcp(messages, { ...process.env, PATH: "" }, "codex");
-    assert.match(codex[0].result.instructions, /tool profile personal: issue-tracker=linear, wiki=notion, git=github/);
+    const codex = await runMcp(
+      messages,
+      { ...process.env, PATH: "", OH_MY_HARNESS_HOME: home },
+      "codex",
+    );
+    assert.match(codex[0].result.instructions, /profile personal: issue-tracker=linear, wiki=notion, git=github/);
     assert.deepEqual(codex[1].result.tools.map(({ name }) => name), [
-      "workspace_cli_status", "issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli",
+      "workspace_cli_status", "workspace_cli_setup", "issue_tracker_linear_cli", "wiki_notion_cli", "git_repository_github_cli",
     ]);
     assert.equal(codex[2].result.isError, true);
-    assert.match(codex[2].result.content[0].text, /not exposed by the codex tool profile/);
+    assert.match(codex[2].result.content[0].text, /not exposed by the approved personal profile for codex/);
     assert.deepEqual(codex[3].result.structuredContent.services.map(({ id }) => id), ["linear", "notion", "github"]);
 
-    const claude = await runMcp(messages.slice(0, 2), { ...process.env, PATH: "" }, "claude-code");
+    writeApprovedReceipt(root, "company");
+    const claude = await runMcp(
+      messages.slice(0, 2),
+      { ...process.env, PATH: "", OH_MY_HARNESS_HOME: home },
+      "claude-code",
+    );
     assert.deepEqual(claude[1].result.tools.map(({ name }) => name), [
-      "workspace_cli_status", "issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli",
+      "workspace_cli_status", "workspace_cli_setup", "issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -245,15 +347,20 @@ test("MCP server executes an exposed runtime tool through the shared core", asyn
   if (process.platform === "win32") return t.skip("POSIX fixture");
   const { root, bin, workspace } = fixture();
   try {
+    const home = writeApprovedReceipt(root, "personal");
     fakeExecutable(bin, "linear", "printf '%s\\n' \"$*\"");
     const messages = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "issue_tracker_linear_cli", arguments: { args: ["issue", "query"], cwd: workspace } } },
     ];
-    const responses = await runMcp(messages, { ...process.env, PATH: bin }, "codex");
+    const responses = await runMcp(
+      messages,
+      { ...process.env, PATH: bin, OH_MY_HARNESS_HOME: home },
+      "codex",
+    );
     assert.equal(responses[0].result.serverInfo.name, "oh-my-harness-cli-tools");
-    assert.equal(responses[1].result.tools.length, 4);
+    assert.equal(responses[1].result.tools.length, 5);
     assert.equal(responses[2].result.structuredContent.access, "read");
     assert.match(responses[2].result.content[0].text, /issue query/);
   } finally {
@@ -357,9 +464,17 @@ test("Windows executes npm-style CLI shims through Node without a shell", async 
     mkdirSync(join(bin, "node_modules", "gh-fixture"), { recursive: true });
     writeFileSync(target, "#!/usr/bin/env node\nprocess.stdout.write(process.argv.slice(2).join(' '));\n");
     writeFileSync(join(bin, "gh.cmd"), "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\gh-fixture\\cli.js\" %*\r\n");
-    const result = await executeCliTool("issue_tracker_github_cli", { args: ["issue", "list"] }, { cwd: workspace, env: { ...process.env, PATH: bin } });
+    const result = await executeCliTool(
+      "git_repository_github_cli",
+      { args: ["repo", "list"] },
+      {
+        cwd: workspace,
+        env: { ...process.env, PATH: bin },
+        policy: approvedPolicy(),
+      },
+    );
     assert.equal(result.code, 0);
-    assert.equal(result.stdout, "issue list");
+    assert.equal(result.stdout, "repo list");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
