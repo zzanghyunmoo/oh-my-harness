@@ -5,9 +5,13 @@
       "args": [
         "--input-type=module",
         "--eval",
-        "import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; process.env.OH_MY_HARNESS_RUNTIME = 'codex'; await import(pathToFileURL(resolve(process.env.CLAUDE_PLUGIN_ROOT || process.cwd(), 'mcp/cli-tools-server.mjs')).href);"
+        "import { isAbsolute, join } from 'node:path'; import { pathToFileURL } from 'node:url'; const root = process.env.PLUGIN_ROOT; if (!root || !isAbsolute(root)) throw new Error('PLUGIN_ROOT must be absolute'); process.env.OH_MY_HARNESS_RUNTIME = 'codex'; await import(pathToFileURL(join(root, 'mcp/cli-tools-server.mjs')).href);"
       ],
-      "cwd": "."
+      "cwd": ".",
+      "env_vars": [
+        "PLUGIN_ROOT",
+        "OH_MY_HARNESS_RECEIPT"
+      ]
     }
   }
 }

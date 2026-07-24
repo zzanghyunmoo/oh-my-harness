@@ -1,0 +1,30 @@
+{
+  "description": "Bounded local Oh My Harness startup context for Codex.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${OH_MY_HARNESS_NODE}\" \"${PLUGIN_ROOT}/scripts/codex-startup-context.mjs\"",
+            "statusMessage": "Checking the approved Oh My Harness profile",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${OH_MY_HARNESS_NODE}\" \"${PLUGIN_ROOT}/scripts/codex-startup-context.mjs\"",
+            "statusMessage": "Refreshing the current Oh My Harness context",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

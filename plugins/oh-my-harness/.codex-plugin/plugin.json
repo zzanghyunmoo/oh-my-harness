@@ -1,33 +1,28 @@
 {
   "name": "oh-my-harness",
   "version": "0.2.0",
-  "description": "Cross-runtime engineering harness with role-scoped workspace CLI tools",
+  "description": "Claude-first environment profiles with Codex-native skills, tools, and startup context",
   "author": {
     "name": "zzanghyunmoo",
     "url": "https://github.com/zzanghyunmoo"
   },
   "homepage": "https://github.com/zzanghyunmoo/oh-my-harness",
   "repository": "https://github.com/zzanghyunmoo/oh-my-harness",
+  "license": "MIT",
   "keywords": [
     "agent-harness",
-    "compound-engineering",
     "codex",
-    "opencode",
-    "pi",
-    "jira",
-    "linear",
-    "confluence",
-    "notion",
-    "github",
-    "gitlab",
-    "coderabbit"
+    "environment-profile",
+    "startup-reconciliation",
+    "workspace-cli"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Oh My Harness",
-    "shortDescription": "Engineering workflows and workspace CLI tools",
-    "longDescription": "Oh My Harness exposes the OMP workflow namespace plus Codex-scoped Linear issue, Notion wiki, and GitHub repository CLI tools.",
+    "shortDescription": "Profile-scoped Codex workflows and tools",
+    "longDescription": "Oh My Harness loads reviewed skills, profile-scoped workspace CLI tools, and bounded startup context through Codex-native plugin surfaces.",
     "developerName": "zzanghyunmoo",
     "category": "Coding",
     "capabilities": [
@@ -38,9 +33,9 @@
     ],
     "websiteURL": "https://github.com/zzanghyunmoo/oh-my-harness",
     "defaultPrompt": [
-      "Triage the current repository's issues",
-      "Review this change with the configured review tools",
-      "Find the relevant project wiki documentation"
+      "Show the current Oh My Harness profile and readiness",
+      "Triage issues with the backend exposed by my profile",
+      "Plan this repository change with the managed workflow skills"
     ]
   }
 }
