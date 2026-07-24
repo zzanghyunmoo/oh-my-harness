@@ -88,8 +88,8 @@
       "id": "anthropic-official-plugins",
       "kind": "official",
       "provider": "github",
-      "identity": "anthropics/claude-plugins-official",
-      "locator": "https://github.com/anthropics/claude-plugins-official",
+      "identity": "anthropics/claude-plugins-official@66799ffb4611b7e0c3af391c7569823a4d6b4246",
+      "locator": "https://github.com/anthropics/claude-plugins-official/tree/66799ffb4611b7e0c3af391c7569823a4d6b4246",
       "provenancePolicy": "exact-commit-tree-content",
       "reviewStatus": "approved"
     },
@@ -97,7 +97,7 @@
       "id": "oh-my-harness-managed",
       "kind": "repository-managed",
       "provider": "github",
-      "identity": "zzanghyunmoo/oh-my-harness",
+      "identity": "zzanghyunmoo/oh-my-harness#managed-capabilities-sha256:2ef1b7aa83d60b968f7733f24302c1625eac5b5faa4d41bf2d6824cf5bd78c41",
       "locator": "https://github.com/zzanghyunmoo/oh-my-harness",
       "provenancePolicy": "exact-commit-tree-content",
       "reviewStatus": "approved"

@@ -13,11 +13,11 @@
         "intent": "Provide language-aware Java navigation, symbols, references, and diagnostics.",
         "inputs": ["Java workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the jdtls executable are verified."
+        "safety": "Side effects: starts the external jdtls process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -48,11 +48,11 @@
         "intent": "Provide language-aware Kotlin navigation, symbols, references, and diagnostics.",
         "inputs": ["Kotlin workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the Kotlin language-server executable are verified."
+        "safety": "Side effects: starts the external kotlin-lsp process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -68,7 +68,7 @@
         }
       },
       "languageServer": {
-        "executables": ["kotlin-language-server"],
+        "executables": ["kotlin-lsp"],
         "supportedPlatforms": ["darwin", "linux", "win32"],
         "configurationRequired": true
       }
@@ -83,11 +83,11 @@
         "intent": "Provide language-aware C# navigation, symbols, references, and diagnostics.",
         "inputs": ["C# workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and a declared C# language-server executable are verified."
+        "safety": "Side effects: starts the external csharp-ls process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -103,7 +103,7 @@
         }
       },
       "languageServer": {
-        "executables": ["csharp-ls", "omnisharp"],
+        "executables": ["csharp-ls"],
         "supportedPlatforms": ["darwin", "linux", "win32"],
         "configurationRequired": true
       }
@@ -118,11 +118,11 @@
         "intent": "Provide language-aware C and C++ navigation, symbols, references, and diagnostics.",
         "inputs": ["C or C++ workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the clangd executable are verified."
+        "safety": "Side effects: starts the external clangd process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -153,11 +153,11 @@
         "intent": "Provide language-aware Go navigation, symbols, references, and diagnostics.",
         "inputs": ["Go workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the gopls executable are verified."
+        "safety": "Side effects: starts the external gopls process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -188,11 +188,11 @@
         "intent": "Provide language-aware Python navigation, symbols, references, and diagnostics.",
         "inputs": ["Python workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the Pyright language-server executable are verified."
+        "safety": "Side effects: starts the external pyright-langserver process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -223,11 +223,11 @@
         "intent": "Provide language-aware TypeScript and JavaScript navigation, symbols, references, and diagnostics.",
         "inputs": ["TypeScript or JavaScript workspace and source files"],
         "outputs": ["Language-server navigation and diagnostics"],
-        "safety": "Do not report readiness unless both agent configuration and the TypeScript language-server executable are verified."
+        "safety": "Side effects: starts the external typescript-language-server process for language intelligence. Approval posture: exact preview is required for plugin installation; readiness requires both agent plugin configuration and the language-server executable."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -258,11 +258,11 @@
         "intent": "Track a concrete objective until it is achieved or genuinely blocked.",
         "inputs": ["Objective and optional explicit budget"],
         "outputs": ["Goal state and completion evidence"],
-        "safety": "Never infer a durable goal from an ordinary task or mark incomplete work complete."
+        "safety": "Side effects: none by default; underlying work keeps its original authority boundary. Approval posture: activate only for explicit goal-tracking intent, never infer a goal, and never mark incomplete work complete."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -288,11 +288,11 @@
         "intent": "Gather authoritative evidence and synthesize a traceable answer.",
         "inputs": ["Research question and constraints"],
         "outputs": ["Evidence-backed synthesis with source attribution"],
-        "safety": "Distinguish source facts from inference and avoid unsupported claims."
+        "safety": "Side effects: read-only network and workspace research. Approval posture: private-source access and every external write require explicit authority; distinguish source facts from inference."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -318,11 +318,11 @@
         "intent": "Generate and compare project-relevant directions before selection.",
         "inputs": ["Problem context and constraints"],
         "outputs": ["Ranked ideas with tradeoffs"],
-        "safety": "Keep speculative ideas labeled and grounded in available project evidence."
+        "safety": "Side effects: none. Approval posture: the user selects a direction before implementation or external mutation; keep hypotheses labeled and grounded."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -348,11 +348,11 @@
         "intent": "Turn an ambiguous idea into a bounded product contract.",
         "inputs": ["Idea, users, constraints, and known decisions"],
         "outputs": ["Requirements, flows, acceptance examples, and scope boundaries"],
-        "safety": "Do not silently convert undecided product choices into implementation facts."
+        "safety": "Side effects: read-only discovery. Approval posture: requirements remain proposals until user acceptance and persistence requires approval; do not convert undecided choices into facts."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -378,11 +378,11 @@
         "intent": "Produce dependency-ordered implementation units and verification evidence.",
         "inputs": ["Product contract and repository context"],
         "outputs": ["Implementation-ready plan"],
-        "safety": "Preserve accepted product scope and surface unresolved implementation blockers."
+        "safety": "Side effects: read-only repository and document inspection. Approval posture: writing or publishing the plan and changing product scope require explicit approval."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -408,11 +408,11 @@
         "intent": "Report actionable bugs, regressions, and missing safety coverage.",
         "inputs": ["Diff, repository context, and relevant plan"],
         "outputs": ["Prioritized findings with evidence"],
-        "safety": "Review is read-only unless the operator separately authorizes fixes."
+        "safety": "Side effects: reads GitHub pull-request data and may post one review comment when the operator explicitly invokes review for that pull request. Approval posture: invocation must identify the review target; fixes and all other remote writes require separate authority."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -438,11 +438,11 @@
         "intent": "Identify concrete blockers, contradictions, and missing decisions.",
         "inputs": ["Document and reviewer persona"],
         "outputs": ["Prioritized document findings"],
-        "safety": "Do not relitigate accepted scope or report stylistic preferences as blockers."
+        "safety": "Side effects: none. Approval posture: applying findings or posting comments requires separate exact authorization; preserve accepted scope and report only material findings."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "managed-skill",
           "sourceId": "oh-my-harness-managed"
         },
@@ -468,11 +468,11 @@
         "intent": "Create a focused, reusable skill with clear triggers and workflow.",
         "inputs": ["Skill purpose, constraints, and target runtime"],
         "outputs": ["Validated skill package"],
-        "safety": "Keep triggers narrow and do not embed credentials or unreviewed executable behavior."
+        "safety": "Side effects: may create skill files, execute declared Python evaluation helpers, invoke Claude, and open a local report when explicitly requested. Approval posture: file writes and evaluations require the user's skill-creation intent; never embed credentials or undeclared executables."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -498,11 +498,11 @@
         "intent": "Repeat implementation and verification until a declared condition is met.",
         "inputs": ["Objective, stop conditions, and verification command"],
         "outputs": ["Iteration results and terminal evidence"],
-        "safety": "Honor explicit stop conditions and never broaden mutation authority."
+        "safety": "Side effects: writes and removes .claude/ralph-loop.local.md and installs a Stop hook that continues the current session loop. Approval posture: explicit loop invocation must provide stop conditions; iterations never broaden mutation authority."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
+          "state": "ready",
           "packaging": "official-plugin",
           "sourceId": "anthropic-official-plugins"
         },
@@ -522,29 +522,29 @@
       "id": "security-guidance",
       "displayName": "Security Guidance",
       "kind": "workflow",
-      "sourceId": "anthropic-official-plugins",
+      "sourceId": "oh-my-harness-managed",
       "semanticContract": {
         "trigger": "A change needs security-specific implementation or review guidance.",
         "intent": "Identify concrete security boundaries, threats, and mitigations.",
         "inputs": ["Code, architecture, or proposed change"],
         "outputs": ["Prioritized security guidance"],
-        "safety": "Avoid credential exposure and distinguish exploitable findings from theoretical concerns."
+        "safety": "Side effects: read-only inspection with no automatic hooks, dependency installation, or model-endpoint upload. Approval posture: scanners, code execution, remote access, file changes, and publication require explicit authorization."
       },
       "runtimeReadiness": {
         "claude-code": {
-          "state": "pending",
-          "packaging": "official-plugin",
-          "sourceId": "anthropic-official-plugins"
+          "state": "ready",
+          "packaging": "managed-skill",
+          "sourceId": "oh-my-harness-managed"
         },
         "opencode": {
           "state": "pending",
           "packaging": "native-skill",
-          "sourceId": "anthropic-official-plugins"
+          "sourceId": "oh-my-harness-managed"
         },
         "codex": {
           "state": "pending",
           "packaging": "native-skill",
-          "sourceId": "anthropic-official-plugins"
+          "sourceId": "oh-my-harness-managed"
         }
       }
     }

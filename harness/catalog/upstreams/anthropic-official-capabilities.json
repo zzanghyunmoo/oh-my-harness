@@ -1,0 +1,368 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "official-capability-lock",
+  "repository": {
+    "provider": "github",
+    "url": "https://github.com/anthropics/claude-plugins-official",
+    "branch": "main",
+    "commit": "66799ffb4611b7e0c3af391c7569823a4d6b4246",
+    "tree": "f6f817093b9f0bb132393810fa5d029f9d3f98cf",
+    "reviewedAt": "2026-07-24",
+    "marketplace": {
+      "path": ".claude-plugin/marketplace.json",
+      "sha256": "006877b3e41b177aaada7620d09c3ea773873cc515d1339153d2ac48054962f4"
+    }
+  },
+  "candidates": [
+    {
+      "capabilityId": "lsp-jdtls",
+      "pluginName": "jdtls-lsp",
+      "disposition": "accepted",
+      "path": "plugins/jdtls-lsp",
+      "pathTree": "b1d80f2ddcf33ba5aef825a0a34e769acb57dc71",
+      "contentSha256": "b2fd1baf631c7b441ba112425504362f7dea875e6e1984d0af1c4d88569d86df",
+      "marketplaceEntrySha256": "90f21e21ba946809b628a8a9e3d079f291a7ca79eacac3a98a24716ed63ef7f9",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/jdtls-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "jdtls", "command": "jdtls", "args": [] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["jdtls"]
+      }
+    },
+    {
+      "capabilityId": "lsp-kotlin",
+      "pluginName": "kotlin-lsp",
+      "disposition": "accepted",
+      "path": "plugins/kotlin-lsp",
+      "pathTree": "6bef850af7ccf9306122f1387686dc493444fdc1",
+      "contentSha256": "09cb3851856ab12a6471633b41e455e356b5eb9f84e775111347555a43ab2a5a",
+      "marketplaceEntrySha256": "949ac114e0ffe7aaa9e82acfbc80a417c18ae302eac62db8b5aa598b3233f806",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/kotlin-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "kotlin-lsp", "command": "kotlin-lsp", "args": ["--stdio"] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["kotlin-lsp"]
+      }
+    },
+    {
+      "capabilityId": "lsp-csharp",
+      "pluginName": "csharp-lsp",
+      "disposition": "accepted",
+      "path": "plugins/csharp-lsp",
+      "pathTree": "4cf8886400a0fef8d7c1cbd7b1eb186bca427ce5",
+      "contentSha256": "cb0726353149a188de87ae171be093d7d3938e3fa8b7f74adb2ad6503b20e914",
+      "marketplaceEntrySha256": "f00d24956c8d23a0a475124aecef6631a51ab69e3f82531688e8aa2a0934b269",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/csharp-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "csharp-ls", "command": "csharp-ls", "args": [] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["csharp-ls"]
+      }
+    },
+    {
+      "capabilityId": "lsp-clangd",
+      "pluginName": "clangd-lsp",
+      "disposition": "accepted",
+      "path": "plugins/clangd-lsp",
+      "pathTree": "9de9ac11fbbbaa13e9d11ddff47567c5cfa2b03b",
+      "contentSha256": "1ead5e5f4259331ac0cf6a4e922dd09bb64d49c95977d176aff83299226a7ae1",
+      "marketplaceEntrySha256": "c4b48f7ad1313a5da53226e6c314fba47039dea4f0c761d9b8f11320d9d06ca6",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/clangd-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "clangd", "command": "clangd", "args": ["--background-index"] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["clangd"]
+      }
+    },
+    {
+      "capabilityId": "lsp-gopls",
+      "pluginName": "gopls-lsp",
+      "disposition": "accepted",
+      "path": "plugins/gopls-lsp",
+      "pathTree": "ff2c998ee9931aa2301bf24be5d19969292f881a",
+      "contentSha256": "1466933932fb56958e5d5aeb3a5c24abefb31bd52f238a20eee9e6351a956d77",
+      "marketplaceEntrySha256": "af4a2bdd3bc5aaaf40b77096e99901b60659197717cbda8149908b9b0aeb8421",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/gopls-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "gopls", "command": "gopls", "args": [] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["gopls"]
+      }
+    },
+    {
+      "capabilityId": "lsp-pyright",
+      "pluginName": "pyright-lsp",
+      "disposition": "accepted",
+      "path": "plugins/pyright-lsp",
+      "pathTree": "07bf6f98043ab1ae5c23a94793a4bf269b47b079",
+      "contentSha256": "f05ca475a5da5633516f47b60f0d9bc533dbfb17ea769652943ca3911f0ca5a2",
+      "marketplaceEntrySha256": "af2ff8a715d0015187333b0afdebdeaa9461f15821c05af4b09f0ab1835363c8",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/pyright-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "pyright", "command": "pyright-langserver", "args": ["--stdio"] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["pyright-langserver"]
+      }
+    },
+    {
+      "capabilityId": "lsp-typescript",
+      "pluginName": "typescript-lsp",
+      "disposition": "accepted",
+      "path": "plugins/typescript-lsp",
+      "pathTree": "1e0f515854250982dd8b62b338443596bef164d4",
+      "contentSha256": "77f0efcdfdcadfa3ca84441988f52338ee57186b299256138b08d19774e80578",
+      "marketplaceEntrySha256": "82fcfb94a053e5d63ee3a356c42dcdd0cf6d8e443b62c939ba3db5c950c0296b",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/typescript-lsp/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [
+          { "id": "typescript", "command": "typescript-language-server", "args": ["--stdio"] }
+        ],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["typescript-language-server"]
+      }
+    },
+    {
+      "capabilityId": "code-review",
+      "pluginName": "code-review",
+      "disposition": "accepted",
+      "path": "plugins/code-review",
+      "pathTree": "67f860bfae9ae06a0dba9edffcbb6d811a43f83b",
+      "contentSha256": "d61bde6ea24f76817f95be6e24a22b232db07f2bce36b3e6e7fdf2d871b5331e",
+      "marketplaceEntrySha256": "2a07d70574605ce98ebb5f8d303b6807e35959ea3ca179188cfece6aebdce2b5",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/code-review/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": ["code-review"],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [],
+        "packageScripts": [],
+        "executableFiles": [],
+        "externalExecutables": ["gh"]
+      }
+    },
+    {
+      "capabilityId": "skill-creator",
+      "pluginName": "skill-creator",
+      "disposition": "accepted",
+      "path": "plugins/skill-creator",
+      "pathTree": "5117ec09c9f5784d327232a604192873f4de33ce",
+      "contentSha256": "8a274038a32ae16eb169b8d19ab3058b856612ea4a558c74f380abb0aa6a6d0f",
+      "marketplaceEntrySha256": "9c66dddcefd0ccf1150d07eea7a0b8c8543a55662f252b0756bb013056507e7a",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/skill-creator/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": ["skill-creator"],
+        "commands": [],
+        "hooks": [],
+        "mcpServers": [],
+        "lspServers": [],
+        "packageScripts": [],
+        "executableFiles": [
+          "skills/skill-creator/eval-viewer/generate_review.py",
+          "skills/skill-creator/scripts/aggregate_benchmark.py",
+          "skills/skill-creator/scripts/generate_report.py",
+          "skills/skill-creator/scripts/improve_description.py",
+          "skills/skill-creator/scripts/package_skill.py",
+          "skills/skill-creator/scripts/quick_validate.py",
+          "skills/skill-creator/scripts/run_eval.py",
+          "skills/skill-creator/scripts/run_loop.py"
+        ],
+        "externalExecutables": ["claude", "python3"]
+      }
+    },
+    {
+      "capabilityId": "ralph-loop",
+      "pluginName": "ralph-loop",
+      "disposition": "accepted",
+      "path": "plugins/ralph-loop",
+      "pathTree": "0ca8d316e91a4dfc17d83651256b641739660807",
+      "contentSha256": "0f74d395ff54cd8f78d7137930ed3e36eba372323ccc0f911f78dd181e0496ed",
+      "marketplaceEntrySha256": "c406819fd994ac16ff3f5f540c1cb4bdfd0d57fd7e82c6d9a981323ea98d3781",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/ralph-loop/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "none" },
+      "policy": {
+        "mutableDependencyResolution": false,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": ["cancel-ralph", "help", "ralph-loop"],
+        "hooks": ["Stop"],
+        "mcpServers": [],
+        "lspServers": [],
+        "packageScripts": [],
+        "executableFiles": [
+          "hooks/stop-hook.sh",
+          "scripts/setup-ralph-loop.sh"
+        ],
+        "externalExecutables": ["bash", "jq"]
+      }
+    },
+    {
+      "capabilityId": "security-guidance",
+      "pluginName": "security-guidance",
+      "disposition": "rejected",
+      "rejectionReason": "SessionStart performs an unpinned mutable pip install of claude-agent-sdk without a dependency lock.",
+      "path": "plugins/security-guidance",
+      "pathTree": "1c9eb6bfc5044ec30879ba66a57f00ce3b77cc66",
+      "contentSha256": "5479e0e6b58be76c0955fc84a261c82cec20ff95e8fafeaa06ad72a8ba6c7b20",
+      "marketplaceEntrySha256": "8b460db9a971f53be62ad74a372e603f740514acede6074ff45fddc2653b0809",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "plugins/security-guidance/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      "dependencyLock": { "kind": "missing" },
+      "policy": {
+        "mutableDependencyResolution": true,
+        "unexpectedExecutableSurfaces": "deny"
+      },
+      "surfaces": {
+        "skills": [],
+        "commands": [],
+        "hooks": ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"],
+        "mcpServers": [],
+        "lspServers": [],
+        "packageScripts": [],
+        "executableFiles": [
+          "hooks/ensure_agent_sdk.py",
+          "hooks/security_reminder_hook.py",
+          "hooks/sg-python.sh"
+        ],
+        "externalExecutables": ["bash", "git", "pip", "python3"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "managed-capability-lock",
+  "contentDigestAlgorithm": "sha256-path-content-v1",
+  "setSha256": "2ef1b7aa83d60b968f7733f24302c1625eac5b5faa4d41bf2d6824cf5bd78c41",
+  "capabilities": [
+    {
+      "capabilityId": "goal",
+      "path": "plugins/oh-my-harness/skills/goal",
+      "contentSha256": "a335db4a29911636efb4f51a491b7774cb70cd84871c93eeae91f1e8efd6c9fb",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "898c32fc9ac397bfd22033c7689bfdbd696dfe40ea75fdc6b0ca60bbf661bd05"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "No mutation by default; underlying work retains its original authority boundary.",
+      "approvalPosture": "Only explicit goal-tracking intent activates the workflow."
+    },
+    {
+      "capabilityId": "deep-research",
+      "path": "plugins/oh-my-harness/skills/deep-research",
+      "contentSha256": "88b0a24f839755b5fedec6b010f94c4e44e734ea8e862e0e411bb2e4874d8baa",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "a93611cf0fe20862372078f9378eb2c909a84c2aaf9702b3a8b4579b2b847efc"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "Read-only network and workspace inspection.",
+      "approvalPosture": "Private-source access and all external writes require explicit authority."
+    },
+    {
+      "capabilityId": "ideation",
+      "path": "plugins/oh-my-harness/skills/ideation",
+      "contentSha256": "746b0f38b2ab9fcadee8bfa3fc7d58584f0622a1de4cc06e94f66c4d56fbcf0c",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "1627a2fc9f019a8bac87ee0fa2928f1f9d61e47e561c6d0dac41970e562229f9"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "None.",
+      "approvalPosture": "The user selects a direction before implementation or external mutation."
+    },
+    {
+      "capabilityId": "brainstorm",
+      "path": "plugins/oh-my-harness/skills/brainstorm",
+      "contentSha256": "64ede79aedaeb5cd6100eb881de0a8a756d12720819a4abcd868dcaea6d7ba2b",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "42fca9669c5fad92da1bb08b5b286cd0710c45cafc1831efeb0417199af7d852"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "Read-only discovery.",
+      "approvalPosture": "Requirements remain proposals until accepted; persistence requires approval."
+    },
+    {
+      "capabilityId": "plan",
+      "path": "plugins/oh-my-harness/skills/plan",
+      "contentSha256": "1be99baccecd7f7fda69a07824153b57956162bbd80be1af5700305636681f36",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "d3bad448c9de7ab5311915472b8a5f68077a078a6acbd3de40ad1c4104cc5007"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "Read-only repository and document inspection.",
+      "approvalPosture": "Writing or publishing a plan and product-scope changes require explicit approval."
+    },
+    {
+      "capabilityId": "doc-review",
+      "path": "plugins/oh-my-harness/skills/doc-review",
+      "contentSha256": "c3e9f57a7547a1be7353fe4e3c1b2323884e4aa09ee5907b89cd91767783fda2",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "eed38b9764d3bfe9c673571e97ceaf993093280180e61512f8bebaa0534dbc3c"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "None.",
+      "approvalPosture": "Applying findings or posting comments requires separate exact authorization."
+    },
+    {
+      "capabilityId": "security-guidance",
+      "path": "plugins/oh-my-harness/skills/security-guidance",
+      "contentSha256": "631d9730552348e45ef6fdf523ed747020db5717760503a35c6c6443c8719799",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "9dbbe4876bd60d3a0d507070b6003ae436f95bc970617617b5be495a7571b43a"
+        }
+      ],
+      "runtimeNeutral": true,
+      "behaviorallyActive": true,
+      "sideEffects": "Read-only inspection; no automatic hooks, dependency installation, or model endpoint upload.",
+      "approvalPosture": "Scanners, code execution, remote access, file changes, and publication require explicit authorization."
+    }
+  ]
+}
