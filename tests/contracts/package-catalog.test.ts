@@ -23,3 +23,15 @@ test("U5 one package catalog drives six installer and tool definitions", () => {
     assert.ok(definition.authenticationGuidance.length > 10);
   }
 });
+
+test("U5 exact package policies always pin a verifiable version", () => {
+  const packages = loadCatalogBundle(REPO_ROOT).packages.packages;
+
+  for (const entry of packages) {
+    if (entry.versionPolicy === "reviewed-package-manager-source") {
+      assert.equal(entry.version, undefined);
+      continue;
+    }
+    assert.match(entry.version ?? "", /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
+  }
+});

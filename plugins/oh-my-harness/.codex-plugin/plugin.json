@@ -16,7 +16,10 @@
     "startup-reconciliation",
     "workspace-cli"
   ],
-  "skills": "./skills/",
+  "skills": [
+    "./skills/",
+    "./codex/skills/"
+  ],
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/codex-hooks.json",
   "interface": {

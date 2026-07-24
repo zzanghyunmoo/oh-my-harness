@@ -1,6 +1,6 @@
-import { tool } from "@opencode-ai/plugin";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { z } from "zod";
 import {
   assertCurrentToolPolicy,
   cliToolDefinitionsForPolicy,
@@ -24,6 +24,7 @@ import {
 } from "../../plugins/oh-my-harness/scripts/startup-sync.mjs";
 
 const packageRoot = resolveOpenCodePackageRoot(import.meta.url);
+const tool = Object.assign((definition) => definition, { schema: z });
 
 function defaultRuntimeDependencies() {
   const configuredRoot =

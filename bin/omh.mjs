@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   formatOmhResult,
@@ -19,7 +20,8 @@ export {
 
 if (
   process.argv[1]
-  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  && realpathSync(fileURLToPath(import.meta.url))
+    === realpathSync(resolve(process.argv[1]))
 ) {
   try {
     await main();

@@ -27,7 +27,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -62,7 +62,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -97,7 +97,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -132,7 +132,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -167,7 +167,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -202,7 +202,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }
@@ -237,7 +237,7 @@
           "sourceId": "anthropic-official-plugins"
         },
         "codex": {
-          "state": "ready",
+          "state": "unsupported",
           "packaging": "native-plugin",
           "sourceId": "anthropic-official-plugins"
         }

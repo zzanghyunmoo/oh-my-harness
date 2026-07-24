@@ -319,7 +319,16 @@ test("U11 owned plugin manifests use Codex-native skills, MCP, and hook surfaces
 
   assert.equal(marketplace.name, "oh-my-harness");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/oh-my-harness");
-  assert.equal(plugin.skills, "./skills/");
+  assert.deepEqual(plugin.skills, ["./skills/", "./codex/skills/"]);
+  for (const id of ["code-review", "skill-creator", "ralph-loop"]) {
+    assert.match(
+      readFileSync(
+        join(PLUGIN_ROOT, "codex", "skills", id, "SKILL.md"),
+        "utf8",
+      ),
+      new RegExp(`^---\\nname: ${id}\\n`),
+    );
+  }
   assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.equal(plugin.hooks, "./hooks/codex-hooks.json");
   assert.match(

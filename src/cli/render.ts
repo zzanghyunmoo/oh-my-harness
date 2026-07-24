@@ -72,7 +72,7 @@ function help(topic: string | undefined, version: string): string {
     "Claude-first, strict TypeScript environment manager for Claude Code, OpenCode, and Codex.",
     "",
     "Usage:",
-    "  omh setup [options]",
+    "  omh setup [options] [--apply --digest sha256]",
     "  omh agents install|status [options]",
     "  omh tools install|doctor [options]",
     "  omh status|doctor [--root path] [--json]",

@@ -16,6 +16,7 @@
     "code-review",
     "startup-reconciliation"
   ],
+  "skills": "./skills/",
   "mcpServers": "./.mcp.claude.json",
   "userConfig": {
     "node_path": {

@@ -45,6 +45,7 @@ export interface ManagedStateReceipt {
     readonly kind: "file" | "directory" | "registration" | "executable";
     readonly target: string;
     readonly digest: string;
+    readonly repairSource?: string;
   }[];
   readonly releaseChannels?: Readonly<
     Record<

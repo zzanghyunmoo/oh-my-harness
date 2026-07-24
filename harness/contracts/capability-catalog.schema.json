@@ -201,6 +201,10 @@
             "reviewed-package-manager-source"
           ]
         },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
         "profileImportance": {
           "$ref": "#/$defs/profileImportance"
         }

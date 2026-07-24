@@ -186,6 +186,10 @@
         },
         "digest": {
           "$ref": "#/$defs/sha256"
+        },
+        "repairSource": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

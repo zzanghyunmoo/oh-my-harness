@@ -39,5 +39,8 @@ export function samePreimage(
 ): boolean {
   if (left.kind !== right.kind) return false;
   if (left.kind === "missing" || right.kind === "missing") return true;
+  if (left.kind === "directory" || right.kind === "directory") {
+    return left.sha256 === right.sha256;
+  }
   return left.sha256 === right.sha256 && left.size === right.size;
 }

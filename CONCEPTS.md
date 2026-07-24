@@ -66,6 +66,64 @@ The distinction between a runtime delivery gate and full Harness v2 parity.
 
 Claude milestone readiness is true only after the Claude Code vertical slice passes native verification. Harness v2 parity is true only after Claude Code, OpenCode, and Codex all pass the shared semantic, lifecycle, and safety contracts.
 
+### Adapter Delivery Readiness
+
+The release-level claim in the Capability Catalog that one runtime adapter has a
+tested native implementation of a semantic capability.
+
+Adapter Delivery Readiness is not proof that a particular machine currently has
+the native registration or external language-server executable. `omh status`,
+`omh doctor`, and startup context combine catalog delivery state with local
+observations before reporting Environment Readiness.
+
+### Environment Readiness
+
+The local, receipt-bound result for one selected Environment Profile.
+
+It requires the exact reviewed runtime, current Catalog Revision, receipt-owned
+native registration evidence, all required machine-shared packages, and every
+selected capability's runtime and external-executable prerequisites. Optional
+package absence produces `ready-with-optional-gaps`; missing required or
+unverifiable evidence never becomes ready.
+
+### Receipt-bound Runtime Context
+
+The bounded startup envelope shown to Claude Code, OpenCode, or Codex after
+native startup integration validates the Managed-state Receipt and inspects its
+owned state.
+
+The context names the runtime, profile, Catalog Revision, selected agents,
+package/capability states, reconciliation outcome, gaps, and preview-first
+remediation. Missing or corrupt receipts produce status-only context rather than
+guessing a profile.
+
+### Native Registration Marker
+
+A receipt-owned local witness that an exact apply completed a runtime's native
+marketplace/plugin/config registration.
+
+The marker is necessary but not sufficient for readiness. `omh doctor` also
+performs bounded read-only native inspection so a deleted or redirected runtime
+registration cannot remain ready merely because the marker exists.
+
+### Verified Official Marketplace Snapshot
+
+The local Claude official marketplace state accepted for an exact setup plan.
+
+It binds the reviewed repository commit marker, the complete marketplace
+manifest SHA-256, and every selected plugin's reconstructed Git tree SHA-1.
+An installed plugin name, mutable marketplace checkout, or cache directory by
+itself is not sufficient provenance.
+
+### Managed Payload Generation
+
+A content-addressed runtime package materialized under the OMH state root and
+used as the native marketplace/plugin source for the selected agents.
+
+The receipt owns the active generation and records a distinct same-digest local
+store as its repair source. Startup may atomically recreate a missing active
+generation from that store, but never overwrites an existing modified target.
+
 ## Legacy v1: Workspace Connector Auth
 
 ### Workspace Connector

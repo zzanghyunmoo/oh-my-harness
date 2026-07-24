@@ -63,6 +63,7 @@ export interface PackageCatalogEntry {
     | "exact-package-version"
     | "exact-release-artifact"
     | "reviewed-package-manager-source";
+  version?: string;
   profileImportance: Record<BuiltInProfileId, "required" | "optional">;
 }
 

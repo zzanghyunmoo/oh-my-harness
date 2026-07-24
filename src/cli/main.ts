@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   formatOmhResult,
@@ -43,7 +44,8 @@ async function entryPoint(): Promise<void> {
 const invokedPath = process.argv[1];
 if (
   invokedPath !== undefined
-  && import.meta.url === pathToFileURL(resolve(invokedPath)).href
+  && realpathSync(fileURLToPath(import.meta.url))
+    === realpathSync(resolve(invokedPath))
 ) {
   await entryPoint();
 }

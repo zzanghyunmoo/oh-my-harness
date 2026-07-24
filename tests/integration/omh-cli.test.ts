@@ -16,6 +16,7 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
+import { gitTreeSha1 } from "../../dist/install/official-marketplace.js";
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -33,6 +34,75 @@ function createExecutable(directory: string, command: string): string {
   return path;
 }
 
+function createOfficialMarketplaceFixture(
+  repositoryRoot: string,
+  claudeConfigRoot: string,
+): Map<string, string> {
+  const lockPath = join(
+    repositoryRoot,
+    "harness",
+    "catalog",
+    "upstreams",
+    "anthropic-official-capabilities.json",
+  );
+  const lock = JSON.parse(readFileSync(lockPath, "utf8")) as {
+    repository: {
+      commit: string;
+      marketplace: { path: string; sha256: string };
+    };
+    candidates: Array<{
+      capabilityId: string;
+      disposition: string;
+      path: string;
+      pathTree: string;
+      pluginName: string;
+    }>;
+  };
+  const marketplaceRoot = join(
+    claudeConfigRoot,
+    "plugins",
+    "marketplaces",
+    "claude-plugins-official",
+  );
+  const installPaths = new Map<string, string>();
+  const plugins: Array<{
+    name: string;
+    source: string;
+    version: string;
+  }> = [];
+  mkdirSync(marketplaceRoot, { recursive: true });
+  writeFileSync(join(marketplaceRoot, ".gcs-sha"), `${lock.repository.commit}\n`);
+  for (const candidate of lock.candidates.filter(
+    ({ disposition }) => disposition === "accepted",
+  )) {
+    const pluginRoot = join(marketplaceRoot, candidate.path);
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(
+      join(pluginRoot, "fixture.txt"),
+      `${candidate.capabilityId}\n`,
+    );
+    candidate.pathTree = gitTreeSha1(pluginRoot);
+    installPaths.set(
+      `${candidate.pluginName}@claude-plugins-official`,
+      pluginRoot,
+    );
+    plugins.push({
+      name: candidate.pluginName,
+      source: `./${candidate.path}`,
+      version: "1.0.0",
+    });
+  }
+  const manifestPath = join(
+    marketplaceRoot,
+    lock.repository.marketplace.path,
+  );
+  mkdirSync(join(manifestPath, ".."), { recursive: true });
+  writeFileSync(manifestPath, `${JSON.stringify({ plugins }, null, 2)}\n`);
+  lock.repository.marketplace.sha256 = sha256(manifestPath);
+  writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+  return installPaths;
+}
+
 test("U13 CLI closes preview, exact apply, receipt, status, and startup context end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "omh-v2-cli-"));
   const repositoryRoot = join(root, "repository");
@@ -42,20 +112,56 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   const calls: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
   let marketplaceRegistered = false;
   let pluginInstalled = false;
+  let managedMarketplaceRoot: string | null = null;
+  const officialInstalled = new Set<string>();
 
   try {
     mkdirSync(repositoryRoot);
     mkdirSync(workspace);
     mkdirSync(binaryRoot);
     cpSync("harness", join(repositoryRoot, "harness"), { recursive: true });
-    mkdirSync(join(repositoryRoot, "dist", "cli"), { recursive: true });
-    copyFileSync(
-      join("dist", "cli", "main.js"),
-      join(repositoryRoot, "dist", "cli", "main.js"),
+    for (const path of [
+      ".agents",
+      ".claude-plugin",
+      ".opencode",
+      "dist",
+      "plugins",
+    ]) {
+      cpSync(path, join(repositoryRoot, path), { recursive: true });
+    }
+    copyFileSync("package.json", join(repositoryRoot, "package.json"));
+    cpSync(
+      join("node_modules", "zod"),
+      join(repositoryRoot, "node_modules", "zod"),
+      { recursive: true },
+    );
+    cpSync(
+      join("node_modules", "typebox"),
+      join(repositoryRoot, "node_modules", "typebox"),
+      { recursive: true },
+    );
+    const claudeConfigRoot = join(root, "claude");
+    const officialInstallPaths = createOfficialMarketplaceFixture(
+      repositoryRoot,
+      claudeConfigRoot,
     );
 
     const claudePath = createExecutable(binaryRoot, "claude");
-    for (const command of ["linear", "ntn", "gh", "jira", "confluence", "glab"]) {
+    for (const command of [
+      "linear",
+      "ntn",
+      "gh",
+      "jira",
+      "confluence",
+      "glab",
+      "jdtls",
+      "kotlin-lsp",
+      "csharp-ls",
+      "clangd",
+      "gopls",
+      "pyright-langserver",
+      "typescript-language-server",
+    ]) {
       createExecutable(binaryRoot, command);
     }
 
@@ -82,39 +188,77 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     const env = {
       ...process.env,
       PATH: `${binaryRoot}${delimiter}${process.env.PATH ?? ""}`,
+      CLAUDE_CONFIG_DIR: claudeConfigRoot,
       XDG_CONFIG_HOME: join(root, "config"),
     };
     const commonOptions = {
       cwd: workspace,
       env,
       repositoryRoot,
+      inspectPackageVersion(
+        _path: string,
+        id: "notion" | "linear" | "jira" | "confluence" | "github" | "gitlab",
+      ) {
+        return {
+          confluence: "2.18.0",
+          jira: "1.7.0",
+          linear: "2.0.0",
+          notion: "0.19.0",
+        }[id] ?? null;
+      },
       runCommand(command: string, args: readonly string[]) {
         calls.push({ command, args: [...args] });
         const invocation = args.join(" ");
         if (invocation === "plugin marketplace list --json") {
           return JSON.stringify(
             marketplaceRegistered
-              ? [{ name: "oh-my-harness", path: repositoryRoot }]
+              ? [{ name: "oh-my-harness", path: managedMarketplaceRoot }]
               : [],
           );
         }
         if (invocation === "plugin list --json") {
-          return JSON.stringify(
-            pluginInstalled
-              ? [{
-                  enabled: true,
-                  id: "oh-my-harness@oh-my-harness",
-                  scope: "user",
-                  version: "0.2.0",
-                }]
-              : [],
-          );
+          const plugins = [...officialInstalled].map((id) => ({
+            enabled: true,
+            id,
+            installPath: officialInstallPaths.get(id),
+            scope: "user",
+            version: "1.0.0",
+          }));
+          if (pluginInstalled && managedMarketplaceRoot !== null) {
+            plugins.push({
+              enabled: true,
+              id: "oh-my-harness@oh-my-harness",
+              installPath: join(
+                managedMarketplaceRoot,
+                "plugins",
+                "oh-my-harness",
+              ),
+              scope: "user",
+              version: "0.2.0",
+            });
+          }
+          return JSON.stringify(plugins);
         }
         if (invocation.startsWith("plugin marketplace add ")) {
           marketplaceRegistered = true;
+          managedMarketplaceRoot = args[3] ?? null;
         }
-        if (invocation.startsWith("plugin install ")) pluginInstalled = true;
-        if (invocation.startsWith("plugin uninstall ")) pluginInstalled = false;
+        if (invocation.startsWith("plugin install ")) {
+          const selector = args[2];
+          if (selector === "oh-my-harness@oh-my-harness") {
+            pluginInstalled = true;
+          } else if (selector !== undefined) {
+            officialInstalled.add(selector);
+          }
+        }
+        if (invocation.startsWith("plugin uninstall ")) {
+          const selector = args[2];
+          if (selector === "oh-my-harness@oh-my-harness") {
+            pluginInstalled = false;
+          } else if (selector !== undefined) {
+            officialInstalled.delete(selector);
+          }
+        }
         return "";
       },
     };
@@ -178,7 +322,12 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(existsSync(receiptPath), true);
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
       desiredState: { profileId: string; selectedAgents: string[] };
-      ownership: Array<{ id: string; kind: string }>;
+      ownership: Array<{
+        id: string;
+        kind: string;
+        repairSource?: string;
+        target: string;
+      }>;
     };
     assert.equal(receipt.desiredState.profileId, "personal");
     assert.deepEqual(receipt.desiredState.selectedAgents, ["claude-code"]);
@@ -228,6 +377,34 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.match(startup.envelope?.renderedContext ?? "", /profile: personal/);
     assert.match(startup.envelope?.renderedContext ?? "", /capabilities:/);
     assert.match(startup.envelope?.renderedContext ?? "", /packages:/);
+
+    const payload = receipt.ownership.find(
+      ({ id }) => id === "plugin:runtime-package",
+    );
+    assert.ok(payload?.repairSource);
+    rmSync(payload.target, { recursive: true, force: true });
+    const drifted = await runOmh(
+      ["status", "--root", stateRoot],
+      commonOptions,
+    );
+    assert.equal(drifted.state, "unverifiable");
+    assert.ok(drifted.status?.blockers.includes("plugin:runtime-package"));
+    const repaired = await runOmh(
+      [
+        "startup",
+        "--runtime",
+        "claude-code",
+        "--mode",
+        "managed-prelaunch",
+        "--receipt",
+        receiptPath,
+        "--format",
+        "json",
+      ],
+      commonOptions,
+    );
+    assert.equal(repaired.envelope?.context.mode, "ready");
+    assert.equal(existsSync(payload.target), true);
 
     const callsBeforeStale = calls.length;
     const stale = await runOmh(

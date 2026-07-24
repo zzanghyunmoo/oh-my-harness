@@ -6,6 +6,10 @@ export type ObservedPreimage =
       readonly kind: "file";
       readonly sha256: string;
       readonly size: number;
+    }
+  | {
+      readonly kind: "directory";
+      readonly sha256: string;
     };
 
 export interface PlanAction {

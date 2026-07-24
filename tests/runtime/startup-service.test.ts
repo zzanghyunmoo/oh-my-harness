@@ -117,7 +117,18 @@ test("U13 startup service derives local-only context and publishes OpenCode snap
     mkdirSync(trustedBin, { recursive: true });
     mkdirSync(workspaceBin, { recursive: true });
     writeFileSync(managedPath, "approved goal\n");
-    for (const command of ["linear", "ntn", "gh"]) {
+    for (const command of [
+      "linear",
+      "ntn",
+      "gh",
+      "jdtls",
+      "kotlin-lsp",
+      "csharp-ls",
+      "clangd",
+      "gopls",
+      "pyright-langserver",
+      "typescript-language-server",
+    ]) {
       executable(join(trustedBin, command));
     }
     executable(join(workspaceBin, "jira"));
@@ -260,7 +271,7 @@ test("U13 native post-discovery repairs one deleted receipt pin and requires res
     assert.equal(readFileSync(managedPath, "utf8"), "restored goal\n");
     const startup = await createFileOpenCodeRuntimeDependencies({ stateRoot })
       .inspectStartup(workspace);
-    assert.equal(startup.ready, true);
+    assert.equal(startup.ready, false);
     assert.equal(startup.restartRequired, true);
   } finally {
     rmSync(root, { recursive: true, force: true });

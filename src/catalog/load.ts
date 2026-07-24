@@ -213,6 +213,14 @@ function validateReferences(source: CatalogSourceDocuments): void {
     assertApprovedSource(sources, agent.sourceId, `agent ${agent.id}`);
   }
   for (const packageEntry of source.packages.packages) {
+    const exactVersionRequired =
+      packageEntry.versionPolicy === "exact-package-version"
+      || packageEntry.versionPolicy === "exact-release-artifact";
+    if (exactVersionRequired !== (packageEntry.version !== undefined)) {
+      throw new Error(
+        `${packageEntry.id}: exact version policies require one version and reviewed package-manager sources must omit it`,
+      );
+    }
     const installerOperatingSystems = packageEntry.installers.map(({ os }) => os);
     if (new Set(installerOperatingSystems).size !== installerOperatingSystems.length) {
       throw new Error(`${packageEntry.id}: duplicate installer operating system`);

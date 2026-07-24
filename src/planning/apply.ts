@@ -112,6 +112,9 @@ function receiptFor(
         kind,
         target: action.target,
         digest,
+        ...(typeof action.payload?.repairSource === "string"
+          ? { repairSource: action.payload.repairSource }
+          : {}),
       };
     });
   return {
@@ -131,7 +134,7 @@ function receiptFor(
       addReviewedContent: true,
       channelId: "stable",
       profileId: plan.desiredState.profileId,
-      artifactClasses: ["managed-skill"],
+      artifactClasses: ["managed-skill", "plugin"],
       permissionScopes: ["workspace:read"],
     },
     runtimeReadiness: selectedAgents.map((agentId: AgentId) => ({

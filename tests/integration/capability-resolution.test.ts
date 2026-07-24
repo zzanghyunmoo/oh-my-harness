@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +22,10 @@ import {
   verifyOfficialCandidate,
   type ObservedOfficialCandidate,
 } from "../../dist/install/capabilities.js";
+import {
+  gitTreeSha1,
+  inspectOfficialClaudeMarketplace,
+} from "../../dist/install/official-marketplace.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -227,4 +239,72 @@ test("U6 LSP readiness requires both native configuration and a supported server
       requiredExecutables: ["jdtls"],
     },
   );
+});
+
+test("U8 Claude official marketplace inspection verifies commit, manifest, and every selected Git tree", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-official-marketplace-"));
+  try {
+    const lock = structuredClone(
+      loadCapabilityProvenance(REPO_ROOT).official,
+    );
+    const marketplaceRoot = join(
+      root,
+      "plugins",
+      "marketplaces",
+      "claude-plugins-official",
+    );
+    mkdirSync(marketplaceRoot, { recursive: true });
+    writeFileSync(
+      join(marketplaceRoot, ".gcs-sha"),
+      `${lock.repository.commit}\n`,
+    );
+    const plugins = [];
+    for (const candidate of lock.candidates.filter(
+      ({ disposition }) => disposition === "accepted",
+    )) {
+      const pluginRoot = join(marketplaceRoot, candidate.path);
+      mkdirSync(pluginRoot, { recursive: true });
+      writeFileSync(
+        join(pluginRoot, "content.txt"),
+        `${candidate.capabilityId}\n`,
+      );
+      candidate.pathTree = gitTreeSha1(pluginRoot);
+      plugins.push({
+        name: candidate.pluginName,
+        source: `./${candidate.path}`,
+        version: "1.0.0",
+      });
+    }
+    const manifestPath = join(
+      marketplaceRoot,
+      lock.repository.marketplace.path,
+    );
+    mkdirSync(join(manifestPath, ".."), { recursive: true });
+    writeFileSync(manifestPath, `${JSON.stringify({ plugins }, null, 2)}\n`);
+    lock.repository.marketplace.sha256 = createHash("sha256")
+      .update(readFileSync(manifestPath))
+      .digest("hex");
+
+    const exact = inspectOfficialClaudeMarketplace(lock, {
+      CLAUDE_CONFIG_DIR: root,
+    });
+    assert.equal(exact.state, "ready");
+    assert.equal(exact.plugins.length, 10);
+
+    const first = lock.candidates.find(
+      ({ disposition }) => disposition === "accepted",
+    );
+    assert.ok(first);
+    writeFileSync(
+      join(marketplaceRoot, first.path, "content.txt"),
+      "drift\n",
+    );
+    const drifted = inspectOfficialClaudeMarketplace(lock, {
+      CLAUDE_CONFIG_DIR: root,
+    });
+    assert.equal(drifted.state, "unverifiable");
+    assert.match(drifted.detail, /plugin tree/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

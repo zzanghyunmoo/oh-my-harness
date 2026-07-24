@@ -7,10 +7,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  inspectManagedRuntimePayload,
+  materializeManagedRuntimePayload,
+} from "../../dist/install/managed-payload.js";
 import {
   OPEN_CODE_LSP_CAPABILITY_IDS,
   OPEN_CODE_WORKFLOW_CAPABILITY_IDS,
@@ -381,6 +385,30 @@ test("U10 packaged plugin resolves from import.meta.url and runs from arbitrary 
   } finally {
     process.chdir(originalCwd);
     rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test("U10 receipt-owned payload carries its exact OpenCode runtime dependency", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-payload-"));
+  try {
+    const payload = inspectManagedRuntimePayload(REPOSITORY_ROOT, root);
+    materializeManagedRuntimePayload(payload);
+    const pluginPath = join(
+      payload.activeRoot,
+      ".opencode",
+      "plugins",
+      "oh-my-harness.js",
+    );
+    assert.equal(
+      resolve(resolveOpenCodePackageRoot(pathToFileURL(pluginPath).href)),
+      resolve(payload.activeRoot),
+    );
+    const module = await import(
+      `${pathToFileURL(pluginPath).href}?payload=${Date.now()}`
+    );
+    assert.equal(typeof module.createOpenCodePlugin, "function");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

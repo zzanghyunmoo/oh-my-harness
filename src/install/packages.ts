@@ -8,6 +8,7 @@ import type { PackageId } from "../domain/catalog.js";
 export type PackagePlanStatus =
   | "installed-unconfigured"
   | "installable"
+  | "version-drift"
   | "manager-missing"
   | "unsupported";
 
@@ -19,6 +20,8 @@ export interface PackageInstallPlanEntry {
   readonly status: PackagePlanStatus;
   readonly executables: readonly string[];
   readonly installedPath?: string;
+  readonly expectedVersion?: string;
+  readonly observedVersion?: string;
   readonly installerKind?: "command" | "managed-artifact";
   readonly installerCommand?: string;
   readonly installerArgs?: readonly string[];
@@ -33,6 +36,7 @@ export interface PackagePlanningOptions {
   readonly os: OperatingSystem;
   findExecutable(commands: readonly string[]): string | null;
   hasInstaller(command: string): boolean;
+  inspectVersion?(path: string, id: PackageId): string | null;
 }
 
 interface InstallInvocation {
@@ -94,13 +98,68 @@ export function planPackageInstallations(
         invocation?.guidance
         ?? `${packageEntry.displayName} is unsupported on ${options.os}.`,
       authenticationGuidance: packageEntry.authentication.guidance,
+      ...(packageEntry.version === undefined
+        ? {}
+        : { expectedVersion: packageEntry.version }),
       ...(invocation === undefined ? {} : { installerKind: invocation.kind }),
     };
     if (installedPath !== null) {
+      const observedVersion = options.inspectVersion?.(installedPath, id);
+      if (
+        packageEntry.version !== undefined
+        && observedVersion !== undefined
+        && observedVersion !== packageEntry.version
+      ) {
+        const drift = {
+          ...base,
+          installedPath,
+          ...(observedVersion === null ? {} : { observedVersion }),
+          guidance: observedVersion === null
+            ? `${packageEntry.displayName} version could not be verified; reinstall the exact reviewed version.`
+            : `${packageEntry.displayName} ${observedVersion} differs from reviewed ${packageEntry.version}.`,
+        };
+        if (!supported || invocation === undefined) {
+          return { ...drift, status: "unsupported" as const };
+        }
+        if (
+          invocation.kind === "command"
+          && (
+            invocation.command === undefined
+            || !options.hasInstaller(invocation.command)
+          )
+        ) {
+          return {
+            ...drift,
+            status: "manager-missing" as const,
+            ...(invocation.command === undefined
+              ? {}
+              : { installerCommand: invocation.command }),
+            installerArgs: [...invocation.args],
+          };
+        }
+        if (invocation.kind === "managed-artifact") {
+          return {
+            ...drift,
+            status: "unsupported" as const,
+            installerArgs: [...invocation.args],
+          };
+        }
+        return {
+          ...drift,
+          status: "version-drift" as const,
+          ...(invocation.command === undefined
+            ? {}
+            : { installerCommand: invocation.command }),
+          installerArgs: [...invocation.args],
+        };
+      }
       return {
         ...base,
         status: "installed-unconfigured" as const,
         installedPath,
+        ...(observedVersion === null || observedVersion === undefined
+          ? {}
+          : { observedVersion }),
       };
     }
     if (!supported || invocation === undefined) {

@@ -9,7 +9,6 @@ import {
   mkdirSync,
   openSync,
   readSync,
-  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -20,9 +19,7 @@ import {
   isAbsolute,
   join,
   parse,
-  relative,
   resolve,
-  sep,
 } from "node:path";
 
 import {
@@ -39,6 +36,7 @@ import {
   isAgentId,
   type AgentId,
 } from "../domain/catalog.js";
+import { hashManagedDirectory } from "../install/managed-payload.js";
 import type {
   ManagedStateReceipt,
   StatePort,
@@ -76,7 +74,6 @@ import type {
 
 const MAX_RECEIPT_BYTES = 256 * 1024;
 const MAX_LOCAL_ARTIFACT_BYTES = 64 * 1024 * 1024;
-const MAX_DIRECTORY_ENTRIES = 4_096;
 const MAX_SNAPSHOT_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 
@@ -198,6 +195,15 @@ function semanticReceiptError(
       && !isAbsolute(ownership.target)
     ) {
       return `${ownership.id}: local ownership target must be absolute`;
+    }
+    if (
+      ownership.repairSource !== undefined
+      && (
+        !isAbsolute(ownership.repairSource)
+        || resolve(ownership.repairSource) === resolve(ownership.target)
+      )
+    ) {
+      return `${ownership.id}: repair source must be a distinct absolute path`;
     }
   }
   return null;
@@ -348,65 +354,6 @@ function hashFile(path: string): {
   };
 }
 
-function hashDirectory(path: string): string {
-  const root = resolve(path);
-  const entries: Array<{
-    readonly path: string;
-    readonly sha256: string;
-    readonly size: number;
-  }> = [];
-  let totalBytes = 0;
-  let totalEntries = 0;
-
-  function visit(directory: string, depth: number): void {
-    if (depth > 64) {
-      throw new Error("managed directory exceeds the depth limit");
-    }
-    const children = readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
-    for (const child of children) {
-      totalEntries += 1;
-      if (totalEntries > MAX_DIRECTORY_ENTRIES) {
-        throw new Error("managed directory exceeds the entry limit");
-      }
-      const childPath = join(directory, child.name);
-      const stat = lstatSync(childPath);
-      if (stat.isSymbolicLink()) {
-        throw new Error("managed directory contains a symbolic link");
-      }
-      if (stat.isDirectory()) {
-        visit(childPath, depth + 1);
-        continue;
-      }
-      if (!stat.isFile()) {
-        throw new Error("managed directory contains an unsupported entry");
-      }
-      const hashed = hashFile(childPath);
-      totalBytes += hashed.bytes;
-      if (totalBytes > MAX_LOCAL_ARTIFACT_BYTES) {
-        throw new Error("managed directory exceeds the bounded size limit");
-      }
-      entries.push({
-        path: relative(root, childPath).split(sep).join("/"),
-        sha256: hashed.sha256,
-        size: hashed.bytes,
-      });
-    }
-  }
-
-  visit(root, 0);
-  const digest = createHash("sha256");
-  for (const entry of entries) {
-    digest.update(entry.path);
-    digest.update("\0");
-    digest.update(entry.sha256);
-    digest.update("\0");
-    digest.update(String(entry.size));
-    digest.update("\n");
-  }
-  return digest.digest("hex");
-}
-
 function observeOwnedArtifact(
   ownership: OwnershipEntry,
 ): ManagedArtifactObservation {
@@ -421,7 +368,7 @@ function observeOwnedArtifact(
       }
       return {
         exists: true,
-        sha256: hashDirectory(ownership.target),
+        sha256: hashManagedDirectory(ownership.target),
         userOwned: false,
       };
     }
@@ -471,7 +418,10 @@ function pinnedArtifact(ownership: OwnershipEntry): PinnedManagedArtifact {
 function localOwnership(
   receipt: ManagedStateReceipt,
 ): readonly OwnershipEntry[] {
-  return receipt.ownership.filter(({ kind }) => kind !== "registration");
+  return receipt.ownership.filter(
+    ({ kind, repairSource }) =>
+      kind !== "registration" && repairSource !== undefined,
+  );
 }
 
 async function inspectLocalSnapshot(
@@ -598,12 +548,36 @@ function capabilityState(
   return "pending";
 }
 
+function registrationMarkerReady(
+  receipt: ManagedStateReceipt,
+  id: string,
+): boolean {
+  const entries = receipt.ownership.filter(
+    (entry) => entry.id === id && entry.kind === "registration",
+  );
+  if (
+    entries.length !== 1
+    || !isAbsolute(entries[0]!.target)
+    || !existsSync(entries[0]!.target)
+  ) {
+    return false;
+  }
+  try {
+    return hashFile(entries[0]!.target).sha256 === entries[0]!.digest;
+  } catch {
+    return false;
+  }
+}
+
 function capabilityObservations(
   input: {
     readonly catalog: CatalogBundle;
+    readonly environment: Readonly<Record<string, string | undefined>>;
+    readonly platform: NodeJS.Platform;
     readonly profile: EnvironmentProfile;
     readonly receipt: ManagedStateReceipt;
     readonly runtimeId: AgentId;
+    readonly workspace: string;
   },
 ): readonly RuntimeCapabilityObservation[] {
   const capabilities = new Map(
@@ -612,20 +586,62 @@ function capabilityObservations(
   const runtimeState = input.receipt.runtimeReadiness.find(
     ({ agentId }) => agentId === input.runtimeId,
   )?.state;
+  const receiptRequiresRegistrationEvidence = input.receipt.ownership.some(
+    ({ id, kind }) => id === "plugin:runtime-package" && kind === "directory",
+  );
+  const nativeRegistrationReady =
+    !receiptRequiresRegistrationEvidence
+    || registrationMarkerReady(
+      input.receipt,
+      `runtime:${input.runtimeId}:native`,
+    );
   return input.profile.capabilities.map((id) => {
     const entry = capabilities.get(id);
     if (entry === undefined) {
       throw new Error(`profile references unknown capability: ${id}`);
+    }
+    let state = capabilityState(
+      entry.runtimeReadiness[input.runtimeId].state,
+      runtimeState,
+    );
+    if (state === "ready" && !nativeRegistrationReady) {
+      state = "pending";
+    }
+    if (
+      state === "ready"
+      && receiptRequiresRegistrationEvidence
+      && input.runtimeId === "claude-code"
+      && entry.runtimeReadiness["claude-code"].packaging === "official-plugin"
+      && !registrationMarkerReady(
+        input.receipt,
+        `capability:claude-code:${id}`,
+      )
+    ) {
+      state = "pending";
+    }
+    if (entry.kind === "lsp" && entry.languageServer !== undefined) {
+      const os = operatingSystem(input.platform);
+      if (
+        os === null
+        || !entry.languageServer.supportedPlatforms.includes(os)
+      ) {
+        state = "unsupported";
+      } else if (
+        resolveTrustedCommand(entry.languageServer.executables, {
+          env: input.environment as NodeJS.ProcessEnv,
+          platform: input.platform,
+          workspace: input.workspace,
+        }) === undefined
+      ) {
+        state = "pending";
+      }
     }
     return {
       id,
       source: entry.sourceId === "oh-my-harness-managed"
         ? "managed"
         : "official",
-      state: capabilityState(
-        entry.runtimeReadiness[input.runtimeId].state,
-        runtimeState,
-      ),
+      state,
     };
   });
 }
@@ -705,7 +721,7 @@ function openCodeStartup(
         ? "approved local state is ready"
         : `startup reconciliation is ${reconciliation.localState}`),
     diagnostics,
-    ready: reconciliation.ready && context.mode !== "status-only",
+    ready: reconciliation.ready && context.mode === "ready",
     restartRequired: reconciliation.restartRequired,
   };
 }
@@ -854,11 +870,14 @@ async function finalizeStartup(
       })
     : [];
   const capabilityState = receipt !== null && profile !== undefined
-    ? capabilityObservations({
+      ? capabilityObservations({
         catalog,
+        environment: request.environment ?? process.env,
+        platform: request.platform ?? process.platform,
         profile,
         receipt,
         runtimeId: request.runtimeId,
+        workspace: request.workspace,
       })
     : [];
   const context = buildRuntimeStartupContext({

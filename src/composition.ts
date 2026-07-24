@@ -29,7 +29,9 @@ import {
 } from "./environment/orchestrator.js";
 import {
   isAgentId,
+  type PackageId,
 } from "./domain/catalog.js";
+import { repairManagedDirectory } from "./install/managed-payload.js";
 import { StalePreviewError } from "./planning/apply.js";
 import { runManagedRuntime } from "./runtime/managed-service.js";
 import { runReceiptDrivenStartupService } from "./runtime/startup-service.js";
@@ -63,6 +65,10 @@ export interface RunOmhOptions {
       readonly env: NodeJS.ProcessEnv;
     },
   ) => string;
+  readonly inspectPackageVersion?: (
+    executablePath: string,
+    packageId: PackageId,
+  ) => string | null;
 }
 
 function profileResult(
@@ -169,6 +175,9 @@ function orchestratorOptions(
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.inspectPackageVersion === undefined
+      ? {}
+      : { inspectPackageVersion: options.inspectPackageVersion }),
     ...(options.os === undefined ? {} : { os: options.os }),
     ...(options.runCommand === undefined
       ? {}
@@ -240,11 +249,23 @@ export async function runOmh(
         ...(options.os === undefined ? {} : { platform: options.os }),
       },
       {
-        repairPinned: async () => ({
-          detail:
-            "this receipt does not record a recoverable local source; review a new exact setup preview",
-          verified: false,
-        }),
+        repairPinned: async ({ ownership }) => {
+          if (
+            ownership.kind !== "directory"
+            || ownership.repairSource === undefined
+          ) {
+            return {
+              detail:
+                "this receipt does not record a recoverable local source; review a new exact setup preview",
+              verified: false,
+            };
+          }
+          return repairManagedDirectory({
+            digest: ownership.digest,
+            source: ownership.repairSource,
+            target: ownership.target,
+          });
+        },
         state: new FileStateStore(stateRoot),
       },
     );

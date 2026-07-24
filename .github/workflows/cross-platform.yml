@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   verify:
+    name: Node 22.19 / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,8 +22,29 @@ jobs:
         with:
           node-version: 22.19.0
           cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run test:harness
-      - run: npm run test:workspace-connectors
-      - run: npm run profile:verify
-      - run: npm run harness:descriptors:verify
+      - name: Install without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Typecheck strict TypeScript
+        run: npm run typecheck
+      - name: Build distributable JavaScript
+        run: npm run build
+      - name: Verify catalogs and generated documentation
+        run: npm run catalog:verify
+      - name: Unit contracts
+        run: npm run test:unit
+      - name: Schema and catalog contracts
+        run: npm run test:contracts
+      - name: Integration flows
+        run: npm run test:integration
+      - name: Claude Code native adapter
+        run: npm run test:runtime:claude
+      - name: OpenCode native adapter
+        run: npm run test:runtime:opencode
+      - name: Codex native adapter
+        run: npm run test:runtime:codex
+      - name: Compatibility and security harness
+        run: npm run test:harness
+      - name: Packed artifact
+        run: npm run package:verify
+      - name: Patch hygiene
+        run: git diff --check

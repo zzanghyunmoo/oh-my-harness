@@ -2,6 +2,10 @@
 
 Oh My Harness v2는 원하는 코딩 에이전트와 공유 CLI 패키지, 검증된 플러그인·스킬을 프로필로 설치하고 유지하는 cross-runtime 환경 관리자다. 지원 대상은 Claude Code, OpenCode, Codex이며 Pi는 신규 제품 surface에서 제거한다. Claude Code를 먼저 완성하되 카탈로그와 정책은 처음부터 runtime-neutral하게 설계하고 세 런타임 parity까지 같은 제품 범위로 다룬다.
 
+이 문서는 2026-07-24 v2 reset 이후의 현재 가드레일이다. 이전 Pi, connector,
+proxy, 전체 Compound Engineering 문서는 역사적 근거일 뿐 새 구현의 권한이
+아니다.
+
 ## 제품 원칙
 
 - 사용자는 `personal`, `company`, 또는 검증된 `custom` Environment Profile과 하나 이상의 에이전트를 선택한다.
@@ -23,9 +27,11 @@ oh-my-harness/
 │   ├── catalog/                  # catalog/profile load와 validation
 │   ├── planning/                 # preview와 exact-apply planner
 │   ├── install/                  # agent/package/capability installer
+│   ├── environment/              # composed preview/apply/status/doctor
 │   ├── reconcile/                # startup reconciliation
 │   ├── runtime/                  # Claude/OpenCode/Codex native adapters
 │   ├── state/                    # receipts, ownership, locks, journal
+│   ├── migration/                # v1 read-only inspection/removal preview
 │   └── tools/                    # 외부 CLI 정책과 실행 adapter
 ├── dist/                         # TypeScript build output, 직접 편집 금지
 ├── harness/
@@ -54,7 +60,7 @@ oh-my-harness/
 
 ## Preview-first 변경 규칙
 
-- `omh setup`, `omh agents install`, `omh packages install`, `omh profiles apply`, removal 명령은 기본적으로 읽기 전용 preview다.
+- `omh setup`, `omh agents install`, `omh tools install`, `omh profiles publish`, removal 명령은 기본적으로 읽기 전용 preview다.
 - 실제 변경은 `--apply`와 방금 확인한 exact preview digest가 모두 있을 때만 수행한다.
 - preview digest는 Catalog Revision, 선택 profile/agents, platform, observed managed state를 포함한다. apply 직전에 다시 계산하여 stale preview를 첫 mutation 전에 거부한다.
 - agent, package, capability installer의 모든 필수 preflight를 mutation보다 먼저 실행한다.
@@ -80,10 +86,16 @@ oh-my-harness/
   - workflow: goal, deep-research, ideation, brainstorm, plan, code-review, doc-review, skill-creator, ralph-loop, security-guidance
 - Claude Code의 공식 marketplace 또는 각 capability의 공식 upstream을 먼저 조사한다.
 - 공식 plugin도 mutable `latest`로 설치하지 않는다. repository, exact commit/tree, plugin path, manifest/version, content digest를 Upstream Trust Receipt로 고정한다.
+- Claude 공식 plugin은 `claude-plugins-official`의 `.gcs-sha`, marketplace
+  manifest SHA-256, 선택 plugin별 Git tree SHA-1이 모두 lock과 일치할 때만
+  preview/apply 대상이 된다. plugin 이름이나 cache 존재만으로 검증하지 않는다.
 - upstream이 없거나 semantic contract를 충족하지 못할 때만 `plugins/oh-my-harness/`에 managed capability를 만든다.
 - 하나의 semantic capability는 trigger, intent, input/output, side effects, approval posture, error behavior를 runtime-neutral하게 정의한다.
 - Claude, OpenCode, Codex adapter는 native surface를 사용하고 같은 contract test를 통과해야 `ready`다.
 - LSP readiness는 agent-side LSP plugin/config와 machine-side language-server executable을 별도로 검증한다.
+- 현재 Codex plugin surface에는 검증된 LSP 등록점이 없으므로 Codex의 7개 LSP
+  cell은 `unsupported`다. native surface가 추가되고 계약 테스트가 생기기 전에는
+  카탈로그를 `ready`로 바꾸지 않는다.
 - 한 runtime의 성공만으로 cross-runtime parity를 선언하지 않는다.
 
 ## Approved Startup Synchronization
@@ -100,7 +112,9 @@ oh-my-harness/
 
 ## 외부 CLI 도구 안전 규칙
 
-- 설치 catalog와 agent tool catalog의 package metadata는 하나의 TypeScript source of truth에서 파생한다.
+- `harness/catalog/packages.json`이 설치와 agent tool package metadata의
+  runtime-neutral source of truth이며 TypeScript loader/adapter가 이를
+  fail-closed로 파생한다.
 - Claude/Codex는 MCP, OpenCode는 native custom tools로 선택 Environment Profile의 backend만 노출한다.
 - 숨겨진 backend를 tool name으로 직접 호출해도 실행 단계에서 다시 거부한다.
 - 외부 CLI 인증은 각 CLI가 소유한다. harness는 login을 자동화하거나 token, password, cookie, Authorization header를 인자로 받거나 receipt에 저장하지 않는다.
@@ -111,6 +125,9 @@ oh-my-harness/
 ## 상태, 소유권, 마이그레이션
 
 - managed payload, receipt, lock, journal은 기본적으로 `~/.oh-my-harness`에 저장하고 저장소에 커밋하지 않는다.
+- runtime plugin payload는 content-addressed store와 receipt-owned generation을
+  분리한다. receipt의 `repairSource`는 같은 digest의 로컬 store만 가리키며,
+  startup repair는 target이 단순 삭제된 경우에만 atomic copy를 수행한다.
 - receipt는 secret-free이며 catalog revision, profile, selected agents, pins, managed paths/digests, ownership, sync consent, lifecycle result를 기록한다.
 - managed root 밖 경로, symlink escape, pre-image가 바뀐 target에는 쓰지 않는다.
 - v1/Pi/Compound Engineering 상태는 read-only migration inspector로 탐지한다. receipt가 없거나 손상된 경로는 `suspected`로만 보고한다.
@@ -134,6 +151,11 @@ oh-my-harness/
   - arbitrary CWD의 marketplace/plugin/MCP/hook 실행
   - `npm pack` payload와 Linux/macOS/Windows CI
 - security boundary를 OS나 runtime 전체에서 skip하지 않는다. platform-specific fixture로 같은 invariant를 검증한다.
+- release 전에는 README의 agent/package/capability 표가 catalog에서 생성된
+  결과와 일치해야 하며 `npm run catalog:verify`가 drift를 거부해야 한다.
+- canonical gate는 `typecheck`, `build`, `catalog:verify`, `test:unit`,
+  `test:contracts`, `test:integration`, 세 `test:runtime:*`, `test:harness`,
+  `package:verify`, `git diff --check`다.
 
 ## 문서와 지식 규칙
 
@@ -159,4 +181,5 @@ oh-my-harness/
 - Node.js와 TypeScript는 `package.json`의 exact supported range를 따른다.
 - `@modelcontextprotocol/sdk`는 MCP adapter에만 사용하고 catalog/domain core가 MCP 타입에 종속되지 않게 한다.
 - OpenCode/Codex/Claude 전용 SDK 또는 manifest type은 각 runtime adapter 경계 밖으로 누출하지 않는다.
-- Pi ExtensionAPI와 `@earendil-works/pi-coding-agent`는 v2 dependency에서 제거 대상이다.
+- Pi ExtensionAPI와 `@earendil-works/pi-coding-agent`는 v2 dependency에
+  다시 추가하지 않는다.

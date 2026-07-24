@@ -19,16 +19,23 @@
   "files": [
     ".agents/plugins/marketplace.json",
     ".claude-plugin/marketplace.json",
+    ".opencode/package.json",
     ".opencode/plugins/oh-my-harness.js",
     "bin/omh.mjs",
-    "catalogs/",
     "dist/",
-    "harness/",
+    "harness/adapters/",
+    "harness/catalog/",
+    "harness/contracts/",
+    "harness/evidence/",
+    "harness/inventory/",
+    "harness/locks/",
+    "harness/profiles/",
     "omh",
     "omh.cmd",
     "plugins/",
-    "schemas/",
-    "scripts/"
+    "scripts/harness/",
+    "scripts/profile-pack.mjs",
+    "scripts/tools/"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -37,18 +44,21 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "prepack": "npm run build",
+    "catalog:verify": "npm run build --silent && node --test \"tests/contracts/*.test.ts\"",
     "profile:verify": "node scripts/profile-pack.mjs verify",
     "profile:lock": "node scripts/profile-pack.mjs lock --write",
     "profile:apply": "node scripts/profile-pack.mjs apply",
     "omh": "npm run build --silent && node dist/cli/main.js",
     "test:unit": "npm run build --silent && node --test \"tests/unit/*.test.ts\"",
+    "test:contracts": "npm run build --silent && node --test \"tests/contracts/*.test.ts\"",
+    "test:integration": "npm run build --silent && node --test \"tests/integration/*.test.ts\"",
+    "test:runtime:claude": "npm run build --silent && node --test tests/runtime/claude-code.test.ts tests/integration/claude-arbitrary-cwd.test.ts",
+    "test:runtime:opencode": "npm run build --silent && node --test tests/runtime/opencode.test.ts",
+    "test:runtime:codex": "npm run build --silent && node --test tests/runtime/codex.test.ts",
     "package:verify": "npm run build --silent && node --test \"tests/release/*.test.ts\"",
     "test:harness": "npm run build --silent && node --test \"tests/harness/*.test.mjs\"",
     "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
     "harness:install": "node scripts/harness/install.mjs",
-    "proxies:install": "node scripts/proxies/manage.mjs install",
-    "proxies:configure": "node scripts/proxies/manage.mjs configure",
-    "proxies:doctor": "node scripts/proxies/manage.mjs doctor",
     "tools:install": "node scripts/tools/manage.mjs",
     "tools:doctor": "node scripts/tools/manage.mjs doctor",
     "harness:upstream:generate": "node scripts/harness/upstream.mjs generate",
@@ -56,14 +66,15 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "jsonc-parser": "3.3.1",
     "tar-stream": "3.2.0",
-    "typebox": "^1.1.38",
-    "yauzl": "3.4.0"
+    "typebox": "1.2.8",
+    "yauzl": "3.4.0",
+    "zod": "4.1.8"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0",
-    "typescript": "^6.0.3"
+    "@types/node": "25.8.0",
+    "typescript": "6.0.3"
   }
 }

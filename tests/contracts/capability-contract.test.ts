@@ -123,6 +123,12 @@ test("U6 all LSP contracts separate plugin configuration from server executables
   assert.equal(lsps.length, 7);
   for (const lsp of lsps) {
     assert.equal(lsp.runtimeReadiness["claude-code"].packaging, "official-plugin");
+    assert.equal(lsp.runtimeReadiness.opencode.state, "ready");
+    assert.equal(
+      lsp.runtimeReadiness.codex.state,
+      "unsupported",
+      "Codex has no reviewed native LSP registration surface",
+    );
     assert.ok(lsp.languageServer);
     assert.equal(lsp.languageServer.configurationRequired, true);
     assert.ok(lsp.languageServer.executables.length > 0);

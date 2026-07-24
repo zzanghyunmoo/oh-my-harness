@@ -1,0 +1,32 @@
+{
+  "$schema": "../contracts/release-catalog.schema.json",
+  "artifacts": [
+    {
+      "digest": "2bf68eded5ca24ccbe3df1728bd1575f581e1ca5229578eb450710327f891acc",
+      "id": "capability-catalog",
+      "kind": "catalog",
+      "sourceId": "oh-my-harness-managed"
+    },
+    {
+      "digest": "2ef1b7aa83d60b968f7733f24302c1625eac5b5faa4d41bf2d6824cf5bd78c41",
+      "id": "managed-skills",
+      "kind": "managed-skill",
+      "sourceId": "oh-my-harness-managed"
+    },
+    {
+      "digest": "70ca3a645e0385c55e3326479c7925150da4ea57dc19c884c86b65077cfb407c",
+      "id": "runtime-plugin",
+      "kind": "plugin",
+      "sourceId": "oh-my-harness-managed"
+    }
+  ],
+  "catalogRevision": "2bf68eded5ca24ccbe3df1728bd1575f581e1ca5229578eb450710327f891acc",
+  "channel": "stable",
+  "compatibility": {
+    "maximumCliVersion": "0.2.0",
+    "minimumCliVersion": "0.2.0"
+  },
+  "kind": "release-catalog",
+  "schemaVersion": "2.0.0",
+  "sequence": 1
+}

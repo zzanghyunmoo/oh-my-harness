@@ -92,3 +92,31 @@ test("U5 installed packages remain auth-owned and install plans expose exact gui
   assert.match(confluence?.installGuidance ?? "", /confluence-cli@2\.18\.0/);
   assert.equal(JSON.stringify(plan).includes("token"), false);
 });
+
+test("U5 exact-package installations reject wrong or unverifiable versions", () => {
+  const catalog = loadCatalogBundle(REPO_ROOT);
+  const personal = catalog.profiles.find(({ id }) => id === "personal");
+  assert.ok(personal);
+  const plan = planPackageInstallations({
+    packages: catalog.packages.packages,
+    profile: personal,
+    os: "darwin",
+    findExecutable: (commands) => `/trusted/bin/${commands[0]}`,
+    hasInstaller: () => true,
+    inspectVersion: (_path, id) => (
+      id === "linear"
+        ? "1.9.0"
+        : id === "notion"
+          ? null
+          : null
+    ),
+  });
+  const linear = plan.find(({ id }) => id === "linear");
+  const notion = plan.find(({ id }) => id === "notion");
+  assert.equal(linear?.status, "version-drift");
+  assert.equal(linear?.expectedVersion, "2.0.0");
+  assert.equal(linear?.observedVersion, "1.9.0");
+  assert.equal(notion?.status, "version-drift");
+  assert.match(notion?.guidance ?? "", /could not be verified/i);
+  assert.equal(summarizePackageReadiness(plan).ready, false);
+});

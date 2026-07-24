@@ -37,6 +37,7 @@
         "guidance": "Run `ntn login`; Notion owns and stores its authentication state."
       },
       "versionPolicy": "exact-package-version",
+      "version": "0.19.0",
       "profileImportance": {
         "personal": "required",
         "company": "optional"
@@ -83,6 +84,7 @@
         "guidance": "Run `linear auth login` and `linear config`; Linear CLI owns its credentials."
       },
       "versionPolicy": "exact-package-version",
+      "version": "2.0.0",
       "profileImportance": {
         "personal": "required",
         "company": "optional"
@@ -132,6 +134,7 @@
         "guidance": "Run `jira init`; Jira CLI owns its authentication configuration."
       },
       "versionPolicy": "exact-release-artifact",
+      "version": "1.7.0",
       "profileImportance": {
         "personal": "optional",
         "company": "required"
@@ -178,6 +181,7 @@
         "guidance": "Run `confluence init --read-only`; Confluence CLI owns its credentials."
       },
       "versionPolicy": "exact-package-version",
+      "version": "2.18.0",
       "profileImportance": {
         "personal": "optional",
         "company": "required"
