@@ -110,6 +110,17 @@ const ALL_CAPABILITY_IDS: readonly OpenCodeCapabilityId[] = [
   ...OPEN_CODE_LSP_CAPABILITY_IDS,
   ...OPEN_CODE_WORKFLOW_CAPABILITY_IDS,
 ];
+const OPEN_CODE_LSP_SERVER_IDS: Readonly<
+  Record<(typeof OPEN_CODE_LSP_CAPABILITY_IDS)[number], string>
+> = {
+  "lsp-jdtls": "jdtls",
+  "lsp-kotlin": "kotlin-ls",
+  "lsp-csharp": "csharp",
+  "lsp-clangd": "clangd",
+  "lsp-gopls": "gopls",
+  "lsp-pyright": "pyright",
+  "lsp-typescript": "typescript",
+};
 
 const WORKFLOW_SOURCES: Readonly<
   Record<
@@ -484,6 +495,27 @@ export function applyOpenCodeNativeConfig(
   }
   if (config.lsp === undefined) {
     config.lsp = {};
+  }
+  const lspConfig = config.lsp;
+  if (lspConfig === undefined) {
+    return {
+      configured: false,
+      diagnostics: ["OpenCode LSP configuration could not be enabled"],
+    };
+  }
+  const individuallyDisabled = [...selectedLsp].filter((id) => {
+    const serverId =
+      OPEN_CODE_LSP_SERVER_IDS[id as keyof typeof OPEN_CODE_LSP_SERVER_IDS];
+    const entry = lspConfig[serverId];
+    return isRecord(entry) && entry.disabled === true;
+  });
+  if (individuallyDisabled.length > 0) {
+    return {
+      configured: false,
+      diagnostics: [
+        `${individuallyDisabled.join(", ")} disabled by user configuration; Oh My Harness did not override it`,
+      ],
+    };
   }
   return { configured: true, diagnostics: [] };
 }

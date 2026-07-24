@@ -58,7 +58,7 @@
         "commit": "3a1c6df9e24672f0761a6ced18e1315d89334baf",
         "locations": [
           "packages/plugin/src/index.ts::Hooks[\"experimental.chat.system.transform\"]",
-          "packages/opencode/src/session/llm.ts"
+          "packages/opencode/src/session/llm/request.ts"
         ],
         "owner": "anomalyco",
         "repository": "opencode"

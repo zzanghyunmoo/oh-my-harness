@@ -260,6 +260,22 @@ test("U10 native config enables selected built-in LSPs without overriding a user
   assert.equal(conflict.configured, false);
   assert.match(conflict.diagnostics[0] ?? "", /user configuration disables LSP/);
   assert.equal(disabled.lsp, false);
+
+  const partiallyDisabled = {
+    lsp: { typescript: { disabled: true } },
+  };
+  const partialConflict = applyOpenCodeNativeConfig(
+    partiallyDisabled,
+    readyContext(),
+  );
+  assert.equal(partialConflict.configured, false);
+  assert.match(
+    partialConflict.diagnostics[0] ?? "",
+    /lsp-typescript.*user configuration/,
+  );
+  assert.deepEqual(partiallyDisabled.lsp, {
+    typescript: { disabled: true },
+  });
 });
 
 test("U10 packaged plugin resolves from import.meta.url and runs from arbitrary CWD", async () => {
@@ -320,6 +336,25 @@ test("U10 packaged plugin resolves from import.meta.url and runs from arbitrary 
       output,
     );
     assert.match(output.system[0] ?? "", /Oh My Harness v2/);
+
+    const closedPlugin = module.createOpenCodePlugin(
+      createFileOpenCodeRuntimeDependencies({
+        env: { OH_MY_HARNESS_STATE_ROOT: join(elsewhere, "absent-state") },
+      }),
+    );
+    const closedHooks = await closedPlugin({
+      directory: elsewhere,
+      worktree: elsewhere,
+      project: {},
+      client: {},
+      experimental_workspace: { register() {} },
+      serverUrl: new URL("http://localhost"),
+      $: undefined,
+    });
+    const closedNames = Object.keys(closedHooks.tool);
+    assert.equal(closedNames.includes("workspace_cli_setup"), true);
+    assert.equal(closedNames.includes("workspace_cli_status"), true);
+    assert.equal(closedNames.some((name) => name.startsWith("omh_")), false);
   } finally {
     process.chdir(originalCwd);
     rmSync(elsewhere, { recursive: true, force: true });
@@ -360,7 +395,7 @@ test("U10 OpenCode adapter uses no Claude or Codex runtime module", () => {
   );
   assert.equal(
     descriptor.native.preModelGate.sourceRef.locations.some((location) =>
-      location.includes("session/llm.ts")
+      location.includes("session/llm/request.ts")
     ),
     true,
   );
