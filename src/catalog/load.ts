@@ -1,4 +1,8 @@
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -183,8 +187,11 @@ function validateReferences(source: CatalogSourceDocuments): void {
     CAPABILITY_IDS,
     "capability catalog",
   );
+  const builtInProfileIds = source.profiles
+    .filter(({ id }) => (BUILT_IN_PROFILE_IDS as readonly string[]).includes(id))
+    .map(({ id }) => id);
   assertExactIds(
-    source.profiles.map(({ id }) => id),
+    builtInProfileIds,
     BUILT_IN_PROFILE_IDS,
     "built-in profile catalog",
   );
@@ -299,16 +306,18 @@ function validateProfileReferences(
     }
   }
 
-  assertExactIds(
-    [...profile.packages.required, ...profile.packages.optional],
-    PACKAGE_IDS,
-    `${profile.id} package selection`,
-  );
-  assertExactIds(
-    profile.capabilities,
-    CAPABILITY_IDS,
-    `${profile.id} capability selection`,
-  );
+  if ((BUILT_IN_PROFILE_IDS as readonly string[]).includes(profile.id)) {
+    assertExactIds(
+      [...profile.packages.required, ...profile.packages.optional],
+      PACKAGE_IDS,
+      `${profile.id} package selection`,
+    );
+    assertExactIds(
+      profile.capabilities,
+      CAPABILITY_IDS,
+      `${profile.id} capability selection`,
+    );
+  }
 
   for (const capabilityId of profile.capabilities) {
     const capability = capabilities.get(capabilityId);
@@ -335,6 +344,14 @@ export function readCatalogSource(
 ): CatalogSourceDocuments {
   const catalogRoot = join(repositoryRoot, "harness", "catalog");
   const profileRoot = join(repositoryRoot, "harness", "profiles");
+  const customProfileRoot = join(profileRoot, "custom");
+  const customProfiles = existsSync(customProfileRoot)
+    ? readdirSync(customProfileRoot, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) =>
+        readJson(join(customProfileRoot, entry.name)) as EnvironmentProfile)
+      .sort((left, right) => left.id.localeCompare(right.id))
+    : [];
   return {
     agents: readJson(join(catalogRoot, "agents.json")) as CatalogSourceDocuments["agents"],
     packages: readJson(join(catalogRoot, "packages.json")) as CatalogSourceDocuments["packages"],
@@ -344,7 +361,9 @@ export function readCatalogSource(
     profiles: BUILT_IN_PROFILE_IDS.map(
       (profileId) =>
         readJson(join(profileRoot, `${profileId}.json`)) as EnvironmentProfile,
-    ),
+    )
+      .concat(customProfiles)
+      .sort((left, right) => left.id.localeCompare(right.id)),
   };
 }
 
