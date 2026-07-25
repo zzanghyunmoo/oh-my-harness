@@ -1,3 +1,10 @@
+import type { AgentId } from "../domain/catalog.js";
+import type {
+  CapabilitySet,
+  EnvironmentInstance,
+  ToolRoute,
+} from "../domain/environment-instance.js";
+
 export interface ApplyJournal {
   readonly schemaVersion: "2.0.0";
   readonly kind: "apply-journal";
@@ -19,6 +26,11 @@ export interface ManagedStateReceipt {
   readonly desiredState: {
     readonly profileId: string;
     readonly selectedAgents: readonly AgentId[];
+    readonly instance?: EnvironmentInstance;
+    readonly capabilitySet?: CapabilitySet;
+    readonly selectedCapabilities?: readonly string[];
+    readonly selectedPackages?: readonly string[];
+    readonly toolRoutes?: readonly ToolRoute[];
   };
   readonly startupConsent: {
     readonly repairPinned: boolean;
@@ -65,4 +77,3 @@ export interface StatePort {
   writeJournal(journal: ApplyJournal): Promise<void>;
   publishReceipt(receipt: ManagedStateReceipt): Promise<void>;
 }
-import type { AgentId } from "../domain/catalog.js";

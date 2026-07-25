@@ -46,6 +46,42 @@ test("managed receipt preserves the selected-agent override in desired state", (
   assert.deepEqual(receipt.desiredState.selectedAgents, ["claude-code", "codex"]);
 });
 
+test("managed receipt accepts closed explicit environment state and legacy receipts", () => {
+  const legacy = receiptFixture();
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", legacy, REPO_ROOT)
+  );
+
+  const explicit = receiptFixture();
+  explicit.desiredState = {
+    ...explicit.desiredState,
+    capabilitySet: "workflow-only",
+    instance: {
+      id: "windows-native",
+      platform: { arch: "x64", os: "win32" },
+      stateRoot: "C:\\Users\\test\\.oh-my-harness\\instances\\windows-native",
+      transport: "local",
+    },
+    selectedCapabilities: ["goal", "plan"],
+    selectedPackages: ["github", "linear", "notion"],
+    toolRoutes: [{
+      packageId: "github",
+      receiptFingerprint: "c".repeat(64),
+      targetInstanceId: "wsl-ubuntu",
+    }],
+  };
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", explicit, REPO_ROOT)
+  );
+
+  const secretRoute = structuredClone(explicit);
+  secretRoute.desiredState.toolRoutes[0].accessToken = "ghp_forbidden";
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", secretRoute, REPO_ROOT),
+    /secret-bearing field|additional field/i,
+  );
+});
+
 test("managed receipt makes ownership scope explicit and limits repair to managed content", () => {
   const missingScope = receiptFixture();
   missingScope.ownership = [{
@@ -152,11 +188,17 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
 test("managed receipt rejects Pi, duplicate agents, unknown fields, and secret-like content", () => {
   const pi = receiptFixture();
   pi.desiredState.selectedAgents = ["pi"];
-  assert.throws(() => validateContractDocument("managed-state-receipt", pi, REPO_ROOT), /schema enum|Pi runtime/i);
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", pi, REPO_ROOT),
+    /schema enum|schema branch|Pi runtime/i,
+  );
 
   const duplicate = receiptFixture();
   duplicate.desiredState.selectedAgents = ["codex", "codex"];
-  assert.throws(() => validateContractDocument("managed-state-receipt", duplicate, REPO_ROOT), /duplicate array item/i);
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", duplicate, REPO_ROOT),
+    /duplicate array item|schema branch/i,
+  );
 
   const extra = { ...receiptFixture(), unexpected: true };
   assert.throws(() => validateContractDocument("managed-state-receipt", extra, REPO_ROOT), /additional field/i);

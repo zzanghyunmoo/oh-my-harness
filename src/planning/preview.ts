@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { validateExplicitDesiredState } from "../domain/environment-instance.js";
 import type { ApplyPlan, ApplyPlanInput } from "./actions.js";
 
 function canonicalize(value: unknown, path = "$"): unknown {
@@ -60,6 +61,28 @@ export function createApplyPlan(input: ApplyPlanInput): ApplyPlan {
   }
   if (input.desiredState.selectedAgents.length === 0) {
     throw new Error("selected agents must be non-empty");
+  }
+  const explicitFields = [
+    input.desiredState.instance,
+    input.desiredState.capabilitySet,
+    input.desiredState.selectedCapabilities,
+    input.desiredState.selectedPackages,
+    input.desiredState.toolRoutes,
+  ];
+  if (explicitFields.some((value) => value !== undefined)) {
+    if (explicitFields.some((value) => value === undefined)) {
+      throw new Error("explicit environment desired state must be complete");
+    }
+    validateExplicitDesiredState(
+      {
+        capabilitySet: input.desiredState.capabilitySet!,
+        instance: input.desiredState.instance!,
+        selectedCapabilities: input.desiredState.selectedCapabilities! as never,
+        selectedPackages: input.desiredState.selectedPackages! as never,
+        toolRoutes: input.desiredState.toolRoutes!,
+      },
+      input.platform,
+    );
   }
   const failed = input.preflights.find(
     ({ required, status }) => required && status !== "ready",

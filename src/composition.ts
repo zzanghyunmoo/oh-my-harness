@@ -164,10 +164,17 @@ function selectionFor(
     ? []
     : parsed.tools;
   return {
+    capabilitySet: parsed.capabilitySet,
+    clean: parsed.clean,
+    ...(parsed.distribution === undefined
+      ? {}
+      : { distribution: parsed.distribution }),
     profileId: parsed.profile,
     ...(selectedAgents === undefined ? {} : { selectedAgents }),
     ...(selectedPackages === undefined ? {} : { selectedPackages }),
     ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+    ...(parsed.target === undefined ? {} : { target: parsed.target }),
+    ...(parsed.toolRoute === undefined ? {} : { toolRoute: parsed.toolRoute }),
   };
 }
 

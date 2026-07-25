@@ -1,8 +1,18 @@
 import {
   isAgentId,
+  isCapabilityId,
+  isPackageId,
   type AgentId,
+  type CapabilityId,
+  type PackageId,
 } from "./catalog.js";
 import type { EnvironmentProfile } from "../catalog/types.js";
+import {
+  validateExplicitDesiredState,
+  type CapabilitySet,
+  type EnvironmentInstance,
+  type ToolRoute,
+} from "./environment-instance.js";
 
 export interface DesiredState {
   profileId: string;
@@ -11,11 +21,23 @@ export interface DesiredState {
   optionalPackages: string[];
   enabledCapabilities: string[];
   startupSync: EnvironmentProfile["startupSync"];
+  instance?: EnvironmentInstance;
+  capabilitySet?: CapabilitySet;
+  selectedCapabilities?: CapabilityId[];
+  selectedPackages?: PackageId[];
+  toolRoutes?: readonly ToolRoute[];
 }
 
 export function resolveDesiredState(
   profile: EnvironmentProfile,
   selectedAgentOverride?: readonly string[],
+  explicit?: {
+    readonly capabilitySet: CapabilitySet;
+    readonly instance: EnvironmentInstance;
+    readonly selectedCapabilities: readonly string[];
+    readonly selectedPackages: readonly string[];
+    readonly toolRoutes: readonly ToolRoute[];
+  },
 ): DesiredState {
   const requested = selectedAgentOverride ?? profile.selectedAgents;
   if (requested.length === 0) {
@@ -31,12 +53,37 @@ export function resolveDesiredState(
     selectedAgents.push(id);
   }
 
-  return {
+  const base: DesiredState = {
     profileId: profile.id,
     selectedAgents,
     requiredPackages: [...profile.packages.required],
     optionalPackages: [...profile.packages.optional],
     enabledCapabilities: [...profile.capabilities],
     startupSync: structuredClone(profile.startupSync),
+  };
+  if (explicit === undefined) return base;
+
+  const selectedCapabilities = explicit.selectedCapabilities.map((id) => {
+    if (!isCapabilityId(id)) throw new Error(`unsupported selected capability: ${id}`);
+    return id;
+  });
+  const selectedPackages = explicit.selectedPackages.map((id) => {
+    if (!isPackageId(id)) throw new Error(`unsupported selected package: ${id}`);
+    return id;
+  });
+  validateExplicitDesiredState({
+    capabilitySet: explicit.capabilitySet,
+    instance: explicit.instance,
+    selectedCapabilities,
+    selectedPackages,
+    toolRoutes: explicit.toolRoutes,
+  });
+  return {
+    ...base,
+    capabilitySet: explicit.capabilitySet,
+    instance: structuredClone(explicit.instance),
+    selectedCapabilities,
+    selectedPackages,
+    toolRoutes: structuredClone(explicit.toolRoutes),
   };
 }

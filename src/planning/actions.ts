@@ -1,3 +1,9 @@
+import type {
+  CapabilitySet,
+  EnvironmentInstance,
+  ToolRoute,
+} from "../domain/environment-instance.js";
+
 export type ActionKind = "acquire" | "register" | "write" | "remove";
 
 export type ObservedPreimage =
@@ -33,6 +39,11 @@ export interface ApplyPlanInput {
   readonly desiredState: {
     readonly profileId: string;
     readonly selectedAgents: readonly string[];
+    readonly instance?: EnvironmentInstance;
+    readonly capabilitySet?: CapabilitySet;
+    readonly selectedCapabilities?: readonly string[];
+    readonly selectedPackages?: readonly string[];
+    readonly toolRoutes?: readonly ToolRoute[];
   };
   readonly platform: {
     readonly arch: string;

@@ -23,10 +23,18 @@ import type {
 import {
   isAgentId,
   isPackageId,
+  WORKFLOW_CAPABILITY_IDS,
   type AgentId,
+  type CapabilityId,
   type PackageId,
 } from "../domain/catalog.js";
 import { resolveDesiredState } from "../domain/desired-state.js";
+import {
+  type CapabilitySet,
+  type EnvironmentInstance,
+  type EnvironmentInstanceId,
+  type ToolRoute,
+} from "../domain/environment-instance.js";
 import { installSelectedAgents } from "../install/agents.js";
 import {
   assessLspReadiness,
@@ -167,6 +175,12 @@ export interface EnvironmentSelection {
   readonly selectedAgents?: readonly string[];
   readonly selectedPackages?: readonly string[];
   readonly stateRoot?: string;
+  readonly capabilitySet?: CapabilitySet;
+  readonly clean?: boolean;
+  readonly distribution?: "Ubuntu";
+  readonly target?: EnvironmentInstanceId;
+  readonly toolRoute?: "wsl-ubuntu";
+  readonly toolRouteReceiptFingerprint?: string;
 }
 
 export interface EnvironmentOrchestratorOptions {
@@ -204,6 +218,7 @@ interface EnvironmentModel {
   readonly capabilities: readonly CapabilityEnvironmentStatus[];
   readonly managedPayload: ManagedRuntimePayload;
   readonly officialMarketplace: OfficialMarketplaceInspection;
+  readonly desired: ReturnType<typeof resolveDesiredState>;
 }
 
 interface Marker {
@@ -376,7 +391,7 @@ function inspectExecutableVersion(
 
 function capabilityModel(
   catalog: CatalogBundle,
-  profile: EnvironmentProfile,
+  selectedCapabilities: readonly CapabilityId[],
   selectedAgents: readonly AgentId[],
   officialMarketplace: OfficialMarketplaceInspection,
   os: OperatingSystem,
@@ -387,7 +402,7 @@ function capabilityModel(
     catalog.capabilities.capabilities.map((entry) => [entry.id, entry]),
   );
   return selectedAgents.flatMap((runtimeId) =>
-    profile.capabilities.map((id) => {
+    selectedCapabilities.map((id) => {
       const capability = byId.get(id);
       if (!capability) throw new Error(`unknown profile capability: ${id}`);
       const readiness = capability.runtimeReadiness[runtimeId];
@@ -455,9 +470,69 @@ function buildModel(
 ): EnvironmentModel {
   const catalog = loadCatalogBundle(options.repositoryRoot);
   const profile = profileFrom(catalog, selection.profileId);
-  const desired = resolveDesiredState(profile, selection.selectedAgents);
-  const stateRoot = resolveStateRoot(selection.stateRoot, options.env);
+  const stateRoot = resolveStateRoot(
+    selection.stateRoot,
+    options.env,
+    selection.target,
+  );
   const { os, platformId } = runtimePlatform(options.os, options.arch);
+  const platformArch = platformId.endsWith("-arm64") ? "arm64" : "x64";
+  let instance: EnvironmentInstance | undefined;
+  if (selection.target === "windows-native") {
+    if (os !== "win32") {
+      throw new Error("windows-native target must execute on win32");
+    }
+    instance = {
+      id: "windows-native",
+      platform: { arch: platformArch, os: "win32" },
+      stateRoot,
+      transport: "local",
+    };
+  } else if (selection.target === "wsl-ubuntu") {
+    if (os !== "linux") {
+      throw new Error("wsl-ubuntu target must execute inside Linux");
+    }
+    instance = {
+      distribution: selection.distribution ?? "Ubuntu",
+      id: "wsl-ubuntu",
+      platform: { arch: platformArch, os: "linux" },
+      stateRoot,
+      transport: "wsl",
+    };
+  }
+  const selectedPackages = selectedPackageIds(profile, selection.selectedPackages);
+  const capabilitySet = selection.capabilitySet ?? "profile";
+  const selectedCapabilities = profile.capabilities.filter((id): id is CapabilityId =>
+    capabilitySet === "profile"
+      || (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
+  );
+  let toolRoutes: readonly ToolRoute[] = [];
+  if (selection.toolRoute !== undefined) {
+    if (instance?.id !== "windows-native") {
+      throw new Error("tool routes require the windows-native target");
+    }
+    if (selection.toolRouteReceiptFingerprint === undefined) {
+      throw new Error("tool route receipt fingerprint is required");
+    }
+    toolRoutes = selectedPackages.map((packageId) => ({
+      packageId,
+      receiptFingerprint: selection.toolRouteReceiptFingerprint!,
+      targetInstanceId: selection.toolRoute!,
+    }));
+  }
+  const desired = resolveDesiredState(
+    profile,
+    selection.selectedAgents,
+    instance === undefined
+      ? undefined
+      : {
+          capabilitySet,
+          instance,
+          selectedCapabilities,
+          selectedPackages,
+          toolRoutes,
+        },
+  );
   const adapters = loadRuntimeAdapters(options.repositoryRoot, catalog)
     .filter(({ id }) => desired.selectedAgents.includes(id));
   const adapterById = new Map(adapters.map((entry) => [entry.id, entry]));
@@ -475,7 +550,7 @@ function buildModel(
   const packages = packageModel(
     catalog,
     profile,
-    selectedPackageIds(profile, selection.selectedPackages),
+    selectedPackages,
     os,
     options.env,
     options.cwd,
@@ -504,7 +579,7 @@ function buildModel(
     agents,
     capabilities: capabilityModel(
       catalog,
-      profile,
+      selectedCapabilities,
       desired.selectedAgents,
       officialMarketplace,
       os,
@@ -516,6 +591,7 @@ function buildModel(
     packages,
     managedPayload,
     officialMarketplace,
+    desired,
     platformId,
     profile,
     receiptPath: join(stateRoot, "receipts", "environment.json"),
@@ -887,6 +963,15 @@ function buildEnvironmentPreview(
         desiredState: {
           profileId: model.profile.id,
           selectedAgents: model.selectedAgents,
+          ...(model.desired.instance === undefined
+            ? {}
+            : {
+                capabilitySet: model.desired.capabilitySet,
+                instance: model.desired.instance,
+                selectedCapabilities: model.desired.selectedCapabilities,
+                selectedPackages: model.desired.selectedPackages,
+                toolRoutes: model.desired.toolRoutes,
+              }),
         },
         observedState: observedState(model, actions, normalized.env),
         platform: {

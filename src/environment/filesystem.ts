@@ -29,6 +29,7 @@ import {
 } from "node:path";
 
 import type { ObservedPreimage } from "../planning/actions.js";
+import type { EnvironmentInstanceId } from "../domain/environment-instance.js";
 
 const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
 
@@ -177,10 +178,15 @@ export function observeRegularFile(path: string): ObservedPreimage {
 export function resolveStateRoot(
   explicit: string | undefined,
   env: NodeJS.ProcessEnv,
+  instanceId?: EnvironmentInstanceId,
 ): string {
   const configured = explicit
     ?? env.OH_MY_HARNESS_HOME
-    ?? join(homedir(), ".oh-my-harness");
+    ?? (
+      instanceId === undefined
+        ? join(homedir(), ".oh-my-harness")
+        : join(homedir(), ".oh-my-harness", "instances", instanceId)
+    );
   if (!isAbsolute(configured) && !win32.isAbsolute(configured)) {
     throw new Error("managed state root must be absolute");
   }

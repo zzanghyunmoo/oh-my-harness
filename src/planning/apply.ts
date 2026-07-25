@@ -130,6 +130,15 @@ function receiptFor(
     desiredState: {
       profileId: plan.desiredState.profileId,
       selectedAgents,
+      ...(plan.desiredState.instance === undefined
+        ? {}
+        : {
+            capabilitySet: plan.desiredState.capabilitySet,
+            instance: plan.desiredState.instance,
+            selectedCapabilities: plan.desiredState.selectedCapabilities,
+            selectedPackages: plan.desiredState.selectedPackages,
+            toolRoutes: plan.desiredState.toolRoutes,
+          }),
     },
     completedActionIds: [...completedActionIds],
     appliedAt: now().toISOString(),
