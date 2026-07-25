@@ -58,6 +58,43 @@ function policy(
   });
 }
 
+function windowsReceipt(
+  profileId = "personal",
+  routeFingerprint = "c".repeat(64),
+): Record<string, unknown> {
+  const value = receipt(profileId);
+  value.desiredState = {
+    capabilitySet: "workflow-only",
+    instance: {
+      id: "windows-native",
+      platform: { arch: "x64", os: "win32" },
+      stateRoot: "C:\\managed\\instances\\windows-native",
+      transport: "local",
+    },
+    profileId,
+    selectedAgents: [...AGENTS],
+    selectedCapabilities: [
+      "goal",
+      "deep-research",
+      "ideation",
+      "brainstorm",
+      "plan",
+      "code-review",
+      "doc-review",
+      "skill-creator",
+      "ralph-loop",
+      "security-guidance",
+    ],
+    selectedPackages: ["linear", "notion", "github"],
+    toolRoutes: ["linear", "notion", "github"].map((packageId) => ({
+      packageId,
+      receiptFingerprint: routeFingerprint,
+      targetInstanceId: "wsl-ubuntu",
+    })),
+  };
+  return value;
+}
+
 test("U7 approved personal and company receipts select exact role backends for every runtime", () => {
   const expectations = {
     personal: [
@@ -160,4 +197,41 @@ test("U7 tool-list minimization is repeated at invocation and stale sessions are
     () => assertCurrentToolPolicy(personal, company),
     /new runtime\/tool session/,
   );
+});
+
+test("U6 windows-native policy binds each selected backend to one WSL receipt", () => {
+  const derived = deriveToolPolicy({
+    runtimeId: "claude-code",
+    receipt: windowsReceipt(),
+    catalogRevision: CATALOG.revision,
+    profiles: CATALOG.profiles,
+    repositoryRoot: REPOSITORY_ROOT,
+  });
+  assert.equal(derived.mode, "ready");
+  assert.deepEqual(
+    derived.toolRoutes.map(({ packageId, targetInstanceId }) => ({
+      packageId,
+      targetInstanceId,
+    })),
+    [
+      { packageId: "linear", targetInstanceId: "wsl-ubuntu" },
+      { packageId: "notion", targetInstanceId: "wsl-ubuntu" },
+      { packageId: "github", targetInstanceId: "wsl-ubuntu" },
+    ],
+  );
+
+  const missingRoute = windowsReceipt();
+  const desired = missingRoute.desiredState as {
+    toolRoutes: unknown[];
+  };
+  desired.toolRoutes.pop();
+  const blocked = deriveToolPolicy({
+    runtimeId: "claude-code",
+    receipt: missingRoute,
+    catalogRevision: CATALOG.revision,
+    profiles: CATALOG.profiles,
+    repositoryRoot: REPOSITORY_ROOT,
+  });
+  assert.equal(blocked.mode, "status-only");
+  assert.equal(blocked.reason, "invalid-tool-routes");
 });

@@ -55,7 +55,14 @@ export type ToolPolicyReason =
   | "runtime-not-selected"
   | "runtime-not-ready"
   | "invalid-profile-backends"
+  | "invalid-tool-routes"
   | "session-receipt-changed";
+
+export interface ToolRoute {
+  readonly packageId: Exclude<CliServiceId, "coderabbit">;
+  readonly targetInstanceId: "wsl-ubuntu";
+  readonly receiptFingerprint: string;
+}
 
 export interface ToolPolicySnapshot {
   readonly mode: "ready" | "status-only";
@@ -69,6 +76,7 @@ export interface ToolPolicySnapshot {
     | "codex"
   )[];
   readonly bindings: RuntimeToolProfile | null;
+  readonly toolRoutes: readonly ToolRoute[];
   readonly toolNames: readonly string[];
   readonly serviceIds: readonly CliServiceId[];
   readonly reason: ToolPolicyReason | null;
@@ -183,4 +191,13 @@ export function listCliToolStatus(options?: {
   readonly serviceIds?: readonly CliServiceId[];
   readonly workspace?: string;
 }): readonly Readonly<Record<string, unknown>>[];
+export function listCliToolStatusForPolicy(
+  policy: ToolPolicySnapshot,
+  options?: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly platform?: NodeJS.Platform;
+    readonly serviceIds?: readonly CliServiceId[];
+    readonly workspace?: string;
+  },
+): Promise<readonly Readonly<Record<string, unknown>>[]>;
 export function formatCliToolResult(result: CliToolResult): string;

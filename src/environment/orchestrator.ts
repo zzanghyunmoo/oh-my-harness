@@ -414,6 +414,38 @@ function packageModel(
   }).filter(({ id }) => selected.includes(id));
 }
 
+function routePackageModel(
+  packages: readonly PackageInstallPlanEntry[],
+  routes: readonly ToolRoute[],
+): readonly PackageInstallPlanEntry[] {
+  const routed = new Map(routes.map((route) => [route.packageId, route]));
+  return packages.map((entry) => {
+    const route = routed.get(entry.id);
+    if (route === undefined) return entry;
+    const guidance =
+      `${entry.displayName} executes through the receipt-bound ${
+        route.targetInstanceId
+      } route (${route.receiptFingerprint.slice(0, 12)}).`;
+    return {
+      authenticationGuidance:
+        `${entry.authenticationGuidance} Authentication remains owned by ${
+          route.targetInstanceId
+        } and is never copied to Windows.`,
+      description: entry.description,
+      displayName: entry.displayName,
+      executables: entry.executables,
+      ...(entry.expectedVersion === undefined
+        ? {}
+        : { expectedVersion: entry.expectedVersion }),
+      guidance,
+      id: entry.id,
+      installGuidance: guidance,
+      required: entry.required,
+      status: "installed-unconfigured" as const,
+    };
+  });
+}
+
 function inspectExecutableVersion(
   executablePath: string,
   env: NodeJS.ProcessEnv,
@@ -600,7 +632,7 @@ function buildModel(
       options.cwd,
     );
   });
-  const packages = packageModel(
+  const nativePackages = packageModel(
     catalog,
     profile,
     selectedPackages,
@@ -611,6 +643,7 @@ function buildModel(
       options.inspectPackageVersion?.(path, id)
       ?? inspectExecutableVersion(path, options.env, options.cwd),
   );
+  const packages = routePackageModel(nativePackages, toolRoutes);
   const officialMarketplaceLock =
     loadCapabilityProvenance(options.repositoryRoot).official;
   let officialMarketplaceSnapshot: OfficialMarketplaceSnapshot | null = null;
@@ -2329,7 +2362,7 @@ export function inspectEnvironment(
       && capabilities.every(({ state }) => state === "ready"),
     instanceId: receipt.desiredState.instance?.id ?? null,
     planDigest: receipt.planDigest,
-    receiptFingerprint: sha256File(receiptPath),
+    receiptFingerprint: sha256Bytes(stableJson(receipt)),
   };
 }
 

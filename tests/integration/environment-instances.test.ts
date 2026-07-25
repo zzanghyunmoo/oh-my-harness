@@ -253,3 +253,57 @@ test("OpenCode workflow preview plans native skills and blocks a user-owned coll
     rmSync(root, { force: true, recursive: true });
   }
 });
+
+test("U6 windows-native packages are WSL routes and never local installers", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-instance-routes-"));
+  const stateRoot = join(root, "instances", "windows-native");
+  try {
+    const fingerprint = "d".repeat(64);
+    const preview = previewEnvironment(
+      {
+        capabilitySet: "workflow-only",
+        profileId: "personal",
+        selectedAgents: ["opencode"],
+        selectedPackages: ["linear", "notion", "github"],
+        stateRoot,
+        target: "windows-native",
+        toolRoute: "wsl-ubuntu",
+        toolRouteReceiptFingerprint: fingerprint,
+      },
+      {
+        arch: "x64",
+        env: { PATH: "", XDG_CONFIG_HOME: join(root, "config") },
+        os: "win32",
+        repositoryRoot: REPOSITORY_ROOT,
+      },
+    );
+
+    assert.ok(preview.plan);
+    assert.deepEqual(
+      preview.packages.map(({ id, installedPath, status }) => ({
+        id,
+        installedPath: installedPath ?? null,
+        status,
+      })),
+      [
+        { id: "linear", installedPath: null, status: "installed-unconfigured" },
+        { id: "notion", installedPath: null, status: "installed-unconfigured" },
+        { id: "github", installedPath: null, status: "installed-unconfigured" },
+      ],
+    );
+    assert.equal(
+      preview.plan.actions.some(({ id }) => id.startsWith("package:")),
+      false,
+    );
+    assert.deepEqual(
+      preview.plan.desiredState.toolRoutes,
+      ["linear", "notion", "github"].map((packageId) => ({
+        packageId,
+        receiptFingerprint: fingerprint,
+        targetInstanceId: "wsl-ubuntu",
+      })),
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});

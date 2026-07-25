@@ -7,7 +7,7 @@ import {
   cliToolServiceIdsForPolicy,
   executeCliTool,
   formatCliToolResult,
-  listCliToolStatus,
+  listCliToolStatusForPolicy,
   loadToolPolicySnapshot,
   staleSessionToolPolicy,
   toolPolicyStatus,
@@ -120,7 +120,7 @@ function statusTool(sessionPolicy) {
     async execute(_args, context) {
       const policy = activePolicy(sessionPolicy);
       const services = policy.mode === "ready"
-        ? listCliToolStatus({
+        ? await listCliToolStatusForPolicy(policy, {
           serviceIds: cliToolServiceIdsForPolicy(policy),
           workspace: context.directory,
         })

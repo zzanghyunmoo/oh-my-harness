@@ -31,6 +31,11 @@ import {
   assertCurrentToolPolicy,
   type ToolPolicySnapshot,
 } from "./policy.js";
+import { toolRouteForService } from "./routes.js";
+import type {
+  WslBridgeClientOptions,
+  WslRoutedExecutor,
+} from "./wsl-bridge.js";
 
 const MAX_ARGS = 64;
 const MAX_ARG_CHARS = 4_096;
@@ -135,6 +140,8 @@ export interface ExecuteCliToolOptions {
   readonly platform?: NodeJS.Platform;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  readonly routeExecutor?: WslRoutedExecutor;
+  readonly wslBridgeOptions?: WslBridgeClientOptions;
 }
 
 export interface TrustedInvocation {
@@ -965,6 +972,35 @@ export async function executeCliTool(
 
   const cwd = safeCwd(input.cwd ?? options.cwd ?? process.cwd());
   const environment = options.env ?? process.env;
+  const route = toolRouteForService(currentPolicy, definition.service);
+  if (route !== null) {
+    if ((options.platform ?? process.platform) !== "win32") {
+      fail("receipt-bound WSL routes may execute only from windows-native");
+    }
+    const routeExecutor = options.routeExecutor
+      ?? (await import("./wsl-bridge.js")).executeWslRoutedCliTool;
+    const bridgeOptions: WslBridgeClientOptions = {
+      ...options.wslBridgeOptions,
+      environment,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    };
+    return routeExecutor(
+      {
+        cwd,
+        input: {
+          args,
+          ...(input.confirmedWrite === undefined
+            ? {}
+            : { confirmedWrite: input.confirmedWrite }),
+        },
+        policy: currentPolicy,
+        route,
+        toolName,
+      },
+      bridgeOptions,
+    );
+  }
   const resolutionOptions: {
     env: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
@@ -1076,6 +1112,76 @@ export function listCliToolStatus(
       });
     }
   });
+}
+
+export async function listCliToolStatusForPolicy(
+  policy: ToolPolicySnapshot,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly platform?: NodeJS.Platform;
+    readonly serviceIds?: readonly CliServiceId[];
+    readonly workspace?: string;
+    readonly wslBridgeOptions?: WslBridgeClientOptions;
+  } = {},
+): Promise<readonly CliToolStatus[]> {
+  const serviceIds = options.serviceIds ?? (
+    policy.mode === "ready" ? policy.serviceIds : []
+  );
+  const routedIds = new Set(
+    serviceIds.filter((id) => toolRouteForService(policy, id) !== null),
+  );
+  if (routedIds.size === 0) {
+    return listCliToolStatus({ ...options, serviceIds });
+  }
+  const workspace = safeCwd(options.workspace ?? process.cwd());
+  if ((options.platform ?? process.platform) !== "win32") {
+    throw new Error("receipt-bound WSL status may execute only from windows-native");
+  }
+  const localIds = serviceIds.filter((id) => !routedIds.has(id));
+  const local = listCliToolStatus({
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+    serviceIds: localIds,
+    workspace,
+  });
+  let routed: readonly CliToolStatus[];
+  try {
+    const bridge = await import("./wsl-bridge.js");
+    routed = await bridge.listWslRoutedCliToolStatus(
+      policy,
+      workspace,
+      {
+        ...options.wslBridgeOptions,
+        environment: options.env ?? process.env,
+      },
+    );
+  } catch (error) {
+    const detail = redactCliOutput(
+      error instanceof Error ? error.message : String(error),
+    );
+    routed = [...routedIds].map((id) => {
+      const service = SERVICE_DEFINITIONS[id];
+      return Object.freeze({
+        authentication: "not-probed" as const,
+        available: false,
+        error: detail,
+        id,
+        install: service.install,
+        label: service.label,
+        state: "missing" as const,
+      });
+    });
+  }
+  const byId = new Map([...local, ...routed].map((entry) => [entry.id, entry]));
+  return Object.freeze(
+    serviceIds.map((id) => {
+      const entry = byId.get(id);
+      if (entry === undefined) {
+        throw new Error(`CLI status is missing receipt-selected service: ${id}`);
+      }
+      return entry;
+    }),
+  );
 }
 
 export function formatCliToolResult(result: CliToolResult): string {
