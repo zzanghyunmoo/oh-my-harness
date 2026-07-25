@@ -81,6 +81,7 @@ export interface OfficialCapabilityLock {
     readonly branch: string;
     readonly commit: string;
     readonly tree: string;
+    readonly contentSha256: string;
     readonly reviewedAt: string;
     readonly marketplace: {
       readonly path: string;
@@ -313,6 +314,7 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
       "branch",
       "commit",
       "tree",
+      "contentSha256",
       "reviewedAt",
       "marketplace",
     ],
@@ -325,6 +327,11 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
   assertString(value.repository.branch, "official repository.branch");
   assertDigest(value.repository.commit, SHA1_PATTERN, "official repository.commit");
   assertDigest(value.repository.tree, SHA1_PATTERN, "official repository.tree");
+  assertDigest(
+    value.repository.contentSha256,
+    SHA256_PATTERN,
+    "official repository.contentSha256",
+  );
   assertString(value.repository.reviewedAt, "official repository.reviewedAt");
   if (Number.isNaN(Date.parse(`${value.repository.reviewedAt}T00:00:00Z`))) {
     fail("official repository.reviewedAt must be an ISO date");

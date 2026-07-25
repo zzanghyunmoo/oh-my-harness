@@ -7,6 +7,7 @@
     "branch": "main",
     "commit": "66799ffb4611b7e0c3af391c7569823a4d6b4246",
     "tree": "f6f817093b9f0bb132393810fa5d029f9d3f98cf",
+    "contentSha256": "346ea4f8154f085c3f13d825d4833462b363f6fd3f53c44086c183918300629e",
     "reviewedAt": "2026-07-24",
     "marketplace": {
       "path": ".claude-plugin/marketplace.json",
