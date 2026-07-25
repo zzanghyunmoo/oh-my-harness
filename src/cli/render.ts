@@ -26,7 +26,7 @@ function help(topic: string | undefined, version: string): string {
   if (topic === "setup") {
     return [
       "Usage:",
-      "  omh setup [--profile id] [--agents ids] [--tools ids] [--root path] [--json]",
+      "  omh setup [--target windows-native|wsl-ubuntu] [--profile id] [--agents ids] [--tools ids] [--capability-set profile|workflow-only] [--clean] [--root path] [--json]",
       "  omh setup [same options] --apply --digest sha256",
       "",
       "Preview is read-only and prints the exact digest required by apply.",
@@ -61,7 +61,7 @@ function help(topic: string | undefined, version: string): string {
   if (topic === "status" || topic === "doctor") {
     return [
       "Usage:",
-      `  omh ${topic} [--root path] [--json]`,
+      `  omh ${topic} [--target windows-native|wsl-ubuntu|all] [--root path] [--json]`,
       "",
       `${topic} is read-only. Status is local-only; doctor performs bounded native inspection without authentication.`,
     ].join("\n");

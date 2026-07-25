@@ -31,11 +31,14 @@ import {
   isAgentId,
   type PackageId,
 } from "./domain/catalog.js";
+import type { EnvironmentInstanceId } from "./domain/environment-instance.js";
 import { repairManagedDirectory } from "./install/managed-payload.js";
 import { StalePreviewError } from "./planning/apply.js";
 import { runManagedRuntime } from "./runtime/managed-service.js";
 import { runReceiptDrivenStartupService } from "./runtime/startup-service.js";
 import { FileStateStore } from "./state/receipt.js";
+import type { TargetPort } from "./environment/target.js";
+import { WslTargetPort } from "./environment/wsl-target.js";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(
@@ -72,6 +75,8 @@ export interface RunOmhOptions {
     executablePath: string,
     packageId: PackageId,
   ) => string | null;
+  readonly targetExecution?: EnvironmentInstanceId;
+  readonly targetPort?: TargetPort;
 }
 
 function profileResult(
@@ -226,6 +231,33 @@ export async function runOmh(
   const activeRepositoryRoot = resolve(options.repositoryRoot ?? repositoryRoot);
   if (parsed.command === "profiles") {
     return profileResult(parsed, activeRepositoryRoot);
+  }
+  const selectedTarget = "target" in parsed ? parsed.target : undefined;
+  if (
+    selectedTarget === "wsl-ubuntu"
+    && options.targetExecution !== "wsl-ubuntu"
+  ) {
+    const targetPort = options.targetPort ?? new WslTargetPort(
+      options.env === undefined ? {} : { environment: options.env },
+    );
+    const startIfStopped = parsed.command === "setup"
+      || (parsed.command === "agents" && parsed.subcommand === "install")
+      || (parsed.command === "tools" && parsed.subcommand === "install");
+    return targetPort.run({
+      argv,
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped,
+      targetId: "wsl-ubuntu",
+    });
+  }
+  if (
+    options.targetExecution !== undefined
+    && selectedTarget !== options.targetExecution
+  ) {
+    throw new Error("target execution identity does not match parsed target");
+  }
+  if (selectedTarget === "all") {
+    throw new Error("aggregate target status is not implemented");
   }
   const coreOptions = orchestratorOptions(options);
   if (parsed.command === "status" || parsed.command === "doctor") {
