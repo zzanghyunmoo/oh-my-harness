@@ -40,8 +40,24 @@ npm run build
 Windows PowerShell에서는 `.\omh.cmd`를 사용합니다.
 
 ```powershell
-.\omh.cmd setup --profile personal --agents claude-code
-.\omh.cmd setup --profile personal --agents claude-code --apply --digest <digest>
+# 1. Ubuntu WSL이 agent, package, workflow, LSP를 소유한다.
+.\omh.cmd setup --target wsl-ubuntu --profile personal `
+  --agents claude-code,opencode --tools github,linear,notion `
+  --capability-set profile --clean --json
+.\omh.cmd setup --target wsl-ubuntu --profile personal `
+  --agents claude-code,opencode --tools github,linear,notion `
+  --capability-set profile --clean --json --apply --digest <wsl-digest>
+
+# 2. Windows는 workflow만 설치하고 package 실행을 준비된 WSL receipt에 고정한다.
+.\omh.cmd setup --target windows-native --profile personal `
+  --agents claude-code,opencode --tools github,linear,notion `
+  --capability-set workflow-only --tool-route wsl-ubuntu --clean --json
+.\omh.cmd setup --target windows-native --profile personal `
+  --agents claude-code,opencode --tools github,linear,notion `
+  --capability-set workflow-only --tool-route wsl-ubuntu --clean --json `
+  --apply --digest <windows-digest>
+
+.\omh.cmd doctor --target all --json
 ```
 
 Preview는 managed root, journal, receipt, marketplace, runtime config,
@@ -59,18 +75,23 @@ profile, agent 선택, platform, observed pre-image로 plan을 다시 만들고 
 - custom: `create → validate → preview → publish`로 로컬 repository diff를
   만든 뒤 review/merge/release된 프로필만 trusted selection이 됩니다.
 
-Agent runtime과 native plugin 등록은 agent별 상태입니다. 외부 CLI executable은
-머신에 한 번 설치되어 trusted `PATH`를 통해 세 runtime이 공유합니다.
+Agent runtime과 native plugin 등록은 Environment Instance별 상태입니다.
+외부 CLI executable은 이를 소유하는 instance에 한 번 설치되어 trusted `PATH`를
+통해 해당 runtime들이 공유합니다. Windows의 `--tool-route wsl-ubuntu`는 준비된
+WSL receipt fingerprint와 정확한 GitHub·Linear·Notion backend를 Windows
+receipt에 기록하며, Windows의 동명 executable로 fallback하지 않습니다.
 `installed-unconfigured`는 executable은 준비됐지만 인증 여부를 검사하지 않았다는
 뜻입니다.
 
 ## 명령
 
 ```text
-omh setup [--profile id] [--agents ids] [--tools ids] [--root absolute]
+omh setup [--target windows-native|wsl-ubuntu] [--profile id] [--agents ids]
+          [--tools ids] [--capability-set profile|workflow-only]
+          [--tool-route wsl-ubuntu] [--clean] [--root absolute]
 omh agents status|install [--only ids] [--profile id] [--root absolute]
 omh tools doctor|install [--only ids] [--profile id] [--root absolute]
-omh status|doctor [--root absolute]
+omh status|doctor [--target windows-native|wsl-ubuntu|all] [--root absolute]
 omh run --runtime id --receipt /absolute/environment.json -- [runtime args]
 omh profiles list
 omh profiles create --id ... --name ... --agents ... --required ... --capabilities ...
@@ -82,7 +103,10 @@ omh profiles publish --file profile.json --repo /absolute/checkout --digest sha2
 `setup`, `agents install`, `tools install`, `profiles publish`는 exact digest가
 없으면 변경하지 않습니다. `status`는 receipt와 로컬 파일만 읽습니다.
 `doctor`는 인증이나 원격 서비스 호출 없이 exact runtime의 native list/config만
-bounded inspection합니다.
+bounded inspection합니다. Claude는 marketplace/plugin/enablement/hook/MCP/skill
+inventory를, OpenCode는 loopback-only server의 health/config/tool/LSP와 native
+skill discovery를 검사합니다. session이나 prompt를 만들지 않으므로 이 검증은
+workflow skill을 호출하거나 모델 출력을 평가하지 않습니다.
 
 Managed launch가 필요하면 `omh run`을 사용합니다. 이 경로는 receipt에 기록된
 Node, reconciler, runtime digest를 검증하고 runtime discovery 전에 startup
@@ -117,20 +141,22 @@ Reviewed tuple이 없는 Linux ARM64는 `unsupported`입니다. PATH에 같은 �
 ## 외부 CLI 패키지 카탈로그
 
 <!-- catalog:packages:start -->
-| Package | Executable | Personal | Company | Supported OS | Exact version | Provenance policy |
-| --- | --- | --- | --- | --- | --- | --- |
-| notion | ntn | required | optional | darwin, linux | 0.19.0 | exact-package-version |
-| linear | linear | required | optional | darwin, linux, win32 | 2.0.0 | exact-package-version |
-| jira | jira | optional | required | darwin, linux, win32 | 1.7.0 | exact-release-artifact |
-| confluence | confluence | optional | required | darwin, linux, win32 | 2.18.0 | exact-package-version |
-| github | gh | required | optional | darwin, linux, win32 | manager-provided | reviewed-package-manager-source |
-| gitlab | glab | optional | required | darwin, linux, win32 | manager-provided | reviewed-package-manager-source |
+| Package | Executable | Personal | Company | Supported OS | Exact version | Provenance policy | Reviewed source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| notion | ntn | required | optional | darwin, linux | 0.19.0 | exact-package-version | package-notion-cli |
+| linear | linear | required | optional | darwin, linux, win32 | 2.0.0 | exact-package-version | package-linear-cli |
+| jira | jira | optional | required | darwin, linux, win32 | 1.7.0 | exact-release-artifact | package-jira-cli |
+| confluence | confluence | optional | required | darwin, linux, win32 | 2.18.0 | exact-package-version | package-confluence-cli |
+| github | gh | required | optional | darwin, linux, win32 | manager-provided | reviewed-package-manager-source | package-github-cli |
+| gitlab | glab | optional | required | darwin, linux, win32 | manager-provided | reviewed-package-manager-source | package-gitlab-cli |
 <!-- catalog:packages:end -->
 
 현재 catalog revision에서 reviewed URL과 SHA-256이 없는 managed Jira artifact는
 Linux/Windows에서 설치 가능하다고 가장하지 않고 required profile을 preview
-단계에서 차단합니다. Notion CLI가 required인 `personal`은 Windows에서
-지원되지 않으므로 custom profile 또는 지원되는 원격 환경을 선택해야 합니다.
+단계에서 차단합니다. Notion CLI는 `ntn@0.19.0`의 Linux/macOS 설치만
+카탈로그에 고정합니다. 따라서 권장 dual-target `personal` 설치에서는 WSL이
+GitHub·Linear·Notion CLI를 소유하고 Windows가 receipt-bound bridge를 통해
+그 세 backend만 사용합니다.
 
 로그인은 사람이 보이는 터미널에서 각 CLI 명령으로 수행합니다:
 `linear auth login`, `ntn login`, `jira init`, `confluence init --read-only`,

@@ -24,6 +24,12 @@ A bounded runtime-tool route that lets a Windows Environment Instance use profil
 
 The bridge preserves trusted executable resolution, argument allowlists, timeouts, output limits, Confirmed CLI Write enforcement, and CLI-owned Authentication. It is not a general shell and never copies WSL credentials into Windows or falls back to ambient Windows executables.
 
+Each routed package is bound in the Windows Managed-state Receipt to the target
+WSL Environment Instance and the canonical fingerprint of its ready receipt.
+Both sides revalidate that fingerprint and the route policy before execution;
+the bridge does not share state roots or give Windows mutation authority over
+the WSL instance.
+
 ### Capability Catalog
 
 The runtime-neutral source of truth for the skills, plugins, hooks, language-server integrations, and external CLI packages known to Oh My Harness.

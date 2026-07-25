@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,19 @@ function collectFiles(path: string): string[] {
     const child = join(path, entry.name);
     return entry.isDirectory() ? collectFiles(child) : [child];
   });
+}
+
+function npmInvocation(args: readonly string[]): {
+  readonly command: string;
+  readonly args: readonly string[];
+} {
+  const npmEntrypoint = process.env.npm_execpath;
+  return npmEntrypoint
+    ? { command: process.execPath, args: [npmEntrypoint, ...args] }
+    : {
+      command: process.platform === "win32" ? "npm.cmd" : "npm",
+      args,
+    };
 }
 
 test("U14 maintained contracts and compatibility scripts expose three runtimes without Pi", () => {
@@ -77,11 +90,13 @@ test("U14 maintained contracts and compatibility scripts expose three runtimes w
     ...collectFiles(join(REPOSITORY_ROOT, "src")),
     join(REPOSITORY_ROOT, "package.json"),
     join(REPOSITORY_ROOT, "package-lock.json"),
-  ].filter(
-    (path) =>
-      !path.includes(`${join("src", "migration")}/`)
-      && !path.endsWith(join("src", "catalog", "load.ts")),
-  );
+  ].filter((path) => {
+    const repositoryRelative = relative(REPOSITORY_ROOT, path)
+      .split(/[\\/]/u)
+      .join("/");
+    return !repositoryRelative.startsWith("src/migration/")
+      && repositoryRelative !== "src/catalog/load.ts";
+  });
   const activePiPattern =
     /(?:["'`]pi["'`]|\bPi\b|pi-(?:subagents|ask-user)|oh-my-pi|@earendil-works\/pi)/;
   for (const path of maintainedFiles) {
@@ -105,9 +120,15 @@ test("U14 package metadata and packed artifact contain no Pi dependency or exten
   const lock = readJson("package-lock.json");
   assert.equal(JSON.stringify(lock).includes("@earendil-works/pi-"), false);
 
+  const invocation = npmInvocation([
+    "pack",
+    "--dry-run",
+    "--json",
+    "--ignore-scripts",
+  ]);
   const packed = spawnSync(
-    process.platform === "win32" ? "npm.cmd" : "npm",
-    ["pack", "--dry-run", "--json", "--ignore-scripts"],
+    invocation.command,
+    invocation.args,
     {
       cwd: REPOSITORY_ROOT,
       encoding: "utf8",

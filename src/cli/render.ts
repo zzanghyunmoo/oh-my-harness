@@ -41,10 +41,11 @@ function help(topic: string | undefined, version: string): string {
   if (topic === "setup") {
     return [
       "Usage:",
-      "  omh setup [--target windows-native|wsl-ubuntu] [--profile id] [--agents ids] [--tools ids] [--capability-set profile|workflow-only] [--clean] [--root path] [--json]",
+      "  omh setup [--target windows-native|wsl-ubuntu] [--profile id] [--agents ids] [--tools ids] [--capability-set profile|workflow-only] [--tool-route wsl-ubuntu] [--clean] [--root path] [--json]",
       "  omh setup [same options] --apply --digest sha256",
       "",
       "Preview is read-only and prints the exact digest required by apply.",
+      "Apply wsl-ubuntu first; windows-native may then bind package tools to its ready receipt with --tool-route wsl-ubuntu.",
     ].join("\n");
   }
   if (topic === "agents") {
@@ -90,7 +91,7 @@ function help(topic: string | undefined, version: string): string {
     "  omh setup [options] [--apply --digest sha256]",
     "  omh agents install|status [options]",
     "  omh tools install|doctor [options]",
-    "  omh status|doctor [--root path] [--json]",
+    "  omh status|doctor [--target windows-native|wsl-ubuntu|all] [--root path] [--json]",
     "  omh run --runtime id --receipt /absolute/receipt -- [runtime args]",
     "  omh profiles list|create|validate|preview|publish [options]",
     "",

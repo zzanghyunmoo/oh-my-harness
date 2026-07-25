@@ -16,6 +16,19 @@ import { PLUGIN_RUNTIME_PATHS } from "../../dist/install/plugin-runtime-files.js
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
+function npmInvocation(args: readonly string[]): {
+  readonly command: string;
+  readonly args: readonly string[];
+} {
+  const npmEntrypoint = process.env.npm_execpath;
+  return npmEntrypoint
+    ? { command: process.execPath, args: [npmEntrypoint, ...args] }
+    : {
+      command: process.platform === "win32" ? "npm.cmd" : "npm",
+      args,
+    };
+}
+
 test("cross-platform CI checks the committed patch against its event base", () => {
   const workflow = readFileSync(
     new URL("../../.github/workflows/cross-platform.yml", import.meta.url),
@@ -29,9 +42,10 @@ test("cross-platform CI checks the committed patch against its event base", () =
 });
 
 test("packed artifact contains compiled entrypoints and runtime assets only", () => {
+  const invocation = npmInvocation(["pack", "--dry-run", "--json"]);
   const packed = spawnSync(
-    process.platform === "win32" ? "npm.cmd" : "npm",
-    ["pack", "--dry-run", "--json"],
+    invocation.command,
+    invocation.args,
     {
       cwd: REPO_ROOT,
       encoding: "utf8",
@@ -53,7 +67,10 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
     "dist/composition.js",
     "dist/environment/orchestrator.js",
     "dist/runtime/managed-service.js",
+    "dist/runtime/opencode-discovery.js",
     "dist/runtime/startup-service.js",
+    "dist/tools/routes.js",
+    "dist/tools/wsl-bridge.js",
     "bin/omh.mjs",
     "omh",
     "omh.cmd",
@@ -98,15 +115,16 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
   const stateRoot = join(root, "state");
   try {
     mkdirSync(arbitraryCwd);
+    const packInvocation = npmInvocation([
+      "pack",
+      "--json",
+      "--ignore-scripts",
+      "--pack-destination",
+      root,
+    ]);
     const packed = spawnSync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      [
-        "pack",
-        "--json",
-        "--ignore-scripts",
-        "--pack-destination",
-        root,
-      ],
+      packInvocation.command,
+      packInvocation.args,
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
@@ -118,18 +136,19 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
     const report = JSON.parse(packed.stdout) as Array<{ filename: string }>;
     const archive = join(root, String(report[0]?.filename));
 
+    const installInvocation = npmInvocation([
+      "install",
+      "--prefix",
+      packageRoot,
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--offline",
+      archive,
+    ]);
     const installed = spawnSync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      [
-        "install",
-        "--prefix",
-        packageRoot,
-        "--ignore-scripts",
-        "--no-audit",
-        "--no-fund",
-        "--offline",
-        archive,
-      ],
+      installInvocation.command,
+      installInvocation.args,
       {
         encoding: "utf8",
         env: { ...process.env, npm_config_update_notifier: "false" },

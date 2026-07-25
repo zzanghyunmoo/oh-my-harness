@@ -35,3 +35,40 @@ test("U5 exact package policies always pin a verifiable version", () => {
     assert.match(entry.version ?? "", /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   }
 });
+
+test("U7 personal CLI sources preserve reviewed ownership and exact npm identities", () => {
+  const packages = loadCatalogBundle(REPO_ROOT).packages.packages;
+  const notion = packages.find(({ id }) => id === "notion");
+  const linear = packages.find(({ id }) => id === "linear");
+  const github = packages.find(({ id }) => id === "github");
+
+  assert.ok(notion);
+  assert.deepEqual(notion.supportedPlatforms, ["darwin", "linux"]);
+  assert.equal(notion.supportedPlatforms.includes("win32"), false);
+  assert.deepEqual(
+    notion.installers.map(({ args }) => args),
+    [
+      ["install", "--global", "ntn@0.19.0", "--ignore-scripts"],
+      ["install", "--global", "ntn@0.19.0", "--ignore-scripts"],
+    ],
+  );
+
+  assert.ok(linear);
+  assert.match(linear.description, /^Community Linear/u);
+  assert.equal(linear.version, "2.0.0");
+  assert.equal(
+    linear.installers.every(({ args }) =>
+      args.join(" ") ===
+        "install --global @schpet/linear-cli@2.0.0 --ignore-scripts"
+    ),
+    true,
+  );
+
+  assert.ok(github);
+  assert.match(github.description, /^Official GitHub/u);
+  assert.equal(github.versionPolicy, "reviewed-package-manager-source");
+  assert.deepEqual(
+    github.installationSources.map(({ sourceId }) => sourceId),
+    ["package-github-cli"],
+  );
+});
