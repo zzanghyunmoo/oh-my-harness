@@ -28,9 +28,34 @@ export class StalePreviewError extends Error {
 export interface ApplyDependencies {
   readonly state: StatePort;
   observe(action: PlanAction): Promise<ObservedPreimage>;
+  prepare?(action: PlanAction): Promise<{
+    readonly commit?: () => Promise<void>;
+    readonly rollback: () => Promise<void>;
+  } | undefined>;
   execute(action: PlanAction): Promise<{ readonly verified: boolean; readonly detail?: string }>;
   verifyCompleted?(action: PlanAction): Promise<boolean>;
   now?: () => Date;
+}
+
+async function rollbackPrepared(
+  prepared: readonly {
+    readonly action: PlanAction;
+    readonly rollback: () => Promise<void>;
+  }[],
+  completed: Set<string>,
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const entry of [...prepared].reverse()) {
+    try {
+      await entry.rollback();
+      completed.delete(entry.action.id);
+    } catch (error) {
+      failures.push(
+        `${entry.action.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return failures;
 }
 
 export interface ApplyResult {
@@ -172,6 +197,11 @@ export async function applyExactPlan(
 
   return dependencies.state.withApplyLock(async () => {
     const completed = await reusableCompletedIds(plan, dependencies);
+    const prepared: Array<{
+      readonly action: PlanAction;
+      readonly commit?: () => Promise<void>;
+      readonly rollback: () => Promise<void>;
+    }> = [];
     let journal = createJournal(plan.digest, plan.catalogRevision, [...completed]);
     await dependencies.state.writeJournal(journal);
 
@@ -179,9 +209,13 @@ export async function applyExactPlan(
       if (completed.has(action.id)) continue;
       const observed = await dependencies.observe(action);
       if (!samePreimage(observed, action.preimage)) {
+        const rollbackFailures = await rollbackPrepared(prepared, completed);
         journal = updateJournal(journal, {
           completedActionIds: [...completed],
-          failure: `action preimage changed: ${action.id}`,
+          failure: [
+            `action preimage changed: ${action.id}`,
+            ...rollbackFailures.map((failure) => `rollback failed: ${failure}`),
+          ].join("; "),
           status: "partial-unready",
         });
         await dependencies.state.writeJournal(journal);
@@ -193,6 +227,16 @@ export async function applyExactPlan(
       }
 
       try {
+        const preparedAction = await dependencies.prepare?.(action);
+        if (preparedAction !== undefined) {
+          prepared.push({
+            action,
+            ...(preparedAction.commit === undefined
+              ? {}
+              : { commit: preparedAction.commit }),
+            rollback: preparedAction.rollback,
+          });
+        }
         const result = await dependencies.execute(action);
         if (!result.verified) {
           throw new Error(result.detail ?? `action verification failed: ${action.id}`);
@@ -204,7 +248,11 @@ export async function applyExactPlan(
         });
         await dependencies.state.writeJournal(journal);
       } catch (error) {
-        const failure = error instanceof Error ? error.message : String(error);
+        const rollbackFailures = await rollbackPrepared(prepared, completed);
+        const failure = [
+          error instanceof Error ? error.message : String(error),
+          ...rollbackFailures.map((entry) => `rollback failed: ${entry}`),
+        ].join("; ");
         journal = updateJournal(journal, {
           completedActionIds: [...completed],
           failure,
@@ -226,7 +274,33 @@ export async function applyExactPlan(
       throw new Error("apply did not verify every planned action");
     }
     const receipt = receiptFor(plan, completedActionIds, dependencies.now ?? (() => new Date()));
-    await dependencies.state.publishReceipt(receipt);
+    try {
+      await dependencies.state.publishReceipt(receipt);
+    } catch (error) {
+      const rollbackFailures = await rollbackPrepared(prepared, completed);
+      const failure = [
+        error instanceof Error ? error.message : String(error),
+        ...rollbackFailures.map((entry) => `rollback failed: ${entry}`),
+      ].join("; ");
+      journal = updateJournal(journal, {
+        completedActionIds: [...completed],
+        failure,
+        status: "partial-unready",
+      });
+      await dependencies.state.writeJournal(journal);
+      return {
+        status: "partial-unready",
+        completedActionIds: [...completed],
+        failure,
+      };
+    }
+    for (const entry of prepared) {
+      try {
+        await entry.commit?.();
+      } catch {
+        // Receipt publication is authoritative. Backup cleanup is a retryable tail.
+      }
+    }
     journal = updateJournal(journal, {
       completedActionIds,
       status: "ready",

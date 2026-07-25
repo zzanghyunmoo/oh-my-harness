@@ -363,11 +363,14 @@ function resolveWslExecutable(environment: NodeJS.ProcessEnv): string {
 }
 
 function unavailableResult(argv: readonly string[], detail: string): OmhResult {
+  const mutationPreview = argv[0] === "setup"
+    || (argv[0] === "agents" && argv[1] === "install")
+    || (argv[0] === "tools" && argv[1] === "install");
   return {
     command: argv[0] ?? "status",
-    exitCode: 6,
+    exitCode: mutationPreview ? 3 : 6,
     output: detail,
-    state: "unverifiable",
+    state: mutationPreview ? "blocked" : "unverifiable",
   };
 }
 
@@ -424,10 +427,18 @@ export class WslTargetPort implements TargetPort {
     if (request.targetId !== "wsl-ubuntu") {
       throw new Error(`WslTargetPort cannot execute ${request.targetId}`);
     }
-    const distribution = parseWslDistributionList(
-      await this.required(["--list", "--verbose"], request, "WSL distribution list"),
-      "Ubuntu",
-    );
+    let distribution: WslDistribution;
+    try {
+      distribution = parseWslDistributionList(
+        await this.required(["--list", "--verbose"], request, "WSL distribution list"),
+        "Ubuntu",
+      );
+    } catch (error) {
+      return unavailableResult(
+        request.argv,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     if (distribution.state === "Stopped" && !request.startIfStopped) {
       return unavailableResult(
         request.argv,
@@ -435,39 +446,47 @@ export class WslTargetPort implements TargetPort {
       );
     }
 
-    const nodeProbe = parseNodeProbe(
-      await this.required(
+    let nodeProbe: NodeProbe;
+    try {
+      nodeProbe = parseNodeProbe(
+        await this.required(
+          [
+            "--distribution",
+            "Ubuntu",
+            "--exec",
+            "/usr/bin/env",
+            "-i",
+            `PATH=${LINUX_PATH}`,
+            "node",
+            "--input-type=module",
+            "--eval",
+            "import os from 'node:os';process.stdout.write(JSON.stringify({arch:process.arch,execPath:process.execPath,home:os.homedir(),platform:process.platform,version:process.versions.node}))",
+          ],
+          request,
+          "WSL Node probe",
+        ),
+      );
+      const translatedRepository = await this.required(
         [
           "--distribution",
           "Ubuntu",
           "--exec",
-          "/usr/bin/env",
-          "-i",
-          `PATH=${LINUX_PATH}`,
-          "node",
-          "--input-type=module",
-          "--eval",
-          "import os from 'node:os';process.stdout.write(JSON.stringify({arch:process.arch,execPath:process.execPath,home:os.homedir(),platform:process.platform,version:process.versions.node}))",
+          "/usr/bin/wslpath",
+          "-a",
+          "-u",
+          request.repositoryRoot,
         ],
         request,
-        "WSL Node probe",
-      ),
-    );
-    const translatedRepository = await this.required(
-      [
-        "--distribution",
-        "Ubuntu",
-        "--exec",
-        "/usr/bin/wslpath",
-        "-a",
-        "-u",
-        request.repositoryRoot,
-      ],
-      request,
-      "WSL repository path translation",
-    );
-    if (!/^\/mnt\/[a-z]\//u.test(translatedRepository)) {
-      throw new Error("WSL repository path translation returned an unsafe path");
+        "WSL repository path translation",
+      );
+      if (!/^\/mnt\/[a-z]\//u.test(translatedRepository)) {
+        throw new Error("WSL repository path translation returned an unsafe path");
+      }
+    } catch (error) {
+      return unavailableResult(
+        request.argv,
+        error instanceof Error ? error.message : String(error),
+      );
     }
     const temporary = await this.required(
       [

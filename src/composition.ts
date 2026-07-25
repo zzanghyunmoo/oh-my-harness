@@ -161,6 +161,10 @@ function selectionFor(
     ParsedOmhArguments,
     { readonly command: "setup" | "agents" | "tools" }
   >,
+  routeDependency?: {
+    readonly failure?: string;
+    readonly receiptFingerprint?: string;
+  },
 ): EnvironmentSelection {
   const selectedAgents = parsed.command === "tools"
     ? undefined
@@ -180,6 +184,12 @@ function selectionFor(
     ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
     ...(parsed.target === undefined ? {} : { target: parsed.target }),
     ...(parsed.toolRoute === undefined ? {} : { toolRoute: parsed.toolRoute }),
+    ...(routeDependency?.failure === undefined
+      ? {}
+      : { toolRouteFailure: routeDependency.failure }),
+    ...(routeDependency?.receiptFingerprint === undefined
+      ? {}
+      : { toolRouteReceiptFingerprint: routeDependency.receiptFingerprint }),
   };
 }
 
@@ -256,15 +266,86 @@ export async function runOmh(
   ) {
     throw new Error("target execution identity does not match parsed target");
   }
-  if (selectedTarget === "all") {
-    throw new Error("aggregate target status is not implemented");
-  }
   const coreOptions = orchestratorOptions(options);
+  if (selectedTarget === "all") {
+    if (parsed.command !== "status" && parsed.command !== "doctor") {
+      throw new Error("--target all is read-only");
+    }
+    const windows = (parsed.command === "doctor"
+      ? diagnoseEnvironment
+      : inspectEnvironment)(
+        {
+          ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+          target: "windows-native",
+        },
+        coreOptions,
+      );
+    const targetPort = options.targetPort ?? new WslTargetPort(
+      options.env === undefined ? {} : { environment: options.env },
+    );
+    const wslResult = await targetPort.run({
+      argv: [parsed.command, "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped: false,
+      targetId: "wsl-ubuntu",
+    });
+    const wsl = wslResult.status ?? null;
+    const wslReadiness = wsl?.readiness
+      ?? (
+        wslResult.state === "unconfigured"
+          ? "unconfigured"
+          : "unverifiable"
+      );
+    const readyStates = ["ready", "ready-with-optional-gaps"];
+    const readiness = (
+      readyStates.includes(windows.readiness)
+      && readyStates.includes(wslReadiness)
+    )
+      ? (
+          windows.readiness === "ready-with-optional-gaps"
+          || wslReadiness === "ready-with-optional-gaps"
+            ? "ready-with-optional-gaps" as const
+            : "ready" as const
+        )
+      : "unverifiable" as const;
+    return {
+      aggregateStatus: {
+        instances: [
+          {
+            id: "windows-native",
+            readiness: windows.readiness,
+            status: windows,
+          },
+          {
+            ...(wslResult.output === undefined
+              ? {}
+              : { detail: wslResult.output }),
+            id: "wsl-ubuntu",
+            readiness: wslReadiness,
+            status: wsl,
+          },
+        ],
+        kind: "environment-aggregate-status",
+        readiness,
+        schemaVersion: "2.0.0",
+      },
+      command: parsed.command,
+      exitCode: ["ready", "ready-with-optional-gaps"].includes(readiness)
+        ? 0
+        : 6,
+      state: readiness,
+    };
+  }
   if (parsed.command === "status" || parsed.command === "doctor") {
     const status = (parsed.command === "doctor"
       ? diagnoseEnvironment
       : inspectEnvironment)(
-      parsed.root === undefined ? {} : { stateRoot: parsed.root },
+      {
+        ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+        ...(parsed.target === undefined || parsed.target === "all"
+          ? {}
+          : { target: parsed.target }),
+      },
       coreOptions,
     );
     return {
@@ -342,7 +423,37 @@ export async function runOmh(
     };
   }
 
-  const selection = selectionFor(parsed);
+  let routeDependency:
+    | { readonly failure?: string; readonly receiptFingerprint?: string }
+    | undefined;
+  if (parsed.target === "windows-native" && parsed.toolRoute === "wsl-ubuntu") {
+    const targetPort = options.targetPort ?? new WslTargetPort(
+      options.env === undefined ? {} : { environment: options.env },
+    );
+    const dependency = await targetPort.run({
+      argv: ["status", "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped: false,
+      targetId: "wsl-ubuntu",
+    });
+    if (
+      dependency.status !== undefined
+      && ["ready", "ready-with-optional-gaps"].includes(
+        dependency.status.readiness,
+      )
+      && dependency.status.receiptFingerprint !== null
+    ) {
+      routeDependency = {
+        receiptFingerprint: dependency.status.receiptFingerprint,
+      };
+    } else {
+      routeDependency = {
+        failure: dependency.output
+          ?? `wsl-ubuntu is ${dependency.state ?? "unverifiable"}`,
+      };
+    }
+  }
+  const selection = selectionFor(parsed, routeDependency);
   if (!parsed.apply) {
     const preview = previewEnvironment(selection, coreOptions);
     return {

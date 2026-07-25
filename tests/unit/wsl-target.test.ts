@@ -159,15 +159,14 @@ test("WSL target rejects stopped read-only inspection and untrusted Node before 
       },
     },
   });
-  await assert.rejects(
-    () => leaked.run({
-      argv: ["setup", "--target", "wsl-ubuntu", "--json"],
-      repositoryRoot: "C:\\repo",
-      startIfStopped: true,
-      targetId: "wsl-ubuntu",
-    }),
-    /trusted Linux Node/,
-  );
+  const blocked = await leaked.run({
+    argv: ["setup", "--target", "wsl-ubuntu", "--json"],
+    repositoryRoot: "C:\\repo",
+    startIfStopped: true,
+    targetId: "wsl-ubuntu",
+  });
+  assert.equal(blocked.state, "blocked");
+  assert.match(blocked.output ?? "", /trusted Linux Node/);
 });
 
 test("WSL target rejects an old Node and path translation failure before staging", async () => {
@@ -202,15 +201,14 @@ test("WSL target rejects an old Node and path translation failure before staging
         },
       },
     });
-    await assert.rejects(
-      () => port.run({
-        argv: ["setup", "--target", "wsl-ubuntu", "--json"],
-        repositoryRoot: "C:\\repo",
-        startIfStopped: true,
-        targetId: "wsl-ubuntu",
-      }),
-      /trusted Linux Node|path translation failed/,
-    );
+    const blocked = await port.run({
+      argv: ["setup", "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: "C:\\repo",
+      startIfStopped: true,
+      targetId: "wsl-ubuntu",
+    });
+    assert.equal(blocked.state, "blocked");
+    assert.match(blocked.output ?? "", /trusted Linux Node|path translation failed/);
   }
 });
 

@@ -1,7 +1,21 @@
 import type {
   EnvironmentPreview,
+  EnvironmentReadiness,
   EnvironmentStatus,
 } from "../environment/orchestrator.js";
+import type { EnvironmentInstanceId } from "../domain/environment-instance.js";
+
+export interface AggregateEnvironmentStatus {
+  readonly schemaVersion: "2.0.0";
+  readonly kind: "environment-aggregate-status";
+  readonly readiness: EnvironmentReadiness;
+  readonly instances: readonly {
+    readonly id: EnvironmentInstanceId;
+    readonly readiness: EnvironmentReadiness;
+    readonly status: EnvironmentStatus | null;
+    readonly detail?: string;
+  }[];
+}
 
 export interface OmhResult {
   readonly command: string;
@@ -10,6 +24,7 @@ export interface OmhResult {
   readonly output?: string;
   readonly preview?: EnvironmentPreview;
   readonly status?: EnvironmentStatus;
+  readonly aggregateStatus?: AggregateEnvironmentStatus;
   readonly apply?: {
     readonly status: string;
     readonly completedActionIds: readonly string[];
@@ -179,6 +194,21 @@ function renderStatus(status: EnvironmentStatus, doctor: boolean): string {
   return lines.join("\n");
 }
 
+function renderAggregateStatus(
+  status: AggregateEnvironmentStatus,
+  doctor: boolean,
+): string {
+  return [
+    `Oh My Harness ${doctor ? "doctor" : "status"}: ${status.readiness}`,
+    "",
+    ...status.instances.map((instance) =>
+      `- ${instance.id}: ${instance.readiness}${
+        instance.detail === undefined ? "" : ` — ${instance.detail}`
+      }`
+    ),
+  ].join("\n");
+}
+
 export function createResultRenderer(
   catalog: CliRenderCatalog,
 ): (result: OmhResult & { readonly topic?: string }) => string {
@@ -205,6 +235,14 @@ export function createResultRenderer(
     }
     if (result.status) {
       return `${renderStatus(result.status, result.command === "doctor")}\n`;
+    }
+    if (result.aggregateStatus) {
+      return `${
+        renderAggregateStatus(
+          result.aggregateStatus,
+          result.command === "doctor",
+        )
+      }\n`;
     }
     return `${JSON.stringify(result, null, 2)}\n`;
   };

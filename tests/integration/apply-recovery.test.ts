@@ -195,3 +195,60 @@ test("U3 action-local revalidation stops a target changed after an earlier actio
   assert.equal(result.conflictActionId, "two");
   assert.equal(state.receipt, null);
 });
+
+test("U3 prepared mutations roll back in reverse order before receipt publication", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const active = new Set<string>();
+  const rollbackOrder: string[] = [];
+
+  const result = await applyExactPlan(exact, exact.digest, {
+    state,
+    observe: async () => ({ kind: "missing" }),
+    prepare: async (action) => ({
+      rollback: async () => {
+        rollbackOrder.push(action.id);
+        active.delete(action.id);
+      },
+    }),
+    execute: async (action) => {
+      active.add(action.id);
+      if (action.id === "two") throw new Error("registration switch failed");
+      return { verified: true };
+    },
+  });
+
+  assert.equal(result.status, "partial-unready");
+  assert.deepEqual(rollbackOrder, ["two", "one"]);
+  assert.deepEqual([...active], []);
+  assert.deepEqual(result.completedActionIds, []);
+  assert.equal(state.receipt, null);
+});
+
+test("U3 receipt publication failure rolls back all prepared mutations", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  state.publishReceipt = async () => {
+    throw new Error("receipt publication failed");
+  };
+  const active = new Set<string>();
+
+  const result = await applyExactPlan(exact, exact.digest, {
+    state,
+    observe: async () => ({ kind: "missing" }),
+    prepare: async (action) => ({
+      rollback: async () => {
+        active.delete(action.id);
+      },
+    }),
+    execute: async (action) => {
+      active.add(action.id);
+      return { verified: true };
+    },
+  });
+
+  assert.equal(result.status, "partial-unready");
+  assert.match(result.failure ?? "", /receipt publication failed/);
+  assert.deepEqual([...active], []);
+  assert.equal(state.receipt, null);
+});

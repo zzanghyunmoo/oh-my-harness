@@ -1,11 +1,15 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  rmSync,
 } from "node:fs";
 import {
   join,
+  relative,
   resolve,
 } from "node:path";
 
@@ -22,6 +26,7 @@ import type {
 } from "../catalog/types.js";
 import {
   isAgentId,
+  isCapabilityId,
   isPackageId,
   WORKFLOW_CAPABILITY_IDS,
   type AgentId,
@@ -148,6 +153,7 @@ export interface EnvironmentPreview {
   readonly digest: string | null;
   readonly readiness: "preview" | "blocked";
   readonly remediation: string;
+  readonly instanceId: EnvironmentInstanceId | null;
 }
 
 export interface EnvironmentStatus {
@@ -168,6 +174,9 @@ export interface EnvironmentStatus {
   readonly claudeMilestoneReady: boolean;
   readonly v2ParityReady: boolean;
   readonly remediation: readonly string[];
+  readonly instanceId: EnvironmentInstanceId | null;
+  readonly planDigest: string | null;
+  readonly receiptFingerprint: string | null;
 }
 
 export interface EnvironmentSelection {
@@ -181,6 +190,9 @@ export interface EnvironmentSelection {
   readonly target?: EnvironmentInstanceId;
   readonly toolRoute?: "wsl-ubuntu";
   readonly toolRouteReceiptFingerprint?: string;
+  readonly toolRouteFailure?: string;
+  readonly toolRoutes?: readonly ToolRoute[];
+  readonly selectedCapabilities?: readonly string[];
 }
 
 export interface EnvironmentOrchestratorOptions {
@@ -219,6 +231,11 @@ interface EnvironmentModel {
   readonly managedPayload: ManagedRuntimePayload;
   readonly officialMarketplace: OfficialMarketplaceInspection;
   readonly desired: ReturnType<typeof resolveDesiredState>;
+  readonly clean: boolean;
+  readonly currentReceipt: ManagedStateReceipt | null;
+  readonly receiptFailure: string | null;
+  readonly toolRouteRequested: boolean;
+  readonly toolRouteFailure: string | null;
 }
 
 interface Marker {
@@ -502,23 +519,30 @@ function buildModel(
   }
   const selectedPackages = selectedPackageIds(profile, selection.selectedPackages);
   const capabilitySet = selection.capabilitySet ?? "profile";
-  const selectedCapabilities = profile.capabilities.filter((id): id is CapabilityId =>
-    capabilitySet === "profile"
-      || (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
-  );
-  let toolRoutes: readonly ToolRoute[] = [];
-  if (selection.toolRoute !== undefined) {
+  const selectedCapabilities = (
+    selection.selectedCapabilities
+    ?? profile.capabilities.filter((id) =>
+      capabilitySet === "profile"
+        || (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
+    )
+  ).map((id) => {
+    if (!isCapabilityId(id)) {
+      throw new Error(`unsupported selected capability: ${id}`);
+    }
+    return id;
+  });
+  let toolRoutes: readonly ToolRoute[] = selection.toolRoutes ?? [];
+  if (selection.toolRoute !== undefined && selection.toolRoutes === undefined) {
     if (instance?.id !== "windows-native") {
       throw new Error("tool routes require the windows-native target");
     }
-    if (selection.toolRouteReceiptFingerprint === undefined) {
-      throw new Error("tool route receipt fingerprint is required");
+    if (selection.toolRouteReceiptFingerprint !== undefined) {
+      toolRoutes = selectedPackages.map((packageId) => ({
+        packageId,
+        receiptFingerprint: selection.toolRouteReceiptFingerprint!,
+        targetInstanceId: selection.toolRoute!,
+      }));
     }
-    toolRoutes = selectedPackages.map((packageId) => ({
-      packageId,
-      receiptFingerprint: selection.toolRouteReceiptFingerprint!,
-      targetInstanceId: selection.toolRoute!,
-    }));
   }
   const desired = resolveDesiredState(
     profile,
@@ -574,6 +598,18 @@ function buildModel(
     options.repositoryRoot,
     stateRoot,
   );
+  let currentReceipt: ManagedStateReceipt | null = null;
+  let receiptFailure: string | null = null;
+  if (selection.clean === true) {
+    try {
+      currentReceipt = readReceipt(
+        join(stateRoot, "receipts", "environment.json"),
+        options.repositoryRoot,
+      );
+    } catch (error) {
+      receiptFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
   return {
     adapters,
     agents,
@@ -592,12 +628,93 @@ function buildModel(
     managedPayload,
     officialMarketplace,
     desired,
+    clean: selection.clean ?? false,
+    currentReceipt,
+    receiptFailure,
+    toolRouteFailure: selection.toolRoute === undefined
+      ? null
+      : selection.toolRouteFailure
+        ?? (
+          selection.toolRouteReceiptFingerprint === undefined
+            ? "wsl-ubuntu does not have a ready receipt"
+            : null
+        ),
+    toolRouteRequested: selection.toolRoute !== undefined,
     platformId,
     profile,
     receiptPath: join(stateRoot, "receipts", "environment.json"),
     selectedAgents: desired.selectedAgents,
     stateRoot,
   };
+}
+
+function targetWithinStateRoot(stateRoot: string, target: string): boolean {
+  const candidate = relative(resolve(stateRoot), resolve(target));
+  return candidate !== ""
+    && candidate !== ".."
+    && !candidate.startsWith("..\\")
+    && !candidate.startsWith("../");
+}
+
+function ownedContentMatches(
+  ownership: ManagedStateReceipt["ownership"][number],
+): boolean {
+  if (!existsSync(ownership.target)) return true;
+  try {
+    return ownership.kind === "directory"
+      ? hashManagedDirectory(ownership.target) === ownership.digest
+      : sha256File(ownership.target) === ownership.digest;
+  } catch {
+    return false;
+  }
+}
+
+function cleanPreflights(model: EnvironmentModel): PlanPreflight[] {
+  if (!model.clean) return [];
+  if (model.receiptFailure !== null) {
+    return [{
+      detail: model.receiptFailure,
+      id: "clean:receipt",
+      required: true,
+      status: "unverifiable",
+    }];
+  }
+  if (model.currentReceipt === null) {
+    return [{
+      detail: "no prior receipt-owned artifacts exist",
+      id: "clean:receipt",
+      required: true,
+      status: "ready",
+    }];
+  }
+  const instance = model.currentReceipt.desiredState.instance;
+  if (
+    instance !== undefined
+    && instance.id !== model.desired.instance?.id
+  ) {
+    return [{
+      detail: "the prior receipt belongs to another environment instance",
+      id: "clean:instance",
+      required: true,
+      status: "unverifiable",
+    }];
+  }
+  return model.currentReceipt.ownership
+    .filter(({ scope }) => scope === "managed")
+    .map((ownership) => {
+      const safe = targetWithinStateRoot(model.stateRoot, ownership.target);
+      const exact = safe && ownedContentMatches(ownership);
+      return {
+        detail: !safe
+          ? "managed ownership target escapes the selected instance root"
+          : exact
+            ? "managed ownership is exact or already absent"
+            : "managed ownership content drifted",
+        id: `clean:${ownership.id}`,
+        required: true,
+        status: exact ? "ready" as const : "unverifiable" as const,
+      };
+    });
 }
 
 function markerFor(
@@ -691,6 +808,18 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           : "unverifiable",
       detail: entry.detail ?? `${entry.sourceId}: ${entry.state}`,
     })),
+    ...cleanPreflights(model),
+    ...(model.toolRouteRequested
+      ? [{
+          detail: model.toolRouteFailure
+            ?? "wsl-ubuntu receipt dependency is ready",
+          id: "route:wsl-ubuntu",
+          required: true,
+          status: model.toolRouteFailure === null
+            ? "ready" as const
+            : "unverifiable" as const,
+        }]
+      : []),
   ];
 }
 
@@ -866,6 +995,35 @@ function planActions(
       target,
     });
   }
+  if (model.clean && model.currentReceipt !== null) {
+    const replacementTargets = new Set(actions.map(({ target }) => resolve(target)));
+    for (const ownership of model.currentReceipt.ownership) {
+      if (
+        ownership.scope !== "managed"
+        || !existsSync(ownership.target)
+        || replacementTargets.has(resolve(ownership.target))
+        || (
+          ownership.repairSource !== undefined
+          && resolve(ownership.repairSource) === resolve(ownership.target)
+        )
+      ) {
+        continue;
+      }
+      actions.push({
+        id: `clean:${ownership.id}`,
+        kind: "remove",
+        payload: {
+          contentDigest: ownership.digest,
+          operation: "remove-owned",
+          ownershipKind: ownership.kind,
+          ownershipScope: "managed",
+        },
+        preimage: observeManagedPath(ownership.target),
+        required: true,
+        target: ownership.target,
+      });
+    }
+  }
   return actions;
 }
 
@@ -894,6 +1052,8 @@ function observedState(
       }),
     ),
     actions: actions.map(({ id, preimage }) => ({ id, preimage })),
+    cleanInstall: model.clean,
+    priorReceiptPlanDigest: model.currentReceipt?.planDigest ?? null,
   };
 }
 
@@ -955,7 +1115,7 @@ function buildEnvironmentPreview(
   const model = buildModel(selection, normalized);
   const checks = preflights(model);
   const blockers = blockingIds(checks);
-  const actions = planActions(model, normalized);
+  const actions = blockers.length === 0 ? planActions(model, normalized) : [];
   const plan = blockers.length === 0
     ? createApplyPlan({
         actions,
@@ -1003,6 +1163,7 @@ function buildEnvironmentPreview(
       schemaVersion: "2.0.0",
       selectedAgents: model.selectedAgents,
       stateRoot: model.stateRoot,
+      instanceId: model.desired.instance?.id ?? null,
     },
   };
 }
@@ -1184,6 +1345,24 @@ async function executeAction(
       verified: sha256File(action.target) === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "remove-owned") {
+    if (!targetWithinStateRoot(model.stateRoot, action.target)) {
+      throw new Error(`${action.id}: clean target escapes the selected instance root`);
+    }
+    if (existsSync(action.target)) {
+      const kind = payloadString(action, "ownershipKind");
+      const exact = kind === "directory"
+        ? hashManagedDirectory(action.target)
+          === payloadString(action, "contentDigest")
+        : sha256File(action.target) === payloadString(action, "contentDigest");
+      if (!exact) throw new Error(`${action.id}: managed clean target drifted`);
+      rmSync(action.target, {
+        force: false,
+        recursive: kind === "directory",
+      });
+    }
+    return { verified: !existsSync(action.target) };
+  }
   if (operation === "register-claude-official") {
     const currentMarketplace = inspectOfficialClaudeMarketplace(
       loadCapabilityProvenance(options.repositoryRoot).official,
@@ -1239,7 +1418,95 @@ async function executeAction(
   throw new Error(`unsupported environment action: ${operation}`);
 }
 
+function prepareActionRollback(
+  action: PlanAction,
+  model: EnvironmentModel,
+): {
+  readonly commit: () => Promise<void>;
+  readonly rollback: () => Promise<void>;
+} | undefined {
+  const operation = payloadString(action, "operation");
+  if (["verify-file", "verify-agent"].includes(operation)) return undefined;
+  const targets = [action.target];
+  const observedTarget = action.payload?.observedTarget;
+  if (
+    typeof observedTarget === "string"
+    && !targets.some((target) => resolve(target) === resolve(observedTarget))
+  ) {
+    targets.push(observedTarget);
+  }
+  const backupRoot = join(
+    model.stateRoot,
+    "journal",
+    "rollback",
+    `${action.id.replaceAll(":", "-")}-${randomBytes(8).toString("hex")}`,
+  );
+  mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
+  const snapshots = targets.map((target, index) => {
+    if (!existsSync(target)) {
+      return {
+        existed: false as const,
+        expectedKind: action.payload?.ownershipKind === "directory"
+          ? "directory" as const
+          : "file" as const,
+        target,
+      };
+    }
+    const stat = lstatSync(target);
+    if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+      throw new Error(`rollback target is not a regular file or directory: ${target}`);
+    }
+    const backup = join(backupRoot, String(index));
+    cpSync(target, backup, {
+      errorOnExist: true,
+      force: false,
+      preserveTimestamps: true,
+      recursive: stat.isDirectory(),
+    });
+    return {
+      backup,
+      existed: true as const,
+      kind: stat.isDirectory() ? "directory" as const : "file" as const,
+      target,
+    };
+  });
+  return {
+    commit: async () => {
+      rmSync(backupRoot, { force: true, recursive: true });
+    },
+    rollback: async () => {
+      for (const snapshot of [...snapshots].reverse()) {
+        if (existsSync(snapshot.target)) {
+          const current = lstatSync(snapshot.target);
+          const expectedDirectory = snapshot.existed
+            ? snapshot.kind === "directory"
+            : snapshot.expectedKind === "directory";
+          if (current.isSymbolicLink() || current.isDirectory() !== expectedDirectory) {
+            throw new Error(`rollback target type changed: ${snapshot.target}`);
+          }
+          rmSync(snapshot.target, {
+            force: true,
+            recursive: current.isDirectory(),
+          });
+        }
+        if (snapshot.existed) {
+          cpSync(snapshot.backup, snapshot.target, {
+            errorOnExist: true,
+            force: false,
+            preserveTimestamps: true,
+            recursive: snapshot.kind === "directory",
+          });
+        }
+      }
+      rmSync(backupRoot, { force: true, recursive: true });
+    },
+  };
+}
+
 function completedActionReady(action: PlanAction): boolean {
+  if (action.payload?.operation === "remove-owned") {
+    return !existsSync(action.target);
+  }
   if (
     action.payload?.operation === "register-runtime"
     || action.payload?.operation === "register-claude-official"
@@ -1272,6 +1539,7 @@ export async function applyEnvironment(
   const result = await applyExactPlan(preview.plan, expectedDigest, {
     state: new FileStateStore(model.stateRoot),
     observe: async (action) => actionPreimage(action),
+    prepare: async (action) => prepareActionRollback(action, model),
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
@@ -1295,12 +1563,42 @@ function readReceipt(
   return value as ManagedStateReceipt;
 }
 
+function selectionFromReceipt(
+  receipt: ManagedStateReceipt,
+  stateRoot: string,
+): EnvironmentSelection {
+  return {
+    ...(receipt.desiredState.capabilitySet === undefined
+      ? {}
+      : { capabilitySet: receipt.desiredState.capabilitySet }),
+    profileId: receipt.desiredState.profileId,
+    ...(receipt.desiredState.selectedCapabilities === undefined
+      ? {}
+      : { selectedCapabilities: receipt.desiredState.selectedCapabilities }),
+    selectedAgents: receipt.desiredState.selectedAgents,
+    ...(receipt.desiredState.selectedPackages === undefined
+      ? {}
+      : { selectedPackages: receipt.desiredState.selectedPackages }),
+    stateRoot,
+    ...(receipt.desiredState.instance === undefined
+      ? {}
+      : { target: receipt.desiredState.instance.id }),
+    ...(receipt.desiredState.toolRoutes === undefined
+      ? {}
+      : { toolRoutes: receipt.desiredState.toolRoutes }),
+  };
+}
+
 export function inspectEnvironment(
-  selection: Pick<EnvironmentSelection, "stateRoot">,
+  selection: Pick<EnvironmentSelection, "stateRoot" | "target">,
   options: EnvironmentOrchestratorOptions,
 ): EnvironmentStatus {
   const normalized = normalizedOptions(options);
-  const stateRoot = resolveStateRoot(selection.stateRoot, normalized.env);
+  const stateRoot = resolveStateRoot(
+    selection.stateRoot,
+    normalized.env,
+    selection.target,
+  );
   const receiptPath = join(stateRoot, "receipts", "environment.json");
   const catalog = loadCatalogBundle(normalized.repositoryRoot);
   let receipt: ManagedStateReceipt | null = null;
@@ -1309,6 +1607,14 @@ export function inspectEnvironment(
     receipt = readReceipt(receiptPath, normalized.repositoryRoot);
   } catch (error) {
     receiptFailure = error instanceof Error ? error.message : String(error);
+  }
+  if (
+    receipt !== null
+    && selection.target !== undefined
+    && receipt.desiredState.instance?.id !== selection.target
+  ) {
+    receiptFailure = "receipt environment instance does not match the selected target";
+    receipt = null;
   }
   if (receipt === null) {
     return {
@@ -1324,23 +1630,23 @@ export function inspectEnvironment(
       profileId: null,
       readiness: receiptFailure === null ? "unconfigured" : "unverifiable",
       receiptPath,
-      remediation: ["omh setup --profile personal --agents claude-code"],
+      remediation: [
+        `omh setup${
+          selection.target === undefined ? "" : ` --target ${selection.target}`
+        } --profile personal --agents claude-code`,
+      ],
       schemaVersion: "2.0.0",
       selectedAgents: [],
       stateRoot,
       v2ParityReady: false,
+      instanceId: selection.target ?? null,
+      planDigest: null,
+      receiptFingerprint: null,
     };
   }
-  const preview = previewEnvironment({
-    profileId: receipt.desiredState.profileId,
-    selectedAgents: receipt.desiredState.selectedAgents,
-    stateRoot,
-  }, normalized);
-  const model = buildModel({
-    profileId: receipt.desiredState.profileId,
-    selectedAgents: receipt.desiredState.selectedAgents,
-    stateRoot,
-  }, normalized);
+  const receiptSelection = selectionFromReceipt(receipt, stateRoot);
+  const preview = previewEnvironment(receiptSelection, normalized);
+  const model = buildModel(receiptSelection, normalized);
   const runtimeReady = new Map(
     receipt.runtimeReadiness.map(({ agentId, state }) => [agentId, state]),
   );
@@ -1498,6 +1804,9 @@ export function inspectEnvironment(
       && nativeReady
       && payloadReady
       && capabilities.every(({ state }) => state === "ready"),
+    instanceId: receipt.desiredState.instance?.id ?? null,
+    planDigest: receipt.planDigest,
+    receiptFingerprint: sha256File(receiptPath),
   };
 }
 
@@ -1558,7 +1867,7 @@ function nativeDoctorIssues(
 }
 
 export function diagnoseEnvironment(
-  selection: Pick<EnvironmentSelection, "stateRoot">,
+  selection: Pick<EnvironmentSelection, "stateRoot" | "target">,
   options: EnvironmentOrchestratorOptions,
 ): EnvironmentStatus {
   const status = inspectEnvironment(selection, options);
@@ -1569,11 +1878,12 @@ export function diagnoseEnvironment(
     return status;
   }
   const normalized = normalizedOptions(options);
-  const model = buildModel({
-    profileId: status.profileId,
-    selectedAgents: status.selectedAgents,
-    stateRoot: status.stateRoot,
-  }, normalized);
+  const receipt = readReceipt(status.receiptPath, normalized.repositoryRoot);
+  if (receipt === null) return status;
+  const model = buildModel(
+    selectionFromReceipt(receipt, status.stateRoot),
+    normalized,
+  );
   const issues = nativeDoctorIssues(model, normalized);
   if (issues.length === 0) return status;
   const blockers = [...new Set([...status.blockers, ...issues])];
