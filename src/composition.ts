@@ -79,6 +79,12 @@ export interface RunOmhOptions {
   readonly targetPort?: TargetPort;
 }
 
+function targetPortFor(options: RunOmhOptions): TargetPort {
+  return options.targetPort ?? new WslTargetPort(
+    options.env === undefined ? {} : { environment: options.env },
+  );
+}
+
 function profileResult(
   parsed: Extract<ParsedOmhArguments, { readonly command: "profiles" }>,
   activeRepositoryRoot: string,
@@ -247,9 +253,7 @@ export async function runOmh(
     selectedTarget === "wsl-ubuntu"
     && options.targetExecution !== "wsl-ubuntu"
   ) {
-    const targetPort = options.targetPort ?? new WslTargetPort(
-      options.env === undefined ? {} : { environment: options.env },
-    );
+    const targetPort = targetPortFor(options);
     const startIfStopped = parsed.command === "setup"
       || (parsed.command === "agents" && parsed.subcommand === "install")
       || (parsed.command === "tools" && parsed.subcommand === "install");
@@ -271,6 +275,13 @@ export async function runOmh(
     if (parsed.command !== "status" && parsed.command !== "doctor") {
       throw new Error("--target all is read-only");
     }
+    const targetPort = targetPortFor(options);
+    const wslResultPromise = targetPort.run({
+      argv: [parsed.command, "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped: false,
+      targetId: "wsl-ubuntu",
+    });
     const windows = (parsed.command === "doctor"
       ? diagnoseEnvironment
       : inspectEnvironment)(
@@ -280,15 +291,7 @@ export async function runOmh(
         },
         coreOptions,
       );
-    const targetPort = options.targetPort ?? new WslTargetPort(
-      options.env === undefined ? {} : { environment: options.env },
-    );
-    const wslResult = await targetPort.run({
-      argv: [parsed.command, "--target", "wsl-ubuntu", "--json"],
-      repositoryRoot: activeRepositoryRoot,
-      startIfStopped: false,
-      targetId: "wsl-ubuntu",
-    });
+    const wslResult = await wslResultPromise;
     const wsl = wslResult.status ?? null;
     const wslReadiness = wsl?.readiness
       ?? (
@@ -427,9 +430,7 @@ export async function runOmh(
     | { readonly failure?: string; readonly receiptFingerprint?: string }
     | undefined;
   if (parsed.target === "windows-native" && parsed.toolRoute === "wsl-ubuntu") {
-    const targetPort = options.targetPort ?? new WslTargetPort(
-      options.env === undefined ? {} : { environment: options.env },
-    );
+    const targetPort = targetPortFor(options);
     const dependency = await targetPort.run({
       argv: ["status", "--target", "wsl-ubuntu", "--json"],
       repositoryRoot: activeRepositoryRoot,

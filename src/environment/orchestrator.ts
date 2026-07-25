@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import {
   join,
-  relative,
   resolve,
 } from "node:path";
 
@@ -85,6 +84,7 @@ import { FileStateStore } from "../state/receipt.js";
 import {
   atomicWriteFile,
   findTrustedExecutable,
+  isPathStrictlyWithin,
   observeRegularFile,
   readBoundedRegularFile,
   resolveStateRoot,
@@ -648,14 +648,6 @@ function buildModel(
   };
 }
 
-function targetWithinStateRoot(stateRoot: string, target: string): boolean {
-  const candidate = relative(resolve(stateRoot), resolve(target));
-  return candidate !== ""
-    && candidate !== ".."
-    && !candidate.startsWith("..\\")
-    && !candidate.startsWith("../");
-}
-
 function ownedContentMatches(
   ownership: ManagedStateReceipt["ownership"][number],
 ): boolean {
@@ -702,7 +694,7 @@ function cleanPreflights(model: EnvironmentModel): PlanPreflight[] {
   return model.currentReceipt.ownership
     .filter(({ scope }) => scope === "managed")
     .map((ownership) => {
-      const safe = targetWithinStateRoot(model.stateRoot, ownership.target);
+      const safe = isPathStrictlyWithin(model.stateRoot, ownership.target);
       const exact = safe && ownedContentMatches(ownership);
       return {
         detail: !safe
@@ -1346,7 +1338,7 @@ async function executeAction(
     };
   }
   if (operation === "remove-owned") {
-    if (!targetWithinStateRoot(model.stateRoot, action.target)) {
+    if (!isPathStrictlyWithin(model.stateRoot, action.target)) {
       throw new Error(`${action.id}: clean target escapes the selected instance root`);
     }
     if (existsSync(action.target)) {
@@ -1442,34 +1434,52 @@ function prepareActionRollback(
     `${action.id.replaceAll(":", "-")}-${randomBytes(8).toString("hex")}`,
   );
   mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
-  const snapshots = targets.map((target, index) => {
-    if (!existsSync(target)) {
+  let snapshots: Array<
+    | {
+        readonly existed: false;
+        readonly expectedKind: "directory" | "file";
+        readonly target: string;
+      }
+    | {
+        readonly backup: string;
+        readonly existed: true;
+        readonly kind: "directory" | "file";
+        readonly target: string;
+      }
+  >;
+  try {
+    snapshots = targets.map((target, index) => {
+      if (!existsSync(target)) {
+        return {
+          existed: false as const,
+          expectedKind: action.payload?.ownershipKind === "directory"
+            ? "directory" as const
+            : "file" as const,
+          target,
+        };
+      }
+      const stat = lstatSync(target);
+      if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+        throw new Error(`rollback target is not a regular file or directory: ${target}`);
+      }
+      const backup = join(backupRoot, String(index));
+      cpSync(target, backup, {
+        errorOnExist: true,
+        force: false,
+        preserveTimestamps: true,
+        recursive: stat.isDirectory(),
+      });
       return {
-        existed: false as const,
-        expectedKind: action.payload?.ownershipKind === "directory"
-          ? "directory" as const
-          : "file" as const,
+        backup,
+        existed: true as const,
+        kind: stat.isDirectory() ? "directory" as const : "file" as const,
         target,
       };
-    }
-    const stat = lstatSync(target);
-    if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
-      throw new Error(`rollback target is not a regular file or directory: ${target}`);
-    }
-    const backup = join(backupRoot, String(index));
-    cpSync(target, backup, {
-      errorOnExist: true,
-      force: false,
-      preserveTimestamps: true,
-      recursive: stat.isDirectory(),
     });
-    return {
-      backup,
-      existed: true as const,
-      kind: stat.isDirectory() ? "directory" as const : "file" as const,
-      target,
-    };
-  });
+  } catch (error) {
+    rmSync(backupRoot, { force: true, recursive: true });
+    throw error;
+  }
   return {
     commit: async () => {
       rmSync(backupRoot, { force: true, recursive: true });
@@ -1645,8 +1655,10 @@ export function inspectEnvironment(
     };
   }
   const receiptSelection = selectionFromReceipt(receipt, stateRoot);
-  const preview = previewEnvironment(receiptSelection, normalized);
-  const model = buildModel(receiptSelection, normalized);
+  const { model, preview } = buildEnvironmentPreview(
+    receiptSelection,
+    normalized,
+  );
   const runtimeReady = new Map(
     receipt.runtimeReadiness.map(({ agentId, state }) => [agentId, state]),
   );

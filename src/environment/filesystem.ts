@@ -194,12 +194,16 @@ export function resolveStateRoot(
   return resolve(configured);
 }
 
-function within(parent: string, child: string): boolean {
+export function isPathWithin(parent: string, child: string): boolean {
   const candidate = relative(parent, child);
   return candidate === ""
     || (candidate !== ".."
       && !candidate.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
       && !isAbsolute(candidate));
+}
+
+export function isPathStrictlyWithin(parent: string, child: string): boolean {
+  return resolve(parent) !== resolve(child) && isPathWithin(parent, child);
 }
 
 function executableCandidates(command: string, platform: NodeJS.Platform): string[] {
@@ -243,12 +247,12 @@ export function findTrustedExecutable(
     } catch {
       continue;
     }
-    if (within(workspace, directory)) continue;
+    if (isPathWithin(workspace, directory)) continue;
     for (const candidate of executableCandidates(command, platform)) {
       const path = join(directory, candidate);
       try {
         const resolvedPath = realpathSync(path);
-        if (within(workspace, resolvedPath)) continue;
+        if (isPathWithin(workspace, resolvedPath)) continue;
         const stat = lstatSync(resolvedPath);
         if (!stat.isFile()) continue;
         if (
