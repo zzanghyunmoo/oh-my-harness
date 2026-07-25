@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -190,6 +192,63 @@ test("aggregate status is strict and never starts a stopped WSL target", async (
       ["windows-native", "wsl-ubuntu"],
     );
     assert.deepEqual(calls, [{ startIfStopped: false }]);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("OpenCode workflow preview plans native skills and blocks a user-owned collision", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-instance-opencode-skills-"));
+  const stateRoot = join(root, "instances", "windows-native");
+  const configRoot = join(root, "config");
+  try {
+    const selection = {
+      capabilitySet: "workflow-only" as const,
+      profileId: "personal",
+      selectedAgents: ["opencode"],
+      selectedPackages: [],
+      stateRoot,
+      target: "windows-native" as const,
+    };
+    const options = {
+      arch: "x64",
+      env: { PATH: "", XDG_CONFIG_HOME: configRoot },
+      os: "win32" as const,
+      repositoryRoot: REPOSITORY_ROOT,
+    };
+    const preview = previewEnvironment(selection, options);
+    assert.ok(preview.plan);
+    assert.deepEqual(
+      preview.plan.actions
+        .filter(({ payload }) =>
+          payload?.operation === "register-opencode-skill"
+        )
+        .map(({ id }) => id),
+      [
+        "capability:opencode:goal",
+        "capability:opencode:deep-research",
+        "capability:opencode:ideation",
+        "capability:opencode:brainstorm",
+        "capability:opencode:plan",
+        "capability:opencode:code-review",
+        "capability:opencode:doc-review",
+        "capability:opencode:skill-creator",
+        "capability:opencode:ralph-loop",
+        "capability:opencode:security-guidance",
+      ],
+    );
+    assert.equal(existsSync(stateRoot), false);
+
+    const collision = join(configRoot, "opencode", "skills", "goal");
+    mkdirSync(collision, { recursive: true });
+    writeFileSync(join(collision, "SKILL.md"), "user owned\n");
+    const blocked = previewEnvironment(selection, options);
+    assert.equal(blocked.plan, null);
+    assert.ok(blocked.blockers.includes("skill:opencode:goal"));
+    assert.equal(
+      readFileSync(join(collision, "SKILL.md"), "utf8"),
+      "user owned\n",
+    );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

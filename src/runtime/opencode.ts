@@ -98,7 +98,6 @@ export interface OpenCodeRuntimeDependencies {
 
 export interface OpenCodeCapabilityDefinition {
   readonly id: (typeof OPEN_CODE_WORKFLOW_CAPABILITY_IDS)[number];
-  readonly toolName: string;
   readonly description: string;
   readonly content: string;
   readonly sourcePath: string;
@@ -633,7 +632,6 @@ export function loadOpenCodeCapabilityDefinitions(
     const { description } = parseFrontmatter(content, sourcePath);
     return {
       id,
-      toolName: `omh_${id.replaceAll("-", "_")}`,
       description,
       content,
       sourcePath,

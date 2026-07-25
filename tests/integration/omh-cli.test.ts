@@ -16,6 +16,7 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
+import { hashManagedDirectory } from "../../dist/install/managed-payload.js";
 import { gitTreeSha1 } from "../../dist/install/official-marketplace.js";
 
 function sha256(path: string): string {
@@ -48,7 +49,13 @@ function createOfficialMarketplaceFixture(
   const lock = JSON.parse(readFileSync(lockPath, "utf8")) as {
     repository: {
       commit: string;
+      contentSha256: string;
       marketplace: { path: string; sha256: string };
+      runtimeMarketplace: {
+        name: string;
+        manifestSha256: string;
+        contentSha256: string;
+      };
     };
     candidates: Array<{
       capabilityId: string;
@@ -56,6 +63,7 @@ function createOfficialMarketplaceFixture(
       path: string;
       pathTree: string;
       pluginName: string;
+      runtimeContentSha256: string;
     }>;
   };
   const marketplaceRoot = join(
@@ -82,8 +90,9 @@ function createOfficialMarketplaceFixture(
       `${candidate.capabilityId}\n`,
     );
     candidate.pathTree = gitTreeSha1(pluginRoot);
+    candidate.runtimeContentSha256 = hashManagedDirectory(pluginRoot);
     installPaths.set(
-      `${candidate.pluginName}@claude-plugins-official`,
+      `${candidate.pluginName}@${lock.repository.runtimeMarketplace.name}`,
       pluginRoot,
     );
     plugins.push({
@@ -99,6 +108,29 @@ function createOfficialMarketplaceFixture(
   mkdirSync(join(manifestPath, ".."), { recursive: true });
   writeFileSync(manifestPath, `${JSON.stringify({ plugins }, null, 2)}\n`);
   lock.repository.marketplace.sha256 = sha256(manifestPath);
+  lock.repository.contentSha256 = hashManagedDirectory(marketplaceRoot, {
+    ignoreTopLevel: [".gcs-sha"],
+  });
+  const adapterFixture = join(repositoryRoot, ".official-adapter-fixture");
+  cpSync(marketplaceRoot, adapterFixture, { recursive: true });
+  rmSync(join(adapterFixture, ".gcs-sha"));
+  const adapterManifestPath = join(
+    adapterFixture,
+    lock.repository.marketplace.path,
+  );
+  const adapterManifest = JSON.parse(
+    readFileSync(adapterManifestPath, "utf8"),
+  ) as Record<string, unknown>;
+  adapterManifest.name = lock.repository.runtimeMarketplace.name;
+  writeFileSync(
+    adapterManifestPath,
+    `${JSON.stringify(adapterManifest, null, 2)}\n`,
+  );
+  lock.repository.runtimeMarketplace.manifestSha256 =
+    sha256(adapterManifestPath);
+  lock.repository.runtimeMarketplace.contentSha256 =
+    hashManagedDirectory(adapterFixture);
+  rmSync(adapterFixture, { recursive: true });
   writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
   return installPaths;
 }
@@ -110,10 +142,10 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   const binaryRoot = join(root, "bin");
   const stateRoot = join(root, "state");
   const calls: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
-  let marketplaceRegistered = false;
   let pluginInstalled = false;
   let managedPluginVersion = "0.2.0";
   let managedMarketplaceRoot: string | null = null;
+  const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
 
   try {
@@ -211,11 +243,10 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         calls.push({ command, args: [...args] });
         const invocation = args.join(" ");
         if (invocation === "plugin marketplace list --json") {
-          return JSON.stringify(
-            marketplaceRegistered
-              ? [{ name: "oh-my-harness", path: managedMarketplaceRoot }]
-              : [],
-          );
+          return JSON.stringify([...marketplaces].map(([name, path]) => ({
+            name,
+            path,
+          })));
         }
         if (invocation === "plugin list --json") {
           const plugins = [...officialInstalled].map((id) => ({
@@ -241,8 +272,18 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           return JSON.stringify(plugins);
         }
         if (invocation.startsWith("plugin marketplace add ")) {
-          marketplaceRegistered = true;
-          managedMarketplaceRoot = args[3] ?? null;
+          const marketplaceRoot = args[3];
+          assert.ok(marketplaceRoot);
+          const manifest = JSON.parse(
+            readFileSync(
+              join(marketplaceRoot, ".claude-plugin", "marketplace.json"),
+              "utf8",
+            ),
+          ) as { name: string };
+          marketplaces.set(manifest.name, marketplaceRoot);
+          if (manifest.name === "oh-my-harness") {
+            managedMarketplaceRoot = marketplaceRoot;
+          }
         }
         if (invocation.startsWith("plugin install ")) {
           const selector = args[2];
@@ -434,7 +475,11 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       commonOptions,
     );
     assert.equal(startup.envelope?.context.profileId, "personal");
-    assert.equal(startup.envelope?.context.mode, "ready");
+    assert.equal(
+      startup.envelope?.context.mode,
+      "ready",
+      JSON.stringify(startup.envelope, null, 2),
+    );
     assert.match(startup.envelope?.renderedContext ?? "", /profile: personal/);
     assert.match(startup.envelope?.renderedContext ?? "", /capabilities:/);
     assert.match(startup.envelope?.renderedContext ?? "", /packages:/);

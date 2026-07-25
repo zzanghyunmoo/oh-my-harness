@@ -1,6 +1,19 @@
-import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  resolve,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -9,12 +22,15 @@ import {
   parse as parseJsonc,
 } from "jsonc-parser";
 
-import {
-  gitTreeSha1,
-  type VerifiedOfficialPlugin,
+import type {
+  VerifiedOfficialPlugin,
 } from "../install/official-marketplace.js";
 import { hashManagedDirectory } from "../install/managed-payload.js";
 import {
+  loadOpenCodeCapabilityDefinitions,
+} from "../runtime/opencode.js";
+import {
+  assertSafeManagedRootPath,
   atomicWriteFile,
   readBoundedRegularFile,
 } from "./filesystem.js";
@@ -28,6 +44,28 @@ export interface ManagedNativeRegistration {
   readonly activeRoot: string;
   readonly receiptPath: string;
 }
+
+export interface ClaudeOfficialMarketplaceRegistration {
+  readonly name: string;
+  readonly root: string;
+}
+
+export interface OpenCodeSkillRegistration {
+  readonly digest: string;
+  readonly id: string;
+  readonly source: string;
+  readonly target: string;
+}
+
+export type OpenCodeSkillRegistrationState =
+  | "missing"
+  | "ready"
+  | "collision";
+
+export type ClaudeRegistrationState =
+  | "missing"
+  | "ready"
+  | "collision";
 
 const MAX_OPEN_CODE_CONFIG_BYTES = 1024 * 1024;
 
@@ -43,6 +81,121 @@ export function openCodeConfigPath(
     throw new Error("OpenCode user configuration root must be absolute");
   }
   return join(configRoot, "opencode", "opencode.json");
+}
+
+function openCodeSkillsRoot(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string {
+  return join(dirname(openCodeConfigPath(env, platform)), "skills");
+}
+
+export function planOpenCodeSkillRegistrations(
+  runtimePackageRoot: string,
+  selectedCapabilityIds: readonly string[],
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): readonly OpenCodeSkillRegistration[] {
+  if (new Set(selectedCapabilityIds).size !== selectedCapabilityIds.length) {
+    throw new Error("OpenCode skill selection contains duplicates");
+  }
+  const definitions = loadOpenCodeCapabilityDefinitions(runtimePackageRoot);
+  const byId = new Map<string, (typeof definitions)[number]>(
+    definitions.map((entry) => [entry.id, entry]),
+  );
+  const root = assertSafeManagedRootPath(
+    openCodeSkillsRoot(env, platform),
+    "OpenCode skills root",
+  );
+  return selectedCapabilityIds.map((id) => {
+    const definition = byId.get(id);
+    if (definition === undefined) {
+      throw new Error(`unsupported OpenCode workflow skill: ${id}`);
+    }
+    const source = dirname(definition.sourcePath);
+    return {
+      digest: hashManagedDirectory(source),
+      id,
+      source,
+      target: join(root, id),
+    };
+  });
+}
+
+export function openCodeSkillsReady(
+  registrations: readonly OpenCodeSkillRegistration[],
+): boolean {
+  try {
+    return registrations.every(({ digest, target }) => {
+      if (!existsSync(target)) return false;
+      const stat = lstatSync(target);
+      return !stat.isSymbolicLink()
+        && stat.isDirectory()
+        && hashManagedDirectory(target) === digest;
+    });
+  } catch {
+    return false;
+  }
+}
+
+export function inspectOpenCodeSkillRegistration(
+  registration: OpenCodeSkillRegistration,
+): OpenCodeSkillRegistrationState {
+  if (!existsSync(registration.target)) return "missing";
+  try {
+    const stat = lstatSync(registration.target);
+    return !stat.isSymbolicLink()
+        && stat.isDirectory()
+        && hashManagedDirectory(registration.target) === registration.digest
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
+  }
+}
+
+export function registerOpenCodeSkills(
+  registrations: readonly OpenCodeSkillRegistration[],
+): void {
+  for (const registration of registrations) {
+    const state = inspectOpenCodeSkillRegistration(registration);
+    if (state === "ready") continue;
+    if (state === "collision") {
+        throw new Error(
+          `OpenCode skill ${registration.id} has a collision with existing user content`,
+        );
+    }
+    const parent = assertSafeManagedRootPath(
+      dirname(registration.target),
+      "OpenCode skills root",
+    );
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    const staging = join(
+      parent,
+      `.${registration.id}.${process.pid}.${
+        randomBytes(8).toString("hex")
+      }.tmp`,
+    );
+    try {
+      cpSync(registration.source, staging, {
+        errorOnExist: true,
+        force: false,
+        recursive: true,
+        verbatimSymlinks: true,
+      });
+      if (hashManagedDirectory(staging) !== registration.digest) {
+        throw new Error(
+          `OpenCode skill ${registration.id} changed after preview`,
+        );
+      }
+      renameSync(staging, registration.target);
+    } finally {
+      rmSync(staging, { force: true, recursive: true });
+    }
+  }
+  if (!openCodeSkillsReady(registrations)) {
+    throw new Error("OpenCode native skill registration did not converge");
+  }
 }
 
 function parseJsonArray(
@@ -104,11 +257,112 @@ function exactClaudeOfficialPlugin(
     return false;
   }
   try {
-    return gitTreeSha1(entry.installPath, {
+    return hashManagedDirectory(entry.installPath, {
       ignoreTopLevel: [".in_use"],
-    }) === plugin.pathTree;
+    }) === plugin.runtimeContentSha256;
   } catch {
     return false;
+  }
+}
+
+export function claudeOfficialMarketplaceReady(
+  executable: string,
+  registration: ClaudeOfficialMarketplaceRegistration,
+  run: NativeCommandRunner,
+): boolean {
+  try {
+    const matches = parseJsonArray(
+      run(executable, ["plugin", "marketplace", "list", "--json"]),
+      "Claude marketplace list",
+    ).filter((entry) => entry.name === registration.name);
+    if (matches.length !== 1) return false;
+    const source = claudeMarketplacePath(matches[0]!);
+    return source !== null && resolve(source) === resolve(registration.root);
+  } catch {
+    return false;
+  }
+}
+
+export function inspectClaudeOfficialMarketplaceRegistration(
+  executable: string,
+  registration: ClaudeOfficialMarketplaceRegistration,
+  run: NativeCommandRunner,
+): ClaudeRegistrationState {
+  try {
+    const matches = parseJsonArray(
+      run(executable, ["plugin", "marketplace", "list", "--json"]),
+      "Claude marketplace list",
+    ).filter((entry) => entry.name === registration.name);
+    if (matches.length === 0) return "missing";
+    if (matches.length > 1) return "collision";
+    const source = claudeMarketplacePath(matches[0]!);
+    return source !== null && resolve(source) === resolve(registration.root)
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
+  }
+}
+
+export function registerClaudeOfficialMarketplace(
+  executable: string,
+  registration: ClaudeOfficialMarketplaceRegistration,
+  run: NativeCommandRunner,
+): void {
+  const matches = parseJsonArray(
+    run(executable, ["plugin", "marketplace", "list", "--json"]),
+    "Claude marketplace list",
+  ).filter((entry) => entry.name === registration.name);
+  if (matches.length > 1) {
+    throw new Error(
+      `Claude marketplace ${registration.name} is registered more than once`,
+    );
+  }
+  const current = matches[0];
+  if (current !== undefined) {
+    const source = claudeMarketplacePath(current);
+    if (source === null || resolve(source) !== resolve(registration.root)) {
+      throw new Error(
+        `Claude marketplace ${registration.name} points to another source`,
+      );
+    }
+  } else {
+    run(executable, [
+      "plugin",
+      "marketplace",
+      "add",
+      registration.root,
+    ]);
+  }
+  if (!claudeOfficialMarketplaceReady(executable, registration, run)) {
+    throw new Error(
+      `Claude marketplace ${registration.name} registration did not converge`,
+    );
+  }
+}
+
+export function inspectClaudeOfficialPluginRegistration(
+  executable: string,
+  plugin: VerifiedOfficialPlugin,
+  run: NativeCommandRunner,
+): ClaudeRegistrationState {
+  try {
+    const matches = parseJsonArray(
+      run(executable, ["plugin", "list", "--json"]),
+      "Claude plugin list",
+    ).filter(({ id }) => id === plugin.selector);
+    if (matches.length === 0) return "missing";
+    if (
+      matches.length > 1
+      || matches.some(({ scope }) => scope !== "user")
+    ) {
+      return "collision";
+    }
+    return exactClaudeOfficialPlugin(matches[0], plugin)
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
   }
 }
 
@@ -328,6 +582,7 @@ export function claudeRegistrationReady(
   registration: ManagedNativeRegistration,
   officialPlugins: readonly VerifiedOfficialPlugin[],
   run: NativeCommandRunner,
+  officialMarketplace?: ClaudeOfficialMarketplaceRegistration,
 ): boolean {
   try {
     const marketplaceMatches = parseJsonArray(
@@ -368,7 +623,15 @@ export function claudeRegistrationReady(
       && marketplacePath !== null
       && resolve(marketplacePath) === resolve(registration.activeRoot)
       && managedPluginReady
-      && officialPluginsReady;
+      && officialPluginsReady
+      && (
+        officialMarketplace === undefined
+        || claudeOfficialMarketplaceReady(
+          executable,
+          officialMarketplace,
+          run,
+        )
+      );
   } catch {
     return false;
   }

@@ -29,6 +29,10 @@ import {
   type OpenCodeRuntimeContext,
   type OpenCodeStartupInspection,
 } from "../../dist/runtime/opencode.js";
+import {
+  verifyOpenCodeNativeDiscovery,
+  type OpenCodeDiscoverySession,
+} from "../../dist/runtime/opencode-discovery.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const PLUGIN_PATH = join(
@@ -117,10 +121,9 @@ test("U10 maps every requested capability to an OpenCode-native surface", () => 
   );
   assert.equal(
     definitions.every(
-      ({ content, description, toolName }) =>
+      ({ content, description }) =>
         content.includes("# ")
-        && description.length > 0
-        && toolName.startsWith("omh_"),
+        && description.length > 0,
     ),
     true,
   );
@@ -348,6 +351,122 @@ test("U10 native config enables selected built-in LSPs without overriding a user
   });
 });
 
+test("U5 verifies OpenCode native skill discovery without a session or prompt", async () => {
+  const paths: string[] = [];
+  let stopped = false;
+  const definitions = loadOpenCodeCapabilityDefinitions(REPOSITORY_ROOT);
+  const session: OpenCodeDiscoverySession = {
+    async get(path) {
+      paths.push(path);
+      if (path === "/global/health") {
+        return { healthy: true, version: "1.18.0" };
+      }
+      if (path === "/config") {
+        return {
+          model: "fixture/model",
+          plugin: ["file:///managed/.opencode/plugins/oh-my-harness.js"],
+          lsp: {},
+        };
+      }
+      if (path === "/config/providers") {
+        return { providers: [], default: { build: "fixture/model" } };
+      }
+      if (path === "/experimental/tool/ids") {
+        return [
+          "skill",
+          "workspace_cli_setup",
+          "workspace_cli_status",
+        ];
+      }
+      if (path === "/lsp") return [];
+      if (
+        path
+        === "/experimental/tool?provider=fixture&model=model"
+      ) {
+        return definitions.map(({ id, description }) =>
+          id === "goal"
+            ? {
+                id: "skill",
+                description: [
+                  "<available_skills>",
+                  ...definitions.flatMap((definition) => [
+                    "<skill>",
+                    `<name>${definition.id}</name>`,
+                    `<description>${definition.description}</description>`,
+                    "</skill>",
+                  ]),
+                  "</available_skills>",
+                ].join("\n"),
+              }
+            : { id: `fixture-${id}`, description }
+        );
+      }
+      throw new Error(`unexpected path: ${path}`);
+    },
+    async stop() {
+      stopped = true;
+    },
+  };
+
+  const evidence = await verifyOpenCodeNativeDiscovery(
+    {
+      cwd: REPOSITORY_ROOT,
+      executablePath: process.execPath,
+      expectedPluginReferences: [
+        "file:///managed/.opencode/plugins/oh-my-harness.js",
+      ],
+      expectedSkills: definitions,
+      expectedToolIds: [
+        "workspace_cli_setup",
+        "workspace_cli_status",
+      ],
+    },
+    { async start() { return session; } },
+  );
+
+  assert.equal(stopped, true);
+  assert.deepEqual(evidence.skillIds, [...OPEN_CODE_WORKFLOW_CAPABILITY_IDS].sort());
+  assert.equal(evidence.toolSchemaModel, "fixture/model");
+  assert.equal(paths.some((path) => path.startsWith("/session")), false);
+  assert.equal(paths.some((path) => path.includes("prompt")), false);
+});
+
+test("U5 OpenCode discovery fails closed and always stops the server", async () => {
+  let stopped = false;
+  const session: OpenCodeDiscoverySession = {
+    async get(path) {
+      if (path === "/global/health") {
+        return { healthy: true, version: "1.18.0" };
+      }
+      if (path === "/config") return { model: "fixture/model" };
+      if (path === "/config/providers") return { default: {} };
+      if (path === "/experimental/tool/ids") return ["skill", "omh_plan"];
+      if (path === "/lsp") return [];
+      return [{
+        id: "skill",
+        description:
+          "<available_skills><skill><name>plan</name><description>Plan</description></skill></available_skills>",
+      }];
+    },
+    async stop() {
+      stopped = true;
+    },
+  };
+
+  await assert.rejects(
+    verifyOpenCodeNativeDiscovery(
+      {
+        cwd: REPOSITORY_ROOT,
+        executablePath: process.execPath,
+        expectedSkills: [{ id: "plan", description: "Plan" }],
+      },
+      { async start() { return session; } },
+    ),
+    /legacy workflow tools/u,
+  );
+  assert.equal(stopped, true);
+});
+
 test("U10 packaged plugin resolves from import.meta.url and runs from arbitrary CWD", async () => {
   const originalCwd = process.cwd();
   const elsewhere = mkdtempSync(join(tmpdir(), "omh-opencode-cwd-"));
@@ -381,24 +500,7 @@ test("U10 packaged plugin resolves from import.meta.url and runs from arbitrary 
     });
     const names = Object.keys(hooks.tool);
     assert.equal(names.includes("workspace_cli_status"), true);
-    assert.equal(names.includes("omh_goal"), true);
-    assert.equal(names.includes("omh_security_guidance"), true);
-
-    const goal = await hooks.tool.omh_goal.execute(
-      { request: "keep the objective visible" },
-      { directory: elsewhere },
-    );
-    assert.match(goal, /# Goal/);
-    assert.match(goal, /keep the objective visible/);
-
-    injectedContext = { ...readyContext(), profileId: "company" };
-    await assert.rejects(
-      hooks.tool.omh_goal.execute(
-        { request: "continue with stale context" },
-        { directory: elsewhere },
-      ),
-      /not current for this session/,
-    );
+    assert.equal(names.some((name) => name.startsWith("omh_")), false);
 
     const output = { system: [] as string[] };
     await hooks["experimental.chat.system.transform"](

@@ -43,6 +43,7 @@ import { installSelectedAgents } from "../install/agents.js";
 import {
   assessLspReadiness,
   loadCapabilityProvenance,
+  type OfficialCapabilityLock,
 } from "../install/capabilities.js";
 import { loadRuntimeAdapters } from "../install/descriptors.js";
 import {
@@ -58,6 +59,19 @@ import {
   type OfficialMarketplaceInspection,
   type VerifiedOfficialPlugin,
 } from "../install/official-marketplace.js";
+import {
+  createOfficialMarketplaceGitOperations,
+  inspectOfficialMarketplaceRuntimeAdapter,
+  inspectOfficialMarketplaceSnapshot,
+  materializeOfficialMarketplaceRuntimeAdapter,
+  materializeOfficialMarketplaceSnapshot,
+  materializeOfficialMarketplaceSnapshotFromDirectory,
+  officialMarketplaceRuntimeAdapter,
+  officialMarketplaceSnapshot as createOfficialMarketplaceSnapshot,
+  plannedOfficialMarketplaceRuntimeAdapter,
+  type OfficialMarketplaceRuntimeAdapter,
+  type OfficialMarketplaceSnapshot,
+} from "../install/official-marketplace-acquisition.js";
 import {
   planPackageInstallations,
   type PackageInstallPlanEntry,
@@ -93,14 +107,23 @@ import {
   stableJson,
 } from "./filesystem.js";
 import {
+  claudeOfficialMarketplaceReady,
   claudeRegistrationReady,
   codexRegistrationReady,
+  inspectClaudeOfficialMarketplaceRegistration,
+  inspectClaudeOfficialPluginRegistration,
+  inspectOpenCodeSkillRegistration,
+  openCodeSkillsReady,
   openCodeConfigPath,
   openCodeRegistrationReady,
+  planOpenCodeSkillRegistrations,
+  registerClaudeOfficialMarketplace,
   registerClaudeOfficialPlugin,
   registerClaudeRuntime,
   registerCodexRuntime,
+  registerOpenCodeSkills,
   registerOpenCodeRuntime,
+  type OpenCodeSkillRegistration,
 } from "./native-registration.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
@@ -230,6 +253,12 @@ interface EnvironmentModel {
   readonly capabilities: readonly CapabilityEnvironmentStatus[];
   readonly managedPayload: ManagedRuntimePayload;
   readonly officialMarketplace: OfficialMarketplaceInspection;
+  readonly officialMarketplaceAdapter: OfficialMarketplaceRuntimeAdapter | null;
+  readonly officialMarketplaceLock: OfficialCapabilityLock;
+  readonly officialMarketplaceSnapshot: OfficialMarketplaceSnapshot | null;
+  readonly officialMarketplaceGitPath: string | null;
+  readonly officialMarketplaceExternalSource: string | null;
+  readonly openCodeSkills: readonly OpenCodeSkillRegistration[];
   readonly desired: ReturnType<typeof resolveDesiredState>;
   readonly clean: boolean;
   readonly currentReceipt: ManagedStateReceipt | null;
@@ -582,22 +611,95 @@ function buildModel(
       options.inspectPackageVersion?.(path, id)
       ?? inspectExecutableVersion(path, options.env, options.cwd),
   );
-  const officialMarketplace: OfficialMarketplaceInspection =
-    desired.selectedAgents.includes("claude-code")
-    ? inspectOfficialClaudeMarketplace(
-        loadCapabilityProvenance(options.repositoryRoot).official,
+  const officialMarketplaceLock =
+    loadCapabilityProvenance(options.repositoryRoot).official;
+  let officialMarketplaceSnapshot: OfficialMarketplaceSnapshot | null = null;
+  let officialMarketplaceAdapter: OfficialMarketplaceRuntimeAdapter | null =
+    null;
+  let officialMarketplaceGitPath: string | null = null;
+  let officialMarketplaceExternalSource: string | null = null;
+  let officialMarketplace: OfficialMarketplaceInspection = {
+    detail: "Claude Code is not selected",
+    plugins: [],
+    root: null,
+    state: "unverifiable",
+  };
+  if (desired.selectedAgents.includes("claude-code")) {
+    officialMarketplaceSnapshot = createOfficialMarketplaceSnapshot(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    officialMarketplaceAdapter = officialMarketplaceRuntimeAdapter(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    const adapterInspection = inspectOfficialMarketplaceRuntimeAdapter(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    if (adapterInspection.state === "ready") {
+      officialMarketplace = adapterInspection;
+    } else if (existsSync(officialMarketplaceAdapter.root)) {
+      officialMarketplace = adapterInspection;
+    } else {
+      const snapshotInspection = inspectOfficialMarketplaceSnapshot(
+        officialMarketplaceLock,
+        stateRoot,
+      );
+      const externalInspection = inspectOfficialClaudeMarketplace(
+        officialMarketplaceLock,
         options.env,
-      )
-    : {
-        detail: "Claude Code is not selected",
-        plugins: [] as const,
-        root: null,
-        state: "unverifiable" as const,
-      };
+      );
+      officialMarketplaceExternalSource =
+        externalInspection.state === "ready"
+          ? externalInspection.root
+          : null;
+      officialMarketplaceGitPath = findTrustedExecutable("git", {
+        cwd: options.cwd,
+        env: options.env,
+        platform: options.os,
+      });
+      const sourceAvailable =
+        snapshotInspection.state === "ready"
+        || (
+          !existsSync(officialMarketplaceSnapshot.root)
+          && (
+            officialMarketplaceExternalSource !== null
+            || officialMarketplaceGitPath !== null
+          )
+        );
+      officialMarketplace = sourceAvailable
+        ? plannedOfficialMarketplaceRuntimeAdapter(
+            officialMarketplaceLock,
+            stateRoot,
+          )
+        : {
+            detail: existsSync(officialMarketplaceSnapshot.root)
+              ? snapshotInspection.detail
+              : [
+                  externalInspection.detail,
+                  "trusted Git is required to acquire the reviewed Claude marketplace",
+                ].join("; "),
+            plugins: [],
+            root: officialMarketplaceAdapter.root,
+            state: "unverifiable",
+          };
+    }
+  }
   const managedPayload = inspectManagedRuntimePayload(
     options.repositoryRoot,
     stateRoot,
   );
+  const openCodeSkills = desired.selectedAgents.includes("opencode")
+    ? planOpenCodeSkillRegistrations(
+        options.repositoryRoot,
+        selectedCapabilities.filter((id) =>
+          (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
+        ),
+        options.env,
+        options.os,
+      )
+    : [];
   let currentReceipt: ManagedStateReceipt | null = null;
   let receiptFailure: string | null = null;
   if (selection.clean === true) {
@@ -627,6 +729,12 @@ function buildModel(
     packages,
     managedPayload,
     officialMarketplace,
+    officialMarketplaceAdapter,
+    officialMarketplaceExternalSource,
+    officialMarketplaceGitPath,
+    officialMarketplaceLock,
+    officialMarketplaceSnapshot,
+    openCodeSkills,
     desired,
     clean: selection.clean ?? false,
     currentReceipt,
@@ -748,6 +856,7 @@ function actionPreimage(action: PlanAction): ObservedPreimage {
     ? observedTarget
     : action.target;
   return action.payload?.ownershipKind === "directory"
+      || action.payload?.observedTargetKind === "directory"
     ? observeManagedPath(target)
     : observeRegularFile(target);
 }
@@ -800,6 +909,31 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           : "unverifiable",
       detail: entry.detail ?? `${entry.sourceId}: ${entry.state}`,
     })),
+    ...(model.selectedAgents.includes("claude-code")
+      ? [{
+          detail: model.officialMarketplace.detail,
+          id: "marketplace:claude-code:official",
+          required: true,
+          status: model.officialMarketplace.state === "ready"
+            ? "ready" as const
+            : "unverifiable" as const,
+        }]
+      : []),
+    ...model.openCodeSkills.map((registration): PlanPreflight => {
+      const state = inspectOpenCodeSkillRegistration(registration);
+      return {
+        detail: state === "collision"
+          ? "OpenCode native skill path contains user-owned or drifted content"
+          : state === "ready"
+            ? "OpenCode native skill already matches reviewed content"
+            : "OpenCode native skill can be installed additively",
+        id: `skill:opencode:${registration.id}`,
+        required: true,
+        status: state === "collision"
+          ? "unverifiable" as const
+          : "ready" as const,
+      };
+    }),
     ...cleanPreflights(model),
     ...(model.toolRouteRequested
       ? [{
@@ -917,12 +1051,79 @@ function planActions(
     });
   }
   if (model.selectedAgents.includes("claude-code")) {
-    if (model.officialMarketplace.state !== "ready") {
+    if (
+      model.officialMarketplace.state !== "ready"
+      || model.officialMarketplaceSnapshot === null
+      || model.officialMarketplaceAdapter === null
+    ) {
       throw new Error("verified Claude official marketplace is unavailable");
     }
+    actions.push({
+      id: "marketplace:claude-code:source",
+      kind: "acquire",
+      payload: {
+        contentDigest: model.officialMarketplaceSnapshot.digest,
+        operation: "acquire-claude-official-marketplace",
+        ownershipKind: "directory",
+        ownershipScope: "managed",
+        ...(model.officialMarketplaceGitPath === null
+          ? {}
+          : { gitPath: model.officialMarketplaceGitPath }),
+        ...(model.officialMarketplaceExternalSource === null
+          ? {}
+          : { externalSource: model.officialMarketplaceExternalSource }),
+      },
+      preimage: observeManagedPath(model.officialMarketplaceSnapshot.root),
+      required: true,
+      target: model.officialMarketplaceSnapshot.root,
+    });
+    actions.push({
+      id: "marketplace:claude-code:runtime-adapter",
+      kind: "acquire",
+      payload: {
+        contentDigest: model.officialMarketplaceAdapter.digest,
+        operation: "materialize-claude-official-adapter",
+        ownershipKind: "directory",
+        ownershipScope: "managed",
+      },
+      preimage: observeManagedPath(model.officialMarketplaceAdapter.root),
+      required: true,
+      target: model.officialMarketplaceAdapter.root,
+    });
+    const marketplaceActionId =
+      "runtime:claude-code:official-marketplace";
+    const marketplaceTarget = capabilityMarkerPath(
+      model.stateRoot,
+      "claude-code",
+      "official-marketplace",
+    );
+    const marketplaceContent = markerFor(
+      marketplaceActionId,
+      model.catalog.revision,
+      marketplaceTarget,
+      model.officialMarketplaceAdapter.digest,
+    );
+    actions.push({
+      id: marketplaceActionId,
+      kind: "register",
+      payload: {
+        content: marketplaceContent,
+        contentDigest: sha256Bytes(marketplaceContent),
+        marketplaceName: model.officialMarketplaceAdapter.name,
+        marketplaceRoot: model.officialMarketplaceAdapter.root,
+        operation: "register-claude-official-marketplace",
+        ownershipKind: "registration",
+        ownershipScope: "managed",
+      },
+      preimage: observeRegularFile(marketplaceTarget),
+      required: true,
+      target: marketplaceTarget,
+    });
     for (const plugin of model.officialMarketplace.plugins.filter(
       ({ capabilityId }) =>
-        model.profile.capabilities.some((id) => id === capabilityId),
+        model.desired.selectedCapabilities?.some(
+          (id) => id === capabilityId,
+        ) ?? model.profile.capabilities.some((id) => id === capabilityId),
     )) {
       const actionId = `capability:claude-code:${plugin.capabilityId}`;
       const target = capabilityMarkerPath(
@@ -954,6 +1155,38 @@ function planActions(
         target,
       });
     }
+  }
+  for (const registration of model.openCodeSkills) {
+    const actionId = `capability:opencode:${registration.id}`;
+    const target = capabilityMarkerPath(
+      model.stateRoot,
+      "opencode",
+      registration.id,
+    );
+    const content = markerFor(
+      actionId,
+      model.catalog.revision,
+      target,
+      registration.digest,
+    );
+    actions.push({
+      id: actionId,
+      kind: "register",
+      payload: {
+        capabilityId: registration.id,
+        content,
+        contentDigest: sha256Bytes(content),
+        observedTarget: registration.target,
+        observedTargetKind: "directory",
+        operation: "register-opencode-skill",
+        ownershipKind: "registration",
+        ownershipScope: "managed",
+        skillDigest: registration.digest,
+      },
+      preimage: observeManagedPath(registration.target),
+      required: true,
+      target,
+    });
   }
   for (const runtimeId of model.selectedAgents) {
     const target = runtimeMarkerPath(model.stateRoot, runtimeId);
@@ -1320,6 +1553,86 @@ async function executeAction(
         === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "acquire-claude-official-marketplace") {
+    const snapshot = model.officialMarketplaceSnapshot;
+    if (snapshot === null || action.target !== snapshot.root) {
+      throw new Error(`${action.id}: Claude marketplace snapshot changed`);
+    }
+    const existing = inspectOfficialMarketplaceSnapshot(
+      model.officialMarketplaceLock,
+      model.stateRoot,
+    );
+    if (existing.state !== "ready") {
+      const externalSource = action.payload?.externalSource;
+      if (typeof externalSource === "string") {
+        if (
+          model.officialMarketplaceExternalSource === null
+          || resolve(externalSource)
+            !== resolve(model.officialMarketplaceExternalSource)
+        ) {
+          throw new Error(
+            "external Claude marketplace source changed after preview",
+          );
+        }
+        materializeOfficialMarketplaceSnapshotFromDirectory(
+          snapshot,
+          model.officialMarketplaceLock,
+          externalSource,
+        );
+      } else {
+        const plannedGit = payloadString(action, "gitPath");
+        const currentGit = findTrustedExecutable("git", {
+          cwd: options.cwd,
+          env: options.env,
+          platform: options.os,
+        });
+        if (
+          currentGit === null
+          || resolve(currentGit) !== resolve(plannedGit)
+        ) {
+          throw new Error("trusted Git changed after Claude marketplace preview");
+        }
+        materializeOfficialMarketplaceSnapshot(
+          snapshot,
+          model.officialMarketplaceLock,
+          createOfficialMarketplaceGitOperations(
+            currentGit,
+            (command, args) => runCommand(command, args, options),
+          ),
+        );
+      }
+    }
+    return {
+      verified:
+        inspectOfficialMarketplaceSnapshot(
+          model.officialMarketplaceLock,
+          model.stateRoot,
+        ).state === "ready",
+    };
+  }
+  if (operation === "materialize-claude-official-adapter") {
+    const snapshot = model.officialMarketplaceSnapshot;
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      snapshot === null
+      || adapter === null
+      || action.target !== adapter.root
+    ) {
+      throw new Error(`${action.id}: Claude marketplace adapter changed`);
+    }
+    materializeOfficialMarketplaceRuntimeAdapter(
+      adapter,
+      snapshot,
+      model.officialMarketplaceLock,
+    );
+    return {
+      verified:
+        inspectOfficialMarketplaceRuntimeAdapter(
+          model.officialMarketplaceLock,
+          model.stateRoot,
+        ).state === "ready",
+    };
+  }
   if (operation === "acquire-agent") {
     await acquireAgent(action, model, options);
     return {
@@ -1355,10 +1668,34 @@ async function executeAction(
     }
     return { verified: !existsSync(action.target) };
   }
+  if (operation === "register-claude-official-marketplace") {
+    const inspection = inspectOfficialMarketplaceRuntimeAdapter(
+      model.officialMarketplaceLock,
+      model.stateRoot,
+    );
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      inspection.state !== "ready"
+      || adapter === null
+      || adapter.name !== payloadString(action, "marketplaceName")
+      || adapter.root !== payloadString(action, "marketplaceRoot")
+    ) {
+      throw new Error("verified Claude runtime marketplace became unavailable");
+    }
+    registerClaudeOfficialMarketplace(
+      runtimeExecutable("claude-code", model, options),
+      { name: adapter.name, root: adapter.root },
+      (command, args) => runCommand(command, args, options),
+    );
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified: sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
   if (operation === "register-claude-official") {
-    const currentMarketplace = inspectOfficialClaudeMarketplace(
-      loadCapabilityProvenance(options.repositoryRoot).official,
-      options.env,
+    const currentMarketplace = inspectOfficialMarketplaceRuntimeAdapter(
+      model.officialMarketplaceLock,
+      model.stateRoot,
     );
     if (currentMarketplace.state !== "ready") {
       throw new Error("verified Claude official marketplace became unavailable");
@@ -1380,6 +1717,29 @@ async function executeAction(
     atomicWriteFile(action.target, payloadString(action, "content"));
     return {
       verified: sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
+  if (operation === "register-opencode-skill") {
+    const capabilityId = payloadString(action, "capabilityId");
+    const [registration] = planOpenCodeSkillRegistrations(
+      model.managedPayload.activeRoot,
+      [capabilityId],
+      options.env,
+      options.os,
+    );
+    if (
+      registration === undefined
+      || registration.target !== payloadString(action, "observedTarget")
+      || registration.digest !== payloadString(action, "skillDigest")
+    ) {
+      throw new Error(`${action.id}: OpenCode skill identity changed after preview`);
+    }
+    registerOpenCodeSkills([registration]);
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified:
+        openCodeSkillsReady([registration])
+        && sha256File(action.target) === payloadString(action, "contentDigest"),
     };
   }
   if (operation === "register-runtime") {
@@ -1413,12 +1773,78 @@ async function executeAction(
 function prepareActionRollback(
   action: PlanAction,
   model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
 ): {
   readonly commit: () => Promise<void>;
   readonly rollback: () => Promise<void>;
 } | undefined {
   const operation = payloadString(action, "operation");
   if (["verify-file", "verify-agent"].includes(operation)) return undefined;
+  let rollbackNative: (() => void) | undefined;
+  if (operation === "register-claude-official-marketplace") {
+    const adapter = model.officialMarketplaceAdapter;
+    if (adapter === null) {
+      throw new Error("Claude official marketplace adapter is unavailable");
+    }
+    const executable = runtimeExecutable("claude-code", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const state = inspectClaudeOfficialMarketplaceRegistration(
+      executable,
+      { name: adapter.name, root: adapter.root },
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error(
+        `Claude marketplace ${adapter.name} points to another source`,
+      );
+    }
+    if (state === "missing") {
+      rollbackNative = () => {
+        nativeRun(executable, [
+          "plugin",
+          "marketplace",
+          "remove",
+          adapter.name,
+        ]);
+      };
+    }
+  } else if (operation === "register-claude-official") {
+    const plugin = model.officialMarketplace.state === "ready"
+      ? model.officialMarketplace.plugins.find(
+          ({ capabilityId, selector }) =>
+            capabilityId === payloadString(action, "capabilityId")
+            && selector === payloadString(action, "selector"),
+        )
+      : undefined;
+    if (plugin === undefined) {
+      throw new Error(`${action.id}: official plugin identity is unavailable`);
+    }
+    const executable = runtimeExecutable("claude-code", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const state = inspectClaudeOfficialPluginRegistration(
+      executable,
+      plugin,
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error(
+        `${plugin.selector} collides with an existing user-owned Claude plugin`,
+      );
+    }
+    if (state === "missing") {
+      rollbackNative = () => {
+        nativeRun(executable, [
+          "plugin",
+          "uninstall",
+          plugin.selector,
+          "--scope",
+          "user",
+        ]);
+      };
+    }
+  }
   const targets = [action.target];
   const observedTarget = action.payload?.observedTarget;
   if (
@@ -1450,9 +1876,17 @@ function prepareActionRollback(
   try {
     snapshots = targets.map((target, index) => {
       if (!existsSync(target)) {
+        const isObservedTarget =
+          typeof observedTarget === "string"
+          && resolve(target) === resolve(observedTarget);
         return {
           existed: false as const,
-          expectedKind: action.payload?.ownershipKind === "directory"
+          expectedKind:
+              (
+                isObservedTarget
+                && action.payload?.observedTargetKind === "directory"
+              )
+              || action.payload?.ownershipKind === "directory"
             ? "directory" as const
             : "file" as const,
           target,
@@ -1485,30 +1919,47 @@ function prepareActionRollback(
       rmSync(backupRoot, { force: true, recursive: true });
     },
     rollback: async () => {
-      for (const snapshot of [...snapshots].reverse()) {
-        if (existsSync(snapshot.target)) {
-          const current = lstatSync(snapshot.target);
-          const expectedDirectory = snapshot.existed
-            ? snapshot.kind === "directory"
-            : snapshot.expectedKind === "directory";
-          if (current.isSymbolicLink() || current.isDirectory() !== expectedDirectory) {
-            throw new Error(`rollback target type changed: ${snapshot.target}`);
-          }
-          rmSync(snapshot.target, {
-            force: true,
-            recursive: current.isDirectory(),
-          });
-        }
-        if (snapshot.existed) {
-          cpSync(snapshot.backup, snapshot.target, {
-            errorOnExist: true,
-            force: false,
-            preserveTimestamps: true,
-            recursive: snapshot.kind === "directory",
-          });
-        }
+      let nativeFailure: unknown;
+      try {
+        rollbackNative?.();
+      } catch (error) {
+        nativeFailure = error;
       }
-      rmSync(backupRoot, { force: true, recursive: true });
+      let filesystemFailure: unknown;
+      try {
+        for (const snapshot of [...snapshots].reverse()) {
+          if (existsSync(snapshot.target)) {
+            const current = lstatSync(snapshot.target);
+            const expectedDirectory = snapshot.existed
+              ? snapshot.kind === "directory"
+              : snapshot.expectedKind === "directory";
+            if (current.isSymbolicLink() || current.isDirectory() !== expectedDirectory) {
+              throw new Error(`rollback target type changed: ${snapshot.target}`);
+            }
+            rmSync(snapshot.target, {
+              force: true,
+              recursive: current.isDirectory(),
+            });
+          }
+          if (snapshot.existed) {
+            cpSync(snapshot.backup, snapshot.target, {
+              errorOnExist: true,
+              force: false,
+              preserveTimestamps: true,
+              recursive: snapshot.kind === "directory",
+            });
+          }
+        }
+        rmSync(backupRoot, { force: true, recursive: true });
+      } catch (error) {
+        filesystemFailure = error;
+      }
+      const failures = [nativeFailure, filesystemFailure]
+        .filter((error) => error !== undefined)
+        .map((error) => error instanceof Error ? error.message : String(error));
+      if (failures.length > 0) {
+        throw new Error(failures.join("; "));
+      }
     },
   };
 }
@@ -1519,7 +1970,9 @@ function completedActionReady(action: PlanAction): boolean {
   }
   if (
     action.payload?.operation === "register-runtime"
+    || action.payload?.operation === "register-claude-official-marketplace"
     || action.payload?.operation === "register-claude-official"
+    || action.payload?.operation === "register-opencode-skill"
   ) {
     return false;
   }
@@ -1549,7 +2002,11 @@ export async function applyEnvironment(
   const result = await applyExactPlan(preview.plan, expectedDigest, {
     state: new FileStateStore(model.stateRoot),
     observe: async (action) => actionPreimage(action),
-    prepare: async (action) => prepareActionRollback(action, model),
+    prepare: async (action) => prepareActionRollback(
+      action,
+      model,
+      normalized,
+    ),
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
@@ -1709,9 +2166,63 @@ export function inspectEnvironment(
         ]),
       )
     : new Map<string, VerifiedOfficialPlugin>();
+  let officialMarketplaceRegistrationReady =
+    !model.selectedAgents.includes("claude-code");
+  if (model.officialMarketplaceAdapter !== null) {
+    const actionId = "runtime:claude-code:official-marketplace";
+    const target = capabilityMarkerPath(
+      stateRoot,
+      "claude-code",
+      "official-marketplace",
+    );
+    const content = markerFor(
+      actionId,
+      catalog.revision,
+      target,
+      model.officialMarketplaceAdapter.digest,
+    );
+    const ownership = receipt.ownership.filter(
+      ({ id, kind }) => id === actionId && kind === "registration",
+    );
+    officialMarketplaceRegistrationReady =
+      ownership.length === 1
+      && ownership[0]?.target === target
+      && ownership[0]?.digest === sha256Bytes(content)
+      && existsSync(target)
+      && sha256File(target) === sha256Bytes(content);
+  }
   const capabilities = preview.capabilities.map((entry) => {
     if (entry.state !== "ready") return entry;
-    let registered = payloadReady && nativeReadyById.get(entry.runtimeId) === true;
+    let registered =
+      payloadReady
+      && nativeReadyById.get(entry.runtimeId) === true
+      && (
+        entry.runtimeId !== "claude-code"
+        || officialMarketplaceRegistrationReady
+      );
+    const openCodeSkill = entry.runtimeId === "opencode"
+      ? model.openCodeSkills.find(({ id }) => id === entry.id)
+      : undefined;
+    if (openCodeSkill !== undefined) {
+      const actionId = `capability:opencode:${entry.id}`;
+      const target = capabilityMarkerPath(stateRoot, "opencode", entry.id);
+      const content = markerFor(
+        actionId,
+        catalog.revision,
+        target,
+        openCodeSkill.digest,
+      );
+      const ownership = receipt.ownership.filter(
+        ({ id, kind }) => id === actionId && kind === "registration",
+      );
+      registered = registered
+        && ownership.length === 1
+        && ownership[0]?.target === target
+        && ownership[0]?.digest === sha256Bytes(content)
+        && existsSync(target)
+        && sha256File(target) === sha256Bytes(content)
+        && openCodeSkillsReady([openCodeSkill]);
+    }
     const official = entry.runtimeId === "claude-code"
       ? officialByCapability.get(entry.id)
       : undefined;
@@ -1836,6 +2347,7 @@ function nativeDoctorIssues(
             options.env,
             options.os,
           )
+          || !openCodeSkillsReady(model.openCodeSkills)
         ) {
           issues.push("native:opencode:registration-drift");
         }
@@ -1852,16 +2364,33 @@ function nativeDoctorIssues(
         const expectedOfficialPlugins =
           model.officialMarketplace.state === "ready"
             ? model.officialMarketplace.plugins.filter(({ capabilityId }) =>
-                model.profile.capabilities.some((id) => id === capabilityId)
+                model.desired.selectedCapabilities?.some(
+                  (id) => id === capabilityId,
+                ) ?? model.profile.capabilities.some(
+                  (id) => id === capabilityId,
+                )
               )
             : [];
+        const officialMarketplace = model.officialMarketplaceAdapter === null
+          ? undefined
+          : {
+              name: model.officialMarketplaceAdapter.name,
+              root: model.officialMarketplaceAdapter.root,
+            };
         if (
           model.officialMarketplace.state !== "ready"
+          || officialMarketplace === undefined
+          || !claudeOfficialMarketplaceReady(
+            executable,
+            officialMarketplace,
+            nativeRun,
+          )
           || !claudeRegistrationReady(
             executable,
             registration,
             expectedOfficialPlugins,
             nativeRun,
+            officialMarketplace,
           )
         ) {
           issues.push("native:claude-code:registration-drift");

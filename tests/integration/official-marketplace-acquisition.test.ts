@@ -17,8 +17,11 @@ import { fileURLToPath } from "node:url";
 import { loadCapabilityProvenance } from "../../dist/install/capabilities.js";
 import {
   createOfficialMarketplaceGitOperations,
+  inspectOfficialMarketplaceRuntimeAdapter,
   inspectOfficialMarketplaceSnapshot,
+  materializeOfficialMarketplaceRuntimeAdapter,
   materializeOfficialMarketplaceSnapshot,
+  officialMarketplaceRuntimeAdapter,
   officialMarketplaceSnapshot,
   type OfficialMarketplaceGitOperations,
 } from "../../dist/install/official-marketplace-acquisition.js";
@@ -55,6 +58,25 @@ function fixture(root: string) {
   );
   lock.repository.marketplace.sha256 = sha256(manifestPath);
   lock.repository.contentSha256 = hashManagedDirectory(source);
+  const adapterFixture = join(root, "adapter-fixture");
+  cpSync(source, adapterFixture, { recursive: true });
+  const adapterManifestPath = join(
+    adapterFixture,
+    lock.repository.marketplace.path,
+  );
+  const adapterManifest = JSON.parse(
+    readFileSync(adapterManifestPath, "utf8"),
+  ) as Record<string, unknown>;
+  adapterManifest.name = "oh-my-harness-anthropic-official";
+  writeFileSync(
+    adapterManifestPath,
+    `${JSON.stringify(adapterManifest, null, 2)}\n`,
+  );
+  lock.repository.runtimeMarketplace = {
+    contentSha256: hashManagedDirectory(adapterFixture),
+    manifestSha256: sha256(adapterManifestPath),
+    name: "oh-my-harness-anthropic-official",
+  };
 
   let cloneCount = 0;
   const operations: OfficialMarketplaceGitOperations = {
@@ -262,4 +284,59 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
       command: git,
     },
   ]);
+});
+
+test("U5 derives an exact collision-safe Claude runtime marketplace alias", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-official-adapter-"));
+  try {
+    const stateRoot = join(root, "state");
+    const item = fixture(root);
+    const snapshot = officialMarketplaceSnapshot(item.lock, stateRoot);
+    materializeOfficialMarketplaceSnapshot(
+      snapshot,
+      item.lock,
+      item.operations,
+    );
+    const adapter = officialMarketplaceRuntimeAdapter(item.lock, stateRoot);
+
+    materializeOfficialMarketplaceRuntimeAdapter(
+      adapter,
+      snapshot,
+      item.lock,
+    );
+    assert.equal(hashManagedDirectory(adapter.root), adapter.digest);
+    const inspection = inspectOfficialMarketplaceRuntimeAdapter(
+      item.lock,
+      stateRoot,
+    );
+    assert.equal(inspection.state, "ready");
+    if (inspection.state === "ready") {
+      assert.equal(
+        inspection.plugins[0]?.selector,
+        `${item.lock.candidates[0]!.pluginName}@oh-my-harness-anthropic-official`,
+      );
+    }
+
+    materializeOfficialMarketplaceRuntimeAdapter(
+      adapter,
+      snapshot,
+      item.lock,
+    );
+    writeFileSync(join(adapter.root, "drift.txt"), "user data\n");
+    assert.throws(
+      () =>
+        materializeOfficialMarketplaceRuntimeAdapter(
+          adapter,
+          snapshot,
+          item.lock,
+        ),
+      /collision/u,
+    );
+    assert.equal(
+      readFileSync(join(adapter.root, "drift.txt"), "utf8"),
+      "user data\n",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

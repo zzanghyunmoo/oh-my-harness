@@ -58,6 +58,7 @@ export interface OfficialCapabilityCandidate {
   readonly path: string;
   readonly pathTree: string;
   readonly contentSha256: string;
+  readonly runtimeContentSha256: string;
   readonly marketplaceEntrySha256: string;
   readonly license: {
     readonly spdx: string;
@@ -86,6 +87,11 @@ export interface OfficialCapabilityLock {
     readonly marketplace: {
       readonly path: string;
       readonly sha256: string;
+    };
+    readonly runtimeMarketplace: {
+      readonly name: string;
+      readonly manifestSha256: string;
+      readonly contentSha256: string;
     };
   };
   readonly candidates: readonly OfficialCapabilityCandidate[];
@@ -317,6 +323,7 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
       "contentSha256",
       "reviewedAt",
       "marketplace",
+      "runtimeMarketplace",
     ],
     [],
     "official repository",
@@ -352,6 +359,30 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
     SHA256_PATTERN,
     "official repository.marketplace.sha256",
   );
+  assertRecord(
+    value.repository.runtimeMarketplace,
+    "official repository.runtimeMarketplace",
+  );
+  assertExactKeys(
+    value.repository.runtimeMarketplace,
+    ["name", "manifestSha256", "contentSha256"],
+    [],
+    "official repository.runtimeMarketplace",
+  );
+  assertString(
+    value.repository.runtimeMarketplace.name,
+    "official repository.runtimeMarketplace.name",
+  );
+  if (!STABLE_ID_PATTERN.test(value.repository.runtimeMarketplace.name)) {
+    fail("official repository.runtimeMarketplace.name must be a stable ID");
+  }
+  for (const key of ["manifestSha256", "contentSha256"] as const) {
+    assertDigest(
+      value.repository.runtimeMarketplace[key],
+      SHA256_PATTERN,
+      `official repository.runtimeMarketplace.${key}`,
+    );
+  }
 
   if (!Array.isArray(value.candidates) || value.candidates.length === 0) {
     fail("official capability lock requires candidates");
@@ -369,6 +400,7 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
         "path",
         "pathTree",
         "contentSha256",
+        "runtimeContentSha256",
         "marketplaceEntrySha256",
         "license",
         "dependencyLock",
@@ -393,6 +425,11 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
     assertSafeRelativePath(candidate.path, `${label}.path`);
     assertDigest(candidate.pathTree, SHA1_PATTERN, `${label}.pathTree`);
     assertDigest(candidate.contentSha256, SHA256_PATTERN, `${label}.contentSha256`);
+    assertDigest(
+      candidate.runtimeContentSha256,
+      SHA256_PATTERN,
+      `${label}.runtimeContentSha256`,
+    );
     assertDigest(
       candidate.marketplaceEntrySha256,
       SHA256_PATTERN,
