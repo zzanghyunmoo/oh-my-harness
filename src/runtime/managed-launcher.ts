@@ -1,4 +1,4 @@
-import { isAbsolute, win32 } from "node:path";
+import { dirname, isAbsolute, win32 } from "node:path";
 
 import type { AgentId } from "../domain/catalog.js";
 
@@ -163,6 +163,12 @@ export function minimalManagedEnvironment(
       result[key] = value;
     }
   }
+  if (process.platform === "win32") {
+    // Windows restores the parent PATH when it is omitted from a child
+    // environment block. An explicit empty value prevents ambient executables
+    // from becoming reachable by the receipt-bound reconciler.
+    result.PATH = "";
+  }
   return Object.freeze(result);
 }
 
@@ -292,11 +298,16 @@ export async function invokeManagedReconciler(
 
 function runtimeEnvironment(
   source: Readonly<Record<string, string | undefined>>,
+  binding: ManagedLaunchBinding,
+  runtimeId: AgentId,
 ): Readonly<Record<string, string>> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
     if (value !== undefined) result[key] = value;
   }
+  result.OH_MY_HARNESS_RECEIPT_PATH = binding.receiptPath;
+  result.OH_MY_HARNESS_RUNTIME = runtimeId;
+  result.OH_MY_HARNESS_STATE_ROOT = dirname(dirname(binding.receiptPath));
   result.OH_MY_HARNESS_MANAGED_LAUNCH_DEPTH = "1";
   return result;
 }
@@ -336,7 +347,11 @@ export async function launchManagedRuntime(
   const runtime = await operations.run({
     args: [...input.args],
     cwd: input.cwd,
-    env: runtimeEnvironment(input.ambientEnvironment),
+    env: runtimeEnvironment(
+      input.ambientEnvironment,
+      input.binding,
+      input.runtimeId,
+    ),
     executablePath: input.binding.runtime.executablePath,
     ...(input.runtimeTimeoutMs === undefined
       ? {}

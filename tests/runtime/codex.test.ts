@@ -32,6 +32,7 @@ import {
   materializeManagedRuntimePayload,
 } from "../../dist/install/managed-payload.js";
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
+import { resolveTrustedInvocation } from "../../dist/tools/invoke.js";
 
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -492,11 +493,26 @@ test("U11 cached Codex plugin starts its MCP server without repository siblings"
 });
 
 test("U11 current Codex CLI loads the local marketplace and plugin manifest", async (t) => {
-  const version = spawnSync("codex", ["--version"], { encoding: "utf8" });
-  if (version.status !== 0) {
+  const invocation = resolveTrustedInvocation(["codex"], {
+    env: process.env,
+    platform: process.platform,
+    workspace: REPOSITORY_ROOT,
+  });
+  if (invocation === undefined) {
     t.skip("current Codex CLI is unavailable");
     return;
   }
+  const runCodex = (
+    args: readonly string[],
+    env: NodeJS.ProcessEnv = process.env,
+  ) =>
+    spawnSync(
+      invocation.command,
+      [...invocation.argsPrefix, ...args],
+      { encoding: "utf8", env },
+    );
+  const version = runCodex(["--version"]);
+  assert.equal(version.status, 0, version.stderr);
   const codexHome = await mkdtemp(join(tmpdir(), "omh-codex-home-"));
   const env = {
     ...process.env,
@@ -505,23 +521,20 @@ test("U11 current Codex CLI loads the local marketplace and plugin manifest", as
     OH_MY_HARNESS_RECEIPT: join(codexHome, "receipt.json"),
   };
   try {
-    const addMarketplace = spawnSync(
-      "codex",
+    const addMarketplace = runCodex(
       ["plugin", "marketplace", "add", REPOSITORY_ROOT, "--json"],
-      { encoding: "utf8", env },
+      env,
     );
     assert.equal(addMarketplace.status, 0, addMarketplace.stderr);
-    const addPlugin = spawnSync(
-      "codex",
+    const addPlugin = runCodex(
       ["plugin", "add", "oh-my-harness@oh-my-harness", "--json"],
-      { encoding: "utf8", env },
+      env,
     );
     assert.equal(addPlugin.status, 0, addPlugin.stderr);
 
-    const listed = spawnSync(
-      "codex",
+    const listed = runCodex(
       ["plugin", "list", "--json"],
-      { encoding: "utf8", env },
+      env,
     );
     assert.equal(listed.status, 0, listed.stderr);
     const plugin = JSON.parse(listed.stdout).installed.find(
@@ -531,10 +544,9 @@ test("U11 current Codex CLI loads the local marketplace and plugin manifest", as
     );
     assert.equal(plugin?.enabled, true);
 
-    const mcp = spawnSync(
-      "codex",
+    const mcp = runCodex(
       ["mcp", "list", "--json"],
-      { encoding: "utf8", env },
+      env,
     );
     assert.equal(mcp.status, 0, mcp.stderr);
     const server = JSON.parse(mcp.stdout).find(

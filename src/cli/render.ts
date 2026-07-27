@@ -1,7 +1,21 @@
 import type {
   EnvironmentPreview,
+  EnvironmentReadiness,
   EnvironmentStatus,
 } from "../environment/orchestrator.js";
+import type { EnvironmentInstanceId } from "../domain/environment-instance.js";
+
+export interface AggregateEnvironmentStatus {
+  readonly schemaVersion: "2.0.0";
+  readonly kind: "environment-aggregate-status";
+  readonly readiness: EnvironmentReadiness;
+  readonly instances: readonly {
+    readonly id: EnvironmentInstanceId;
+    readonly readiness: EnvironmentReadiness;
+    readonly status: EnvironmentStatus | null;
+    readonly detail?: string;
+  }[];
+}
 
 export interface OmhResult {
   readonly command: string;
@@ -10,6 +24,7 @@ export interface OmhResult {
   readonly output?: string;
   readonly preview?: EnvironmentPreview;
   readonly status?: EnvironmentStatus;
+  readonly aggregateStatus?: AggregateEnvironmentStatus;
   readonly apply?: {
     readonly status: string;
     readonly completedActionIds: readonly string[];
@@ -26,10 +41,11 @@ function help(topic: string | undefined, version: string): string {
   if (topic === "setup") {
     return [
       "Usage:",
-      "  omh setup [--profile id] [--agents ids] [--tools ids] [--root path] [--json]",
+      "  omh setup [--target windows-native|wsl-ubuntu] [--profile id] [--agents ids] [--tools ids] [--capability-set profile|workflow-only] [--tool-route wsl-ubuntu] [--clean] [--root path] [--json]",
       "  omh setup [same options] --apply --digest sha256",
       "",
       "Preview is read-only and prints the exact digest required by apply.",
+      "Apply wsl-ubuntu first; windows-native may then bind package tools to its ready receipt with --tool-route wsl-ubuntu.",
     ].join("\n");
   }
   if (topic === "agents") {
@@ -61,7 +77,7 @@ function help(topic: string | undefined, version: string): string {
   if (topic === "status" || topic === "doctor") {
     return [
       "Usage:",
-      `  omh ${topic} [--root path] [--json]`,
+      `  omh ${topic} [--target windows-native|wsl-ubuntu|all] [--root path] [--json]`,
       "",
       `${topic} is read-only. Status is local-only; doctor performs bounded native inspection without authentication.`,
     ].join("\n");
@@ -75,7 +91,7 @@ function help(topic: string | undefined, version: string): string {
     "  omh setup [options] [--apply --digest sha256]",
     "  omh agents install|status [options]",
     "  omh tools install|doctor [options]",
-    "  omh status|doctor [--root path] [--json]",
+    "  omh status|doctor [--target windows-native|wsl-ubuntu|all] [--root path] [--json]",
     "  omh run --runtime id --receipt /absolute/receipt -- [runtime args]",
     "  omh profiles list|create|validate|preview|publish [options]",
     "",
@@ -179,6 +195,21 @@ function renderStatus(status: EnvironmentStatus, doctor: boolean): string {
   return lines.join("\n");
 }
 
+function renderAggregateStatus(
+  status: AggregateEnvironmentStatus,
+  doctor: boolean,
+): string {
+  return [
+    `Oh My Harness ${doctor ? "doctor" : "status"}: ${status.readiness}`,
+    "",
+    ...status.instances.map((instance) =>
+      `- ${instance.id}: ${instance.readiness}${
+        instance.detail === undefined ? "" : ` — ${instance.detail}`
+      }`
+    ),
+  ].join("\n");
+}
+
 export function createResultRenderer(
   catalog: CliRenderCatalog,
 ): (result: OmhResult & { readonly topic?: string }) => string {
@@ -205,6 +236,14 @@ export function createResultRenderer(
     }
     if (result.status) {
       return `${renderStatus(result.status, result.command === "doctor")}\n`;
+    }
+    if (result.aggregateStatus) {
+      return `${
+        renderAggregateStatus(
+          result.aggregateStatus,
+          result.command === "doctor",
+        )
+      }\n`;
     }
     return `${JSON.stringify(result, null, 2)}\n`;
   };

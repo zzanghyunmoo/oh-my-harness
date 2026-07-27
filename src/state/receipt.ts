@@ -25,6 +25,7 @@ import type {
   ManagedStateReceipt,
   StatePort,
 } from "../ports/state.js";
+import { validateApplyJournal } from "./journal.js";
 import { withFileLock } from "./lock.js";
 
 function assertSafeStateRoot(path: string): string {
@@ -74,10 +75,20 @@ function atomicWriteJson(path: string, value: unknown): void {
 export class FileStateStore implements StatePort {
   readonly root: string;
   readonly lockTimeoutMs: number;
+  readonly validateReceipt:
+    | ((value: unknown) => ManagedStateReceipt)
+    | undefined;
 
-  constructor(root: string, options: { readonly lockTimeoutMs?: number } = {}) {
+  constructor(
+    root: string,
+    options: {
+      readonly lockTimeoutMs?: number;
+      readonly validateReceipt?: (value: unknown) => ManagedStateReceipt;
+    } = {},
+  ) {
     this.root = assertSafeStateRoot(root);
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
+    this.validateReceipt = options.validateReceipt;
   }
 
   async withApplyLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -89,7 +100,19 @@ export class FileStateStore implements StatePort {
   }
 
   async readJournal(): Promise<ApplyJournal | null> {
-    return readJson<ApplyJournal>(join(this.root, "journal", "apply.json"));
+    const value = readJson<unknown>(join(this.root, "journal", "apply.json"));
+    return value === null ? null : validateApplyJournal(value);
+  }
+
+  async readReceipt(): Promise<ManagedStateReceipt | null> {
+    const value = readJson<unknown>(
+      join(this.root, "receipts", "environment.json"),
+    );
+    if (value === null) return null;
+    if (this.validateReceipt === undefined) {
+      throw new Error("managed receipt validator is unavailable");
+    }
+    return this.validateReceipt(value);
   }
 
   async writeJournal(journal: ApplyJournal): Promise<void> {

@@ -171,3 +171,84 @@ test("compiled CLI parses exact setup apply and custom profile lifecycle command
     },
   );
 });
+
+test("compiled CLI parses explicit environment instances with recommended overlays", () => {
+  const windows = parseOmhArguments([
+    "setup",
+    "--target",
+    "windows-native",
+    "--agents",
+    "claude-code,opencode",
+    "--tools",
+    "github,linear,notion",
+    "--tool-route",
+    "wsl-ubuntu",
+    "--clean",
+    "--json",
+  ]);
+  assert.equal(windows.command, "setup");
+  assert.equal(windows.target, "windows-native");
+  assert.equal(windows.capabilitySet, "workflow-only");
+  assert.equal(windows.toolRoute, "wsl-ubuntu");
+  assert.equal(windows.clean, true);
+
+  const wsl = parseOmhArguments([
+    "setup",
+    "--target",
+    "wsl-ubuntu",
+    "--distribution",
+    "Ubuntu",
+  ]);
+  assert.equal(wsl.command, "setup");
+  assert.equal(wsl.target, "wsl-ubuntu");
+  assert.equal(wsl.capabilitySet, "profile");
+  assert.equal(wsl.distribution, "Ubuntu");
+
+  assert.deepEqual(parseOmhArguments(["status", "--target", "all", "--json"]), {
+    command: "status",
+    json: true,
+    root: undefined,
+    target: "all",
+  });
+});
+
+test("compiled CLI rejects invalid environment instance combinations", () => {
+  assert.throws(
+    () => parseOmhArguments(["setup", "--target", "unknown"]),
+    /--target must be one of/,
+  );
+  assert.throws(
+    () => parseOmhArguments(["setup", "--target", "all"]),
+    /--target all is read-only/,
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--target",
+      "windows-native",
+      "--distribution",
+      "Ubuntu",
+    ]),
+    /--distribution is only valid for wsl-ubuntu/,
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--target",
+      "wsl-ubuntu",
+      "--tool-route",
+      "wsl-ubuntu",
+    ]),
+    /route to itself/,
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--target",
+      "wsl-ubuntu",
+      "--root",
+      "/tmp/not-the-instance",
+    ]),
+    /target root must end with wsl-ubuntu/,
+  );
+});

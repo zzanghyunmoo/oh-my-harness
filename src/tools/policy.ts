@@ -20,6 +20,10 @@ import {
   isAgentId,
   type AgentId,
 } from "../domain/catalog.js";
+import type {
+  EnvironmentInstance,
+  ToolRoute,
+} from "../domain/environment-instance.js";
 import { readBoundedRegularFile } from "../environment/filesystem.js";
 import {
   CLI_TOOL_DEFINITIONS,
@@ -54,6 +58,7 @@ export type ToolPolicyReason =
   | "runtime-not-selected"
   | "runtime-not-ready"
   | "invalid-profile-backends"
+  | "invalid-tool-routes"
   | "session-receipt-changed";
 
 export interface ToolPolicySnapshot {
@@ -64,6 +69,7 @@ export interface ToolPolicySnapshot {
   readonly receiptFingerprint: string | null;
   readonly selectedAgents: readonly AgentId[];
   readonly bindings: RuntimeToolProfile | null;
+  readonly toolRoutes: readonly ToolRoute[];
   readonly toolNames: readonly string[];
   readonly serviceIds: readonly CliServiceId[];
   readonly reason: ToolPolicyReason | null;
@@ -78,6 +84,9 @@ interface ToolPolicyReceipt {
   readonly desiredState: {
     readonly profileId: string;
     readonly selectedAgents: readonly AgentId[];
+    readonly instance?: EnvironmentInstance;
+    readonly selectedPackages?: readonly CliServiceId[];
+    readonly toolRoutes?: readonly ToolRoute[];
   };
   readonly startupConsent: {
     readonly repairPinned: boolean;
@@ -152,6 +161,7 @@ function statusOnly(
     receiptFingerprint: options.receiptFingerprint ?? null,
     selectedAgents: Object.freeze([...selectedAgents]),
     bindings: null,
+    toolRoutes: Object.freeze([]),
     toolNames: Object.freeze([]),
     serviceIds: Object.freeze([]),
     reason,
@@ -274,6 +284,27 @@ export function deriveToolPolicy(
   if (definitions.length !== PROFILE_CAPABILITIES.length) {
     return statusOnly(input.runtimeId, "invalid-profile-backends", common);
   }
+  const toolRoutes = receipt.desiredState.toolRoutes ?? [];
+  const selectedServices = new Set(definitions.map(({ service }) => service));
+  if (
+    receipt.desiredState.instance?.id === "windows-native"
+    && (
+      toolRoutes.length !== selectedServices.size
+      || toolRoutes.some(({ packageId }) => !selectedServices.has(packageId))
+      || [...selectedServices].some(
+        (service) =>
+          toolRoutes.filter(({ packageId }) => packageId === service).length !== 1,
+      )
+    )
+  ) {
+    return statusOnly(input.runtimeId, "invalid-tool-routes", common);
+  }
+  if (
+    receipt.desiredState.instance?.id === "wsl-ubuntu"
+    && toolRoutes.length > 0
+  ) {
+    return statusOnly(input.runtimeId, "invalid-tool-routes", common);
+  }
 
   return Object.freeze({
     mode: "ready",
@@ -285,6 +316,9 @@ export function deriveToolPolicy(
       ...receipt.desiredState.selectedAgents,
     ]),
     bindings,
+    toolRoutes: Object.freeze(
+      toolRoutes.map((route) => Object.freeze({ ...route })),
+    ),
     toolNames: Object.freeze(definitions.map(({ name }) => name)),
     serviceIds: Object.freeze(
       PROFILE_CAPABILITIES.map((capability) => bindings[capability]),
@@ -444,6 +478,10 @@ export function toolPolicyStatus(
     runtimeId: policy.runtimeId,
     profileId: policy.profileId,
     catalogRevision: policy.catalogRevision,
+    toolRoutes: policy.toolRoutes.map(({ packageId, targetInstanceId }) => ({
+      packageId,
+      targetInstanceId,
+    })),
     reason: policy.reason,
     remediation: policy.remediation,
   });

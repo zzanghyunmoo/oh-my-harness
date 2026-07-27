@@ -31,11 +31,15 @@ import {
   isAgentId,
   type PackageId,
 } from "./domain/catalog.js";
+import type { EnvironmentInstanceId } from "./domain/environment-instance.js";
 import { repairManagedDirectory } from "./install/managed-payload.js";
 import { StalePreviewError } from "./planning/apply.js";
+import type { ManagedStateReceipt } from "./ports/state.js";
 import { runManagedRuntime } from "./runtime/managed-service.js";
 import { runReceiptDrivenStartupService } from "./runtime/startup-service.js";
 import { FileStateStore } from "./state/receipt.js";
+import type { TargetPort } from "./environment/target.js";
+import { WslTargetPort } from "./environment/wsl-target.js";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(
@@ -72,6 +76,14 @@ export interface RunOmhOptions {
     executablePath: string,
     packageId: PackageId,
   ) => string | null;
+  readonly targetExecution?: EnvironmentInstanceId;
+  readonly targetPort?: TargetPort;
+}
+
+function targetPortFor(options: RunOmhOptions): TargetPort {
+  return options.targetPort ?? new WslTargetPort(
+    options.env === undefined ? {} : { environment: options.env },
+  );
 }
 
 function profileResult(
@@ -156,6 +168,10 @@ function selectionFor(
     ParsedOmhArguments,
     { readonly command: "setup" | "agents" | "tools" }
   >,
+  routeDependency?: {
+    readonly failure?: string;
+    readonly receiptFingerprint?: string;
+  },
 ): EnvironmentSelection {
   const selectedAgents = parsed.command === "tools"
     ? undefined
@@ -164,10 +180,23 @@ function selectionFor(
     ? []
     : parsed.tools;
   return {
+    capabilitySet: parsed.capabilitySet,
+    clean: parsed.clean,
+    ...(parsed.distribution === undefined
+      ? {}
+      : { distribution: parsed.distribution }),
     profileId: parsed.profile,
     ...(selectedAgents === undefined ? {} : { selectedAgents }),
     ...(selectedPackages === undefined ? {} : { selectedPackages }),
     ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+    ...(parsed.target === undefined ? {} : { target: parsed.target }),
+    ...(parsed.toolRoute === undefined ? {} : { toolRoute: parsed.toolRoute }),
+    ...(routeDependency?.failure === undefined
+      ? {}
+      : { toolRouteFailure: routeDependency.failure }),
+    ...(routeDependency?.receiptFingerprint === undefined
+      ? {}
+      : { toolRouteReceiptFingerprint: routeDependency.receiptFingerprint }),
   };
 }
 
@@ -220,12 +249,107 @@ export async function runOmh(
   if (parsed.command === "profiles") {
     return profileResult(parsed, activeRepositoryRoot);
   }
+  const selectedTarget = "target" in parsed ? parsed.target : undefined;
+  if (
+    selectedTarget === "wsl-ubuntu"
+    && options.targetExecution !== "wsl-ubuntu"
+  ) {
+    const targetPort = targetPortFor(options);
+    const startIfStopped = parsed.command === "setup"
+      || (parsed.command === "agents" && parsed.subcommand === "install")
+      || (parsed.command === "tools" && parsed.subcommand === "install");
+    return targetPort.run({
+      argv,
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped,
+      targetId: "wsl-ubuntu",
+    });
+  }
+  if (
+    options.targetExecution !== undefined
+    && selectedTarget !== options.targetExecution
+  ) {
+    throw new Error("target execution identity does not match parsed target");
+  }
   const coreOptions = orchestratorOptions(options);
+  if (selectedTarget === "all") {
+    if (parsed.command !== "status" && parsed.command !== "doctor") {
+      throw new Error("--target all is read-only");
+    }
+    const targetPort = targetPortFor(options);
+    const wslResultPromise = targetPort.run({
+      argv: [parsed.command, "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped: false,
+      targetId: "wsl-ubuntu",
+    });
+    const windows = (parsed.command === "doctor"
+      ? diagnoseEnvironment
+      : inspectEnvironment)(
+        {
+          ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+          target: "windows-native",
+        },
+        coreOptions,
+      );
+    const wslResult = await wslResultPromise;
+    const wsl = wslResult.status ?? null;
+    const wslReadiness = wsl?.readiness
+      ?? (
+        wslResult.state === "unconfigured"
+          ? "unconfigured"
+          : "unverifiable"
+      );
+    const readyStates = ["ready", "ready-with-optional-gaps"];
+    const readiness = (
+      readyStates.includes(windows.readiness)
+      && readyStates.includes(wslReadiness)
+    )
+      ? (
+          windows.readiness === "ready-with-optional-gaps"
+          || wslReadiness === "ready-with-optional-gaps"
+            ? "ready-with-optional-gaps" as const
+            : "ready" as const
+        )
+      : "unverifiable" as const;
+    return {
+      aggregateStatus: {
+        instances: [
+          {
+            id: "windows-native",
+            readiness: windows.readiness,
+            status: windows,
+          },
+          {
+            ...(wslResult.output === undefined
+              ? {}
+              : { detail: wslResult.output }),
+            id: "wsl-ubuntu",
+            readiness: wslReadiness,
+            status: wsl,
+          },
+        ],
+        kind: "environment-aggregate-status",
+        readiness,
+        schemaVersion: "2.0.0",
+      },
+      command: parsed.command,
+      exitCode: ["ready", "ready-with-optional-gaps"].includes(readiness)
+        ? 0
+        : 6,
+      state: readiness,
+    };
+  }
   if (parsed.command === "status" || parsed.command === "doctor") {
     const status = (parsed.command === "doctor"
       ? diagnoseEnvironment
       : inspectEnvironment)(
-      parsed.root === undefined ? {} : { stateRoot: parsed.root },
+      {
+        ...(parsed.root === undefined ? {} : { stateRoot: parsed.root }),
+        ...(parsed.target === undefined || parsed.target === "all"
+          ? {}
+          : { target: parsed.target }),
+      },
       coreOptions,
     );
     return {
@@ -273,7 +397,16 @@ export async function runOmh(
             target: ownership.target,
           });
         },
-        state: new FileStateStore(stateRoot),
+        state: new FileStateStore(stateRoot, {
+          validateReceipt(value) {
+            validateContractDocument(
+              "managed-state-receipt",
+              value,
+              activeRepositoryRoot,
+            );
+            return value as ManagedStateReceipt;
+          },
+        }),
       },
     );
     return {
@@ -303,7 +436,35 @@ export async function runOmh(
     };
   }
 
-  const selection = selectionFor(parsed);
+  let routeDependency:
+    | { readonly failure?: string; readonly receiptFingerprint?: string }
+    | undefined;
+  if (parsed.target === "windows-native" && parsed.toolRoute === "wsl-ubuntu") {
+    const targetPort = targetPortFor(options);
+    const dependency = await targetPort.run({
+      argv: ["status", "--target", "wsl-ubuntu", "--json"],
+      repositoryRoot: activeRepositoryRoot,
+      startIfStopped: false,
+      targetId: "wsl-ubuntu",
+    });
+    if (
+      dependency.status !== undefined
+      && ["ready", "ready-with-optional-gaps"].includes(
+        dependency.status.readiness,
+      )
+      && dependency.status.receiptFingerprint !== null
+    ) {
+      routeDependency = {
+        receiptFingerprint: dependency.status.receiptFingerprint,
+      };
+    } else {
+      routeDependency = {
+        failure: dependency.output
+          ?? `wsl-ubuntu is ${dependency.state ?? "unverifiable"}`,
+      };
+    }
+  }
+  const selection = selectionFor(parsed, routeDependency);
   if (!parsed.apply) {
     const preview = previewEnvironment(selection, coreOptions);
     return {

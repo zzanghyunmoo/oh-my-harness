@@ -1,11 +1,25 @@
+import type { AgentId } from "../domain/catalog.js";
+import type {
+  CapabilitySet,
+  EnvironmentInstance,
+  ToolRoute,
+} from "../domain/environment-instance.js";
+
 export interface ApplyJournal {
   readonly schemaVersion: "2.0.0";
   readonly kind: "apply-journal";
   readonly planDigest: string;
   readonly catalogRevision: string;
   readonly completedActionIds: readonly string[];
+  readonly pendingRecoveries?: readonly ApplyRecoveryRecord[];
   readonly status: "applying" | "partial-unready" | "ready";
   readonly failure?: string;
+}
+
+export interface ApplyRecoveryRecord {
+  readonly actionId: string;
+  readonly kind: string;
+  readonly payload: Readonly<Record<string, unknown>>;
 }
 
 export interface ManagedStateReceipt {
@@ -19,6 +33,11 @@ export interface ManagedStateReceipt {
   readonly desiredState: {
     readonly profileId: string;
     readonly selectedAgents: readonly AgentId[];
+    readonly instance?: EnvironmentInstance;
+    readonly capabilitySet?: CapabilitySet;
+    readonly selectedCapabilities?: readonly string[];
+    readonly selectedPackages?: readonly string[];
+    readonly toolRoutes?: readonly ToolRoute[];
   };
   readonly startupConsent: {
     readonly repairPinned: boolean;
@@ -62,7 +81,7 @@ export interface ManagedStateReceipt {
 export interface StatePort {
   withApplyLock<T>(operation: () => Promise<T>): Promise<T>;
   readJournal(): Promise<ApplyJournal | null>;
+  readReceipt?(): Promise<ManagedStateReceipt | null>;
   writeJournal(journal: ApplyJournal): Promise<void>;
   publishReceipt(receipt: ManagedStateReceipt): Promise<void>;
 }
-import type { AgentId } from "../domain/catalog.js";

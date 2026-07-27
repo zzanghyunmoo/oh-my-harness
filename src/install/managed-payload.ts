@@ -34,8 +34,13 @@ const PAYLOAD_PATHS = [
   ".opencode/package.json",
   ".opencode/plugins/oh-my-harness.js",
   "dist",
+  "harness/adapters",
+  "harness/catalog",
+  "harness/contracts",
+  "harness/profiles",
   "package.json",
   "plugins/oh-my-harness",
+  "scripts/harness/acquisition.mjs",
 ] as const;
 
 interface PayloadSource {
@@ -145,6 +150,20 @@ function dependencyRoot(
 }
 
 function payloadSources(repositoryRoot: string): readonly PayloadSource[] {
+  const runtimeDependencies = [
+    ["b4a", "1.8.1"],
+    ["bare-events", "2.9.1"],
+    ["events-universal", "1.0.1"],
+    ["fast-fifo", "1.3.2"],
+    ["jsonc-parser", "3.3.1"],
+    ["pend", "1.2.0"],
+    ["streamx", "2.28.0"],
+    ["tar-stream", "3.2.0"],
+    ["text-decoder", "1.2.7"],
+    ["typebox", "1.2.8"],
+    ["yauzl", "3.4.0"],
+    ["zod", "4.1.8"],
+  ] as const;
   return [
     ...PAYLOAD_PATHS.map((path) => ({
       destination: path,
@@ -159,14 +178,10 @@ function payloadSources(repositoryRoot: string): readonly PayloadSource[] {
       ),
       source: join(repositoryRoot, path),
     })),
-    {
-      destination: "node_modules/zod",
-      source: dependencyRoot(repositoryRoot, "zod", "4.1.8"),
-    },
-    {
-      destination: "node_modules/typebox",
-      source: dependencyRoot(repositoryRoot, "typebox", "1.2.8"),
-    },
+    ...runtimeDependencies.map(([name, version]) => ({
+      destination: join("node_modules", name),
+      source: dependencyRoot(repositoryRoot, name, version),
+    })),
   ];
 }
 

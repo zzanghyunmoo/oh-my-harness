@@ -29,6 +29,7 @@ import {
 } from "node:path";
 
 import type { ObservedPreimage } from "../planning/actions.js";
+import type { EnvironmentInstanceId } from "../domain/environment-instance.js";
 
 const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
 
@@ -177,23 +178,31 @@ export function observeRegularFile(path: string): ObservedPreimage {
 export function resolveStateRoot(
   explicit: string | undefined,
   env: NodeJS.ProcessEnv,
+  instanceId?: EnvironmentInstanceId,
 ): string {
   const configured = explicit
     ?? env.OH_MY_HARNESS_HOME
-    ?? join(homedir(), ".oh-my-harness");
+    ?? (
+      instanceId === undefined
+        ? join(homedir(), ".oh-my-harness")
+        : join(homedir(), ".oh-my-harness", "instances", instanceId)
+    );
   if (!isAbsolute(configured) && !win32.isAbsolute(configured)) {
     throw new Error("managed state root must be absolute");
   }
-  assertSafeManagedRootPath(configured, "managed state root");
-  return resolve(configured);
+  return assertSafeManagedRootPath(configured, "managed state root");
 }
 
-function within(parent: string, child: string): boolean {
+export function isPathWithin(parent: string, child: string): boolean {
   const candidate = relative(parent, child);
   return candidate === ""
     || (candidate !== ".."
       && !candidate.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
       && !isAbsolute(candidate));
+}
+
+export function isPathStrictlyWithin(parent: string, child: string): boolean {
+  return resolve(parent) !== resolve(child) && isPathWithin(parent, child);
 }
 
 function executableCandidates(command: string, platform: NodeJS.Platform): string[] {
@@ -237,12 +246,12 @@ export function findTrustedExecutable(
     } catch {
       continue;
     }
-    if (within(workspace, directory)) continue;
+    if (isPathWithin(workspace, directory)) continue;
     for (const candidate of executableCandidates(command, platform)) {
       const path = join(directory, candidate);
       try {
         const resolvedPath = realpathSync(path);
-        if (within(workspace, resolvedPath)) continue;
+        if (isPathWithin(workspace, resolvedPath)) continue;
         const stat = lstatSync(resolvedPath);
         if (!stat.isFile()) continue;
         if (

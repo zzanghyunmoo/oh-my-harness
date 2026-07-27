@@ -265,12 +265,17 @@ test("U7 a receipt change invalidates the live session and requires restart", as
   }
 });
 
-test("U7 local status separates installed-unconfigured from authentication", async (t) => {
-  if (process.platform === "win32") return t.skip("POSIX executable fixture");
+test("U7 local status separates installed-unconfigured from authentication", async () => {
   const { root, home, workspace, bin } = fixture();
   try {
     const linear = join(bin, "linear");
-    writeFileSync(linear, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    writeFileSync(
+      linear,
+      process.platform === "win32"
+        ? "#!/usr/bin/env node\nprocess.exit(0);\n"
+        : "#!/bin/sh\nexit 0\n",
+      { mode: 0o700 },
+    );
     chmodSync(linear, 0o700);
     writeReceipt(home, receipt("personal"));
     const server = startMcp("claude-code", home, bin);

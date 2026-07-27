@@ -30,11 +30,13 @@
     "harness/inventory/",
     "harness/locks/",
     "harness/profiles/",
+    "npm-shrinkwrap.json",
     "omh",
     "omh.cmd",
     "plugins/",
     "scripts/harness/",
     "scripts/profile-pack.mjs",
+    "scripts/validate-dual-environment.ps1",
     "scripts/tools/"
   ],
   "engines": {

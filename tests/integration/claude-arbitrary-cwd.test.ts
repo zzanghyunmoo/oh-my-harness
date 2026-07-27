@@ -175,7 +175,7 @@ test("U8 cached Claude plugin reconciles by receipt identity from arbitrary CWD"
     ]);
     assert.equal(invocation.count, 1);
     assert.equal(invocation.cwd, realpathSync(arbitraryCwd));
-    assert.equal(invocation.path, null);
+    assert.equal(invocation.path, process.platform === "win32" ? "" : null);
 
     const setup = runScript(
       startupScript,

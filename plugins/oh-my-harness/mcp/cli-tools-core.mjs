@@ -47,6 +47,7 @@ export const {
   executeCliTool,
   formatCliToolResult,
   listCliToolStatus,
+  listCliToolStatusForPolicy,
   redactCliOutput,
   resolveCliExecutable,
   resolveTrustedCommand,

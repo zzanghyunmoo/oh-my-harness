@@ -1,10 +1,16 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  rmSync,
 } from "node:fs";
 import {
+  basename,
+  dirname,
+  isAbsolute,
   join,
   resolve,
 } from "node:path";
@@ -22,15 +28,25 @@ import type {
 } from "../catalog/types.js";
 import {
   isAgentId,
+  isCapabilityId,
   isPackageId,
+  WORKFLOW_CAPABILITY_IDS,
   type AgentId,
+  type CapabilityId,
   type PackageId,
 } from "../domain/catalog.js";
 import { resolveDesiredState } from "../domain/desired-state.js";
+import {
+  type CapabilitySet,
+  type EnvironmentInstance,
+  type EnvironmentInstanceId,
+  type ToolRoute,
+} from "../domain/environment-instance.js";
 import { installSelectedAgents } from "../install/agents.js";
 import {
   assessLspReadiness,
   loadCapabilityProvenance,
+  type OfficialCapabilityLock,
 } from "../install/capabilities.js";
 import { loadRuntimeAdapters } from "../install/descriptors.js";
 import {
@@ -47,10 +63,24 @@ import {
   type VerifiedOfficialPlugin,
 } from "../install/official-marketplace.js";
 import {
+  createOfficialMarketplaceGitOperations,
+  inspectOfficialMarketplaceRuntimeAdapter,
+  inspectOfficialMarketplaceSnapshot,
+  materializeOfficialMarketplaceRuntimeAdapter,
+  materializeOfficialMarketplaceSnapshot,
+  materializeOfficialMarketplaceSnapshotFromDirectory,
+  officialMarketplaceRuntimeAdapter,
+  officialMarketplaceSnapshot as createOfficialMarketplaceSnapshot,
+  plannedOfficialMarketplaceRuntimeAdapter,
+  type OfficialMarketplaceRuntimeAdapter,
+  type OfficialMarketplaceSnapshot,
+} from "../install/official-marketplace-acquisition.js";
+import {
   planPackageInstallations,
   type PackageInstallPlanEntry,
 } from "../install/packages.js";
 import type {
+  ApplyRecoveryRecord,
   ManagedStateReceipt,
 } from "../ports/state.js";
 import {
@@ -71,7 +101,9 @@ import type {
 import { FileStateStore } from "../state/receipt.js";
 import {
   atomicWriteFile,
+  assertSafeManagedRootPath,
   findTrustedExecutable,
+  isPathStrictlyWithin,
   observeRegularFile,
   readBoundedRegularFile,
   resolveStateRoot,
@@ -80,14 +112,25 @@ import {
   stableJson,
 } from "./filesystem.js";
 import {
+  claudeOfficialMarketplaceReady,
   claudeRegistrationReady,
   codexRegistrationReady,
+  inspectClaudeOfficialMarketplaceRegistration,
+  inspectClaudeOfficialPluginRegistration,
+  inspectClaudeManagedRuntimeRegistration,
+  inspectCodexManagedRuntimeRegistration,
+  inspectOpenCodeSkillRegistration,
+  openCodeSkillsReady,
   openCodeConfigPath,
   openCodeRegistrationReady,
+  planOpenCodeSkillRegistrations,
+  registerClaudeOfficialMarketplace,
   registerClaudeOfficialPlugin,
   registerClaudeRuntime,
   registerCodexRuntime,
+  registerOpenCodeSkills,
   registerOpenCodeRuntime,
+  type OpenCodeSkillRegistration,
 } from "./native-registration.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
@@ -140,6 +183,7 @@ export interface EnvironmentPreview {
   readonly digest: string | null;
   readonly readiness: "preview" | "blocked";
   readonly remediation: string;
+  readonly instanceId: EnvironmentInstanceId | null;
 }
 
 export interface EnvironmentStatus {
@@ -160,6 +204,9 @@ export interface EnvironmentStatus {
   readonly claudeMilestoneReady: boolean;
   readonly v2ParityReady: boolean;
   readonly remediation: readonly string[];
+  readonly instanceId: EnvironmentInstanceId | null;
+  readonly planDigest: string | null;
+  readonly receiptFingerprint: string | null;
 }
 
 export interface EnvironmentSelection {
@@ -167,6 +214,15 @@ export interface EnvironmentSelection {
   readonly selectedAgents?: readonly string[];
   readonly selectedPackages?: readonly string[];
   readonly stateRoot?: string;
+  readonly capabilitySet?: CapabilitySet;
+  readonly clean?: boolean;
+  readonly distribution?: "Ubuntu";
+  readonly target?: EnvironmentInstanceId;
+  readonly toolRoute?: "wsl-ubuntu";
+  readonly toolRouteReceiptFingerprint?: string;
+  readonly toolRouteFailure?: string;
+  readonly toolRoutes?: readonly ToolRoute[];
+  readonly selectedCapabilities?: readonly string[];
 }
 
 export interface EnvironmentOrchestratorOptions {
@@ -204,6 +260,18 @@ interface EnvironmentModel {
   readonly capabilities: readonly CapabilityEnvironmentStatus[];
   readonly managedPayload: ManagedRuntimePayload;
   readonly officialMarketplace: OfficialMarketplaceInspection;
+  readonly officialMarketplaceAdapter: OfficialMarketplaceRuntimeAdapter | null;
+  readonly officialMarketplaceLock: OfficialCapabilityLock;
+  readonly officialMarketplaceSnapshot: OfficialMarketplaceSnapshot | null;
+  readonly officialMarketplaceGitPath: string | null;
+  readonly officialMarketplaceExternalSource: string | null;
+  readonly openCodeSkills: readonly OpenCodeSkillRegistration[];
+  readonly desired: ReturnType<typeof resolveDesiredState>;
+  readonly clean: boolean;
+  readonly currentReceipt: ManagedStateReceipt | null;
+  readonly receiptFailure: string | null;
+  readonly toolRouteRequested: boolean;
+  readonly toolRouteFailure: string | null;
 }
 
 interface Marker {
@@ -353,6 +421,38 @@ function packageModel(
   }).filter(({ id }) => selected.includes(id));
 }
 
+function routePackageModel(
+  packages: readonly PackageInstallPlanEntry[],
+  routes: readonly ToolRoute[],
+): readonly PackageInstallPlanEntry[] {
+  const routed = new Map(routes.map((route) => [route.packageId, route]));
+  return packages.map((entry) => {
+    const route = routed.get(entry.id);
+    if (route === undefined) return entry;
+    const guidance =
+      `${entry.displayName} executes through the receipt-bound ${
+        route.targetInstanceId
+      } route (${route.receiptFingerprint.slice(0, 12)}).`;
+    return {
+      authenticationGuidance:
+        `${entry.authenticationGuidance} Authentication remains owned by ${
+          route.targetInstanceId
+        } and is never copied to Windows.`,
+      description: entry.description,
+      displayName: entry.displayName,
+      executables: entry.executables,
+      ...(entry.expectedVersion === undefined
+        ? {}
+        : { expectedVersion: entry.expectedVersion }),
+      guidance,
+      id: entry.id,
+      installGuidance: guidance,
+      required: entry.required,
+      status: "installed-unconfigured" as const,
+    };
+  });
+}
+
 function inspectExecutableVersion(
   executablePath: string,
   env: NodeJS.ProcessEnv,
@@ -376,7 +476,7 @@ function inspectExecutableVersion(
 
 function capabilityModel(
   catalog: CatalogBundle,
-  profile: EnvironmentProfile,
+  selectedCapabilities: readonly CapabilityId[],
   selectedAgents: readonly AgentId[],
   officialMarketplace: OfficialMarketplaceInspection,
   os: OperatingSystem,
@@ -387,7 +487,7 @@ function capabilityModel(
     catalog.capabilities.capabilities.map((entry) => [entry.id, entry]),
   );
   return selectedAgents.flatMap((runtimeId) =>
-    profile.capabilities.map((id) => {
+    selectedCapabilities.map((id) => {
       const capability = byId.get(id);
       if (!capability) throw new Error(`unknown profile capability: ${id}`);
       const readiness = capability.runtimeReadiness[runtimeId];
@@ -455,9 +555,76 @@ function buildModel(
 ): EnvironmentModel {
   const catalog = loadCatalogBundle(options.repositoryRoot);
   const profile = profileFrom(catalog, selection.profileId);
-  const desired = resolveDesiredState(profile, selection.selectedAgents);
-  const stateRoot = resolveStateRoot(selection.stateRoot, options.env);
+  const stateRoot = resolveStateRoot(
+    selection.stateRoot,
+    options.env,
+    selection.target,
+  );
   const { os, platformId } = runtimePlatform(options.os, options.arch);
+  const platformArch = platformId.endsWith("-arm64") ? "arm64" : "x64";
+  let instance: EnvironmentInstance | undefined;
+  if (selection.target === "windows-native") {
+    if (os !== "win32") {
+      throw new Error("windows-native target must execute on win32");
+    }
+    instance = {
+      id: "windows-native",
+      platform: { arch: platformArch, os: "win32" },
+      stateRoot,
+      transport: "local",
+    };
+  } else if (selection.target === "wsl-ubuntu") {
+    if (os !== "linux") {
+      throw new Error("wsl-ubuntu target must execute inside Linux");
+    }
+    instance = {
+      distribution: selection.distribution ?? "Ubuntu",
+      id: "wsl-ubuntu",
+      platform: { arch: platformArch, os: "linux" },
+      stateRoot,
+      transport: "wsl",
+    };
+  }
+  const selectedPackages = selectedPackageIds(profile, selection.selectedPackages);
+  const capabilitySet = selection.capabilitySet ?? "profile";
+  const selectedCapabilities = (
+    selection.selectedCapabilities
+    ?? profile.capabilities.filter((id) =>
+      capabilitySet === "profile"
+        || (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
+    )
+  ).map((id) => {
+    if (!isCapabilityId(id)) {
+      throw new Error(`unsupported selected capability: ${id}`);
+    }
+    return id;
+  });
+  let toolRoutes: readonly ToolRoute[] = selection.toolRoutes ?? [];
+  if (selection.toolRoute !== undefined && selection.toolRoutes === undefined) {
+    if (instance?.id !== "windows-native") {
+      throw new Error("tool routes require the windows-native target");
+    }
+    if (selection.toolRouteReceiptFingerprint !== undefined) {
+      toolRoutes = selectedPackages.map((packageId) => ({
+        packageId,
+        receiptFingerprint: selection.toolRouteReceiptFingerprint!,
+        targetInstanceId: selection.toolRoute!,
+      }));
+    }
+  }
+  const desired = resolveDesiredState(
+    profile,
+    selection.selectedAgents,
+    instance === undefined
+      ? undefined
+      : {
+          capabilitySet,
+          instance,
+          selectedCapabilities,
+          selectedPackages,
+          toolRoutes,
+        },
+  );
   const adapters = loadRuntimeAdapters(options.repositoryRoot, catalog)
     .filter(({ id }) => desired.selectedAgents.includes(id));
   const adapterById = new Map(adapters.map((entry) => [entry.id, entry]));
@@ -472,10 +639,10 @@ function buildModel(
       options.cwd,
     );
   });
-  const packages = packageModel(
+  const nativePackages = packageModel(
     catalog,
     profile,
-    selectedPackageIds(profile, selection.selectedPackages),
+    selectedPackages,
     os,
     options.env,
     options.cwd,
@@ -483,28 +650,114 @@ function buildModel(
       options.inspectPackageVersion?.(path, id)
       ?? inspectExecutableVersion(path, options.env, options.cwd),
   );
-  const officialMarketplace: OfficialMarketplaceInspection =
-    desired.selectedAgents.includes("claude-code")
-    ? inspectOfficialClaudeMarketplace(
-        loadCapabilityProvenance(options.repositoryRoot).official,
+  const packages = routePackageModel(nativePackages, toolRoutes);
+  const officialMarketplaceLock =
+    loadCapabilityProvenance(options.repositoryRoot).official;
+  let officialMarketplaceSnapshot: OfficialMarketplaceSnapshot | null = null;
+  let officialMarketplaceAdapter: OfficialMarketplaceRuntimeAdapter | null =
+    null;
+  let officialMarketplaceGitPath: string | null = null;
+  let officialMarketplaceExternalSource: string | null = null;
+  let officialMarketplace: OfficialMarketplaceInspection = {
+    detail: "Claude Code is not selected",
+    plugins: [],
+    root: null,
+    state: "unverifiable",
+  };
+  if (desired.selectedAgents.includes("claude-code")) {
+    officialMarketplaceSnapshot = createOfficialMarketplaceSnapshot(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    officialMarketplaceAdapter = officialMarketplaceRuntimeAdapter(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    const adapterInspection = inspectOfficialMarketplaceRuntimeAdapter(
+      officialMarketplaceLock,
+      stateRoot,
+    );
+    if (adapterInspection.state === "ready") {
+      officialMarketplace = adapterInspection;
+    } else if (existsSync(officialMarketplaceAdapter.root)) {
+      officialMarketplace = adapterInspection;
+    } else {
+      const snapshotInspection = inspectOfficialMarketplaceSnapshot(
+        officialMarketplaceLock,
+        stateRoot,
+      );
+      const externalInspection = inspectOfficialClaudeMarketplace(
+        officialMarketplaceLock,
         options.env,
-      )
-    : {
-        detail: "Claude Code is not selected",
-        plugins: [] as const,
-        root: null,
-        state: "unverifiable" as const,
-      };
+      );
+      officialMarketplaceExternalSource =
+        externalInspection.state === "ready"
+          ? externalInspection.root
+          : null;
+      officialMarketplaceGitPath = findTrustedExecutable("git", {
+        cwd: options.cwd,
+        env: options.env,
+        platform: options.os,
+      });
+      const sourceAvailable =
+        snapshotInspection.state === "ready"
+        || (
+          !existsSync(officialMarketplaceSnapshot.root)
+          && (
+            officialMarketplaceExternalSource !== null
+            || officialMarketplaceGitPath !== null
+          )
+        );
+      officialMarketplace = sourceAvailable
+        ? plannedOfficialMarketplaceRuntimeAdapter(
+            officialMarketplaceLock,
+            stateRoot,
+          )
+        : {
+            detail: existsSync(officialMarketplaceSnapshot.root)
+              ? snapshotInspection.detail
+              : [
+                  externalInspection.detail,
+                  "trusted Git is required to acquire the reviewed Claude marketplace",
+                ].join("; "),
+            plugins: [],
+            root: officialMarketplaceAdapter.root,
+            state: "unverifiable",
+          };
+    }
+  }
   const managedPayload = inspectManagedRuntimePayload(
     options.repositoryRoot,
     stateRoot,
   );
+  const openCodeSkills = desired.selectedAgents.includes("opencode")
+    ? planOpenCodeSkillRegistrations(
+        options.repositoryRoot,
+        selectedCapabilities.filter((id) =>
+          (WORKFLOW_CAPABILITY_IDS as readonly string[]).includes(id)
+        ),
+        options.env,
+        options.os,
+      )
+    : [];
+  let currentReceipt: ManagedStateReceipt | null = null;
+  let receiptFailure: string | null = null;
+  if (selection.clean === true) {
+    try {
+      currentReceipt = readReceipt(
+        join(stateRoot, "receipts", "environment.json"),
+        options.repositoryRoot,
+      );
+    } catch (error) {
+      receiptFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
   return {
     adapters,
     agents,
     capabilities: capabilityModel(
       catalog,
-      profile,
+      selectedCapabilities,
       desired.selectedAgents,
       officialMarketplace,
       os,
@@ -516,12 +769,116 @@ function buildModel(
     packages,
     managedPayload,
     officialMarketplace,
+    officialMarketplaceAdapter,
+    officialMarketplaceExternalSource,
+    officialMarketplaceGitPath,
+    officialMarketplaceLock,
+    officialMarketplaceSnapshot,
+    openCodeSkills,
+    desired,
+    clean: selection.clean ?? false,
+    currentReceipt,
+    receiptFailure,
+    toolRouteFailure: selection.toolRoute === undefined
+      ? null
+      : selection.toolRouteFailure
+        ?? (
+          selection.toolRouteReceiptFingerprint === undefined
+            ? "wsl-ubuntu does not have a ready receipt"
+            : null
+        ),
+    toolRouteRequested: selection.toolRoute !== undefined,
     platformId,
     profile,
     receiptPath: join(stateRoot, "receipts", "environment.json"),
     selectedAgents: desired.selectedAgents,
     stateRoot,
   };
+}
+
+function ownedContentMatches(
+  ownership: ManagedStateReceipt["ownership"][number],
+): boolean {
+  if (!existsSync(ownership.target)) return true;
+  try {
+    return ownership.kind === "directory"
+      ? hashManagedDirectory(ownership.target) === ownership.digest
+      : sha256File(ownership.target) === ownership.digest;
+  } catch {
+    return false;
+  }
+}
+
+function ownedTargetStaysWithinStateRoot(
+  stateRoot: string,
+  target: string,
+): boolean {
+  try {
+    if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
+      return false;
+    }
+    const parent = assertSafeManagedRootPath(
+      dirname(target),
+      "managed ownership parent",
+    );
+    return isPathStrictlyWithin(
+      stateRoot,
+      join(parent, basename(target)),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function cleanPreflights(model: EnvironmentModel): PlanPreflight[] {
+  if (!model.clean) return [];
+  if (model.receiptFailure !== null) {
+    return [{
+      detail: model.receiptFailure,
+      id: "clean:receipt",
+      required: true,
+      status: "unverifiable",
+    }];
+  }
+  if (model.currentReceipt === null) {
+    return [{
+      detail: "no prior receipt-owned artifacts exist",
+      id: "clean:receipt",
+      required: true,
+      status: "ready",
+    }];
+  }
+  const instance = model.currentReceipt.desiredState.instance;
+  if (
+    instance !== undefined
+    && instance.id !== model.desired.instance?.id
+  ) {
+    return [{
+      detail: "the prior receipt belongs to another environment instance",
+      id: "clean:instance",
+      required: true,
+      status: "unverifiable",
+    }];
+  }
+  return model.currentReceipt.ownership
+    .filter(({ scope }) => scope === "managed")
+    .map((ownership) => {
+      const safe = ownedTargetStaysWithinStateRoot(
+        model.stateRoot,
+        ownership.target,
+      );
+      const exact = safe && ownedContentMatches(ownership);
+      return {
+        detail: !safe
+          ? "managed ownership target escapes the selected instance root"
+          : exact
+            ? "managed ownership is exact or already absent"
+            : "managed ownership content drifted",
+        id: `clean:${ownership.id}`,
+        required: true,
+        status: exact ? "ready" as const : "unverifiable" as const,
+      };
+    });
 }
 
 function markerFor(
@@ -549,6 +906,23 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
+function previousManagedPayloadRoot(model: EnvironmentModel): string | null {
+  if (!model.clean || model.currentReceipt === null) return null;
+  const ownership = model.currentReceipt.ownership.find(
+    ({ id, kind, scope }) =>
+      id === "plugin:runtime-package"
+      && kind === "directory"
+      && scope === "managed",
+  );
+  if (
+    ownership === undefined
+    || resolve(ownership.target) === resolve(model.managedPayload.activeRoot)
+  ) {
+    return null;
+  }
+  return ownership.target;
+}
+
 function capabilityMarkerPath(
   stateRoot: string,
   runtimeId: AgentId,
@@ -563,6 +937,7 @@ function actionPreimage(action: PlanAction): ObservedPreimage {
     ? observedTarget
     : action.target;
   return action.payload?.ownershipKind === "directory"
+      || action.payload?.observedTargetKind === "directory"
     ? observeManagedPath(target)
     : observeRegularFile(target);
 }
@@ -615,6 +990,43 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           : "unverifiable",
       detail: entry.detail ?? `${entry.sourceId}: ${entry.state}`,
     })),
+    ...(model.selectedAgents.includes("claude-code")
+      ? [{
+          detail: model.officialMarketplace.detail,
+          id: "marketplace:claude-code:official",
+          required: true,
+          status: model.officialMarketplace.state === "ready"
+            ? "ready" as const
+            : "unverifiable" as const,
+        }]
+      : []),
+    ...model.openCodeSkills.map((registration): PlanPreflight => {
+      const state = inspectOpenCodeSkillRegistration(registration);
+      return {
+        detail: state === "collision"
+          ? "OpenCode native skill path contains user-owned or drifted content"
+          : state === "ready"
+            ? "OpenCode native skill already matches reviewed content"
+            : "OpenCode native skill can be installed additively",
+        id: `skill:opencode:${registration.id}`,
+        required: true,
+        status: state === "collision"
+          ? "unverifiable" as const
+          : "ready" as const,
+      };
+    }),
+    ...cleanPreflights(model),
+    ...(model.toolRouteRequested
+      ? [{
+          detail: model.toolRouteFailure
+            ?? "wsl-ubuntu receipt dependency is ready",
+          id: "route:wsl-ubuntu",
+          required: true,
+          status: model.toolRouteFailure === null
+            ? "ready" as const
+            : "unverifiable" as const,
+        }]
+      : []),
   ];
 }
 
@@ -624,8 +1036,19 @@ function planActions(
     Pick<EnvironmentOrchestratorOptions, "env" | "os" | "repositoryRoot">
   >,
 ): PlanAction[] {
-  const reconcilerPath = resolve(options.repositoryRoot, "dist", "cli", "main.js");
-  const reconcilerDigest = sha256File(reconcilerPath);
+  const reconcilerSource = resolve(
+    options.repositoryRoot,
+    "dist",
+    "cli",
+    "main.js",
+  );
+  const reconcilerDigest = sha256File(reconcilerSource);
+  const reconcilerTarget = join(
+    model.managedPayload.activeRoot,
+    "dist",
+    "cli",
+    "main.js",
+  );
   const actions: PlanAction[] = [
     {
       id: "omh-node",
@@ -641,19 +1064,6 @@ function planActions(
       target: process.execPath,
     },
     {
-      id: RECONCILER_ACTION_ID,
-      kind: "write",
-      payload: {
-        contentDigest: reconcilerDigest,
-        operation: "verify-file",
-        ownershipKind: "file",
-        ownershipScope: "external",
-      },
-      preimage: observeRegularFile(reconcilerPath),
-      required: true,
-      target: reconcilerPath,
-    },
-    {
       id: "plugin:runtime-package",
       kind: "acquire",
       payload: {
@@ -662,6 +1072,13 @@ function planActions(
         ownershipKind: "directory",
         ownershipScope: "managed",
         repairSource: model.managedPayload.storeRoot,
+        receiptIdentity: {
+          digest: reconcilerDigest,
+          id: RECONCILER_ACTION_ID,
+          kind: "file",
+          scope: "external",
+          target: reconcilerTarget,
+        },
       },
       preimage: observeManagedPath(model.managedPayload.activeRoot),
       required: true,
@@ -720,12 +1137,79 @@ function planActions(
     });
   }
   if (model.selectedAgents.includes("claude-code")) {
-    if (model.officialMarketplace.state !== "ready") {
+    if (
+      model.officialMarketplace.state !== "ready"
+      || model.officialMarketplaceSnapshot === null
+      || model.officialMarketplaceAdapter === null
+    ) {
       throw new Error("verified Claude official marketplace is unavailable");
     }
+    actions.push({
+      id: "marketplace:claude-code:source",
+      kind: "acquire",
+      payload: {
+        contentDigest: model.officialMarketplaceSnapshot.digest,
+        operation: "acquire-claude-official-marketplace",
+        ownershipKind: "directory",
+        ownershipScope: "managed",
+        ...(model.officialMarketplaceGitPath === null
+          ? {}
+          : { gitPath: model.officialMarketplaceGitPath }),
+        ...(model.officialMarketplaceExternalSource === null
+          ? {}
+          : { externalSource: model.officialMarketplaceExternalSource }),
+      },
+      preimage: observeManagedPath(model.officialMarketplaceSnapshot.root),
+      required: true,
+      target: model.officialMarketplaceSnapshot.root,
+    });
+    actions.push({
+      id: "marketplace:claude-code:runtime-adapter",
+      kind: "acquire",
+      payload: {
+        contentDigest: model.officialMarketplaceAdapter.digest,
+        operation: "materialize-claude-official-adapter",
+        ownershipKind: "directory",
+        ownershipScope: "managed",
+      },
+      preimage: observeManagedPath(model.officialMarketplaceAdapter.root),
+      required: true,
+      target: model.officialMarketplaceAdapter.root,
+    });
+    const marketplaceActionId =
+      "runtime:claude-code:official-marketplace";
+    const marketplaceTarget = capabilityMarkerPath(
+      model.stateRoot,
+      "claude-code",
+      "official-marketplace",
+    );
+    const marketplaceContent = markerFor(
+      marketplaceActionId,
+      model.catalog.revision,
+      marketplaceTarget,
+      model.officialMarketplaceAdapter.digest,
+    );
+    actions.push({
+      id: marketplaceActionId,
+      kind: "register",
+      payload: {
+        content: marketplaceContent,
+        contentDigest: sha256Bytes(marketplaceContent),
+        marketplaceName: model.officialMarketplaceAdapter.name,
+        marketplaceRoot: model.officialMarketplaceAdapter.root,
+        operation: "register-claude-official-marketplace",
+        ownershipKind: "registration",
+        ownershipScope: "managed",
+      },
+      preimage: observeRegularFile(marketplaceTarget),
+      required: true,
+      target: marketplaceTarget,
+    });
     for (const plugin of model.officialMarketplace.plugins.filter(
       ({ capabilityId }) =>
-        model.profile.capabilities.some((id) => id === capabilityId),
+        model.desired.selectedCapabilities?.some(
+          (id) => id === capabilityId,
+        ) ?? model.profile.capabilities.some((id) => id === capabilityId),
     )) {
       const actionId = `capability:claude-code:${plugin.capabilityId}`;
       const target = capabilityMarkerPath(
@@ -758,6 +1242,38 @@ function planActions(
       });
     }
   }
+  for (const registration of model.openCodeSkills) {
+    const actionId = `capability:opencode:${registration.id}`;
+    const target = capabilityMarkerPath(
+      model.stateRoot,
+      "opencode",
+      registration.id,
+    );
+    const content = markerFor(
+      actionId,
+      model.catalog.revision,
+      target,
+      registration.digest,
+    );
+    actions.push({
+      id: actionId,
+      kind: "register",
+      payload: {
+        capabilityId: registration.id,
+        content,
+        contentDigest: sha256Bytes(content),
+        observedTarget: registration.target,
+        observedTargetKind: "directory",
+        operation: "register-opencode-skill",
+        ownershipKind: "registration",
+        ownershipScope: "managed",
+        skillDigest: registration.digest,
+      },
+      preimage: observeManagedPath(registration.target),
+      required: true,
+      target,
+    });
+  }
   for (const runtimeId of model.selectedAgents) {
     const target = runtimeMarkerPath(model.stateRoot, runtimeId);
     const content = markerFor(
@@ -771,6 +1287,7 @@ function planActions(
       options.os,
       target,
     );
+    const previousActiveRoot = previousManagedPayloadRoot(model);
     actions.push({
       id: `runtime:${runtimeId}:native`,
       kind: "register",
@@ -782,6 +1299,7 @@ function planActions(
         operation: "register-runtime",
         ownershipKind: "registration",
         ownershipScope: "managed",
+        ...(previousActiveRoot === null ? {} : { previousActiveRoot }),
         receiptPath: model.receiptPath,
         runtimeId,
       },
@@ -789,6 +1307,35 @@ function planActions(
       required: true,
       target,
     });
+  }
+  if (model.clean && model.currentReceipt !== null) {
+    const replacementTargets = new Set(actions.map(({ target }) => resolve(target)));
+    for (const ownership of model.currentReceipt.ownership) {
+      if (
+        ownership.scope !== "managed"
+        || !existsSync(ownership.target)
+        || replacementTargets.has(resolve(ownership.target))
+        || (
+          ownership.repairSource !== undefined
+          && resolve(ownership.repairSource) === resolve(ownership.target)
+        )
+      ) {
+        continue;
+      }
+      actions.push({
+        id: `clean:${ownership.id}`,
+        kind: "remove",
+        payload: {
+          contentDigest: ownership.digest,
+          operation: "remove-owned",
+          ownershipKind: ownership.kind,
+          ownershipScope: "managed",
+        },
+        preimage: observeManagedPath(ownership.target),
+        required: true,
+        target: ownership.target,
+      });
+    }
   }
   return actions;
 }
@@ -818,6 +1365,8 @@ function observedState(
       }),
     ),
     actions: actions.map(({ id, preimage }) => ({ id, preimage })),
+    cleanInstall: model.clean,
+    priorReceiptPlanDigest: model.currentReceipt?.planDigest ?? null,
   };
 }
 
@@ -879,7 +1428,7 @@ function buildEnvironmentPreview(
   const model = buildModel(selection, normalized);
   const checks = preflights(model);
   const blockers = blockingIds(checks);
-  const actions = planActions(model, normalized);
+  const actions = blockers.length === 0 ? planActions(model, normalized) : [];
   const plan = blockers.length === 0
     ? createApplyPlan({
         actions,
@@ -887,6 +1436,15 @@ function buildEnvironmentPreview(
         desiredState: {
           profileId: model.profile.id,
           selectedAgents: model.selectedAgents,
+          ...(model.desired.instance === undefined
+            ? {}
+            : {
+                capabilitySet: model.desired.capabilitySet,
+                instance: model.desired.instance,
+                selectedCapabilities: model.desired.selectedCapabilities,
+                selectedPackages: model.desired.selectedPackages,
+                toolRoutes: model.desired.toolRoutes,
+              }),
         },
         observedState: observedState(model, actions, normalized.env),
         platform: {
@@ -918,6 +1476,7 @@ function buildEnvironmentPreview(
       schemaVersion: "2.0.0",
       selectedAgents: model.selectedAgents,
       stateRoot: model.stateRoot,
+      instanceId: model.desired.instance?.id ?? null,
     },
   };
 }
@@ -1082,6 +1641,88 @@ async function executeAction(
         === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "acquire-claude-official-marketplace") {
+    const snapshot = model.officialMarketplaceSnapshot;
+    if (snapshot === null || action.target !== snapshot.root) {
+      throw new Error(`${action.id}: Claude marketplace snapshot changed`);
+    }
+    const existing = inspectOfficialMarketplaceSnapshot(
+      model.officialMarketplaceLock,
+      model.stateRoot,
+    );
+    if (existing.state !== "ready") {
+      const externalSource = action.payload?.externalSource;
+      if (typeof externalSource === "string") {
+        if (
+          model.officialMarketplaceExternalSource === null
+          || resolve(externalSource)
+            !== resolve(model.officialMarketplaceExternalSource)
+        ) {
+          throw new Error(
+            "external Claude marketplace source changed after preview",
+          );
+        }
+        materializeOfficialMarketplaceSnapshotFromDirectory(
+          snapshot,
+          model.officialMarketplaceLock,
+          externalSource,
+        );
+      } else {
+        const plannedGit = payloadString(action, "gitPath");
+        const currentGit = findTrustedExecutable("git", {
+          cwd: options.cwd,
+          env: options.env,
+          platform: options.os,
+        });
+        if (
+          currentGit === null
+          || resolve(currentGit) !== resolve(plannedGit)
+        ) {
+          throw new Error("trusted Git changed after Claude marketplace preview");
+        }
+        materializeOfficialMarketplaceSnapshot(
+          snapshot,
+          model.officialMarketplaceLock,
+          createOfficialMarketplaceGitOperations(
+            currentGit,
+            (command, args, env) =>
+              runCommand(command, args, { ...options, env }),
+            options.env,
+          ),
+        );
+      }
+    }
+    return {
+      verified:
+        inspectOfficialMarketplaceSnapshot(
+          model.officialMarketplaceLock,
+          model.stateRoot,
+        ).state === "ready",
+    };
+  }
+  if (operation === "materialize-claude-official-adapter") {
+    const snapshot = model.officialMarketplaceSnapshot;
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      snapshot === null
+      || adapter === null
+      || action.target !== adapter.root
+    ) {
+      throw new Error(`${action.id}: Claude marketplace adapter changed`);
+    }
+    materializeOfficialMarketplaceRuntimeAdapter(
+      adapter,
+      snapshot,
+      model.officialMarketplaceLock,
+    );
+    return {
+      verified:
+        inspectOfficialMarketplaceRuntimeAdapter(
+          model.officialMarketplaceLock,
+          model.stateRoot,
+        ).state === "ready",
+    };
+  }
   if (operation === "acquire-agent") {
     await acquireAgent(action, model, options);
     return {
@@ -1099,10 +1740,52 @@ async function executeAction(
       verified: sha256File(action.target) === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "remove-owned") {
+    if (!isPathStrictlyWithin(model.stateRoot, action.target)) {
+      throw new Error(`${action.id}: clean target escapes the selected instance root`);
+    }
+    if (existsSync(action.target)) {
+      const kind = payloadString(action, "ownershipKind");
+      const exact = kind === "directory"
+        ? hashManagedDirectory(action.target)
+          === payloadString(action, "contentDigest")
+        : sha256File(action.target) === payloadString(action, "contentDigest");
+      if (!exact) throw new Error(`${action.id}: managed clean target drifted`);
+      rmSync(action.target, {
+        force: false,
+        recursive: kind === "directory",
+      });
+    }
+    return { verified: !existsSync(action.target) };
+  }
+  if (operation === "register-claude-official-marketplace") {
+    const inspection = inspectOfficialMarketplaceRuntimeAdapter(
+      model.officialMarketplaceLock,
+      model.stateRoot,
+    );
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      inspection.state !== "ready"
+      || adapter === null
+      || adapter.name !== payloadString(action, "marketplaceName")
+      || adapter.root !== payloadString(action, "marketplaceRoot")
+    ) {
+      throw new Error("verified Claude runtime marketplace became unavailable");
+    }
+    registerClaudeOfficialMarketplace(
+      runtimeExecutable("claude-code", model, options),
+      { name: adapter.name, root: adapter.root },
+      (command, args) => runCommand(command, args, options),
+    );
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified: sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
   if (operation === "register-claude-official") {
-    const currentMarketplace = inspectOfficialClaudeMarketplace(
-      loadCapabilityProvenance(options.repositoryRoot).official,
-      options.env,
+    const currentMarketplace = inspectOfficialMarketplaceRuntimeAdapter(
+      model.officialMarketplaceLock,
+      model.stateRoot,
     );
     if (currentMarketplace.state !== "ready") {
       throw new Error("verified Claude official marketplace became unavailable");
@@ -1126,12 +1809,40 @@ async function executeAction(
       verified: sha256File(action.target) === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "register-opencode-skill") {
+    const capabilityId = payloadString(action, "capabilityId");
+    const [registration] = planOpenCodeSkillRegistrations(
+      model.managedPayload.activeRoot,
+      [capabilityId],
+      options.env,
+      options.os,
+    );
+    if (
+      registration === undefined
+      || registration.target !== payloadString(action, "observedTarget")
+      || registration.digest !== payloadString(action, "skillDigest")
+    ) {
+      throw new Error(`${action.id}: OpenCode skill identity changed after preview`);
+    }
+    registerOpenCodeSkills([registration]);
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified:
+        openCodeSkillsReady([registration])
+        && sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
   if (operation === "register-runtime") {
     const rawId = payloadString(action, "runtimeId");
     if (!isAgentId(rawId)) throw new Error(`unsupported runtime action: ${rawId}`);
     const executable = runtimeExecutable(rawId, model, options);
     const registration = {
       activeRoot: model.managedPayload.activeRoot,
+      ...(action.payload?.previousActiveRoot === undefined
+        ? {}
+        : {
+            previousActiveRoot: payloadString(action, "previousActiveRoot"),
+          }),
       receiptPath: model.receiptPath,
     };
     const nativeRun = (command: string, args: readonly string[]) =>
@@ -1154,10 +1865,926 @@ async function executeAction(
   throw new Error(`unsupported environment action: ${operation}`);
 }
 
+type EnvironmentRollbackSnapshot =
+  | {
+      readonly existed: false;
+      readonly expectedKind: "directory" | "file";
+      readonly target: string;
+    }
+  | {
+      readonly backup: string;
+      readonly digest: string;
+      readonly existed: true;
+      readonly kind: "directory" | "file";
+      readonly target: string;
+    };
+
+type EnvironmentNativeRecovery =
+  | {
+      readonly executablePath: string;
+      readonly kind: "claude-marketplace-absent";
+      readonly marketplaceName: string;
+      readonly marketplaceRoot: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "claude-runtime-absent";
+      readonly receiptPath: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "claude-runtime-previous";
+      readonly previousActiveRoot: string;
+      readonly receiptPath: string;
+    }
+  | {
+      readonly capabilityId: string;
+      readonly executablePath: string;
+      readonly kind: "claude-plugin-absent";
+      readonly selector: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "codex-runtime-absent";
+      readonly receiptPath: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "codex-runtime-previous";
+      readonly previousActiveRoot: string;
+      readonly receiptPath: string;
+    };
+
+interface EnvironmentRecoveryPayload {
+  readonly backupRoot: string;
+  readonly native: EnvironmentNativeRecovery | null;
+  readonly operation: string;
+  readonly schemaVersion: "2.0.0";
+  readonly snapshots: readonly EnvironmentRollbackSnapshot[];
+}
+
+function recoveryKeysMatch(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+function validatedNativeRecovery(
+  value: unknown,
+  actionId: string,
+): EnvironmentNativeRecovery | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "object"
+    || Array.isArray(value)
+    || value === null
+    || typeof (value as Record<string, unknown>).kind !== "string"
+  ) {
+    throw new Error(`invalid native recovery record: ${actionId}`);
+  }
+  const native = value as Record<string, unknown>;
+  const kind = native.kind;
+  const keySets: Readonly<Record<string, readonly string[]>> = {
+    "claude-marketplace-absent": [
+      "executablePath",
+      "kind",
+      "marketplaceName",
+      "marketplaceRoot",
+    ],
+    "claude-plugin-absent": [
+      "capabilityId",
+      "executablePath",
+      "kind",
+      "selector",
+    ],
+    "claude-runtime-absent": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "receiptPath",
+    ],
+    "claude-runtime-previous": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "previousActiveRoot",
+      "receiptPath",
+    ],
+    "codex-runtime-absent": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "receiptPath",
+    ],
+    "codex-runtime-previous": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "previousActiveRoot",
+      "receiptPath",
+    ],
+  };
+  const expectedKeys = keySets[String(kind)];
+  if (
+    expectedKeys === undefined
+    || !recoveryKeysMatch(native, expectedKeys)
+    || expectedKeys.some(
+      (key) =>
+        key !== "kind"
+        && (
+          typeof native[key] !== "string"
+          || String(native[key]).length === 0
+        ),
+    )
+    || expectedKeys.some(
+      (key) =>
+        [
+          "activeRoot",
+          "executablePath",
+          "marketplaceRoot",
+          "previousActiveRoot",
+          "receiptPath",
+        ].includes(key)
+        && !isAbsolute(String(native[key])),
+    )
+  ) {
+    throw new Error(`invalid native recovery record: ${actionId}`);
+  }
+  return native as unknown as EnvironmentNativeRecovery;
+}
+
+function snapshotDigest(
+  target: string,
+  kind: "directory" | "file",
+): string {
+  return kind === "directory"
+    ? hashManagedDirectory(target)
+    : sha256File(target);
+}
+
+function recoveryPayload(
+  recovery: ApplyRecoveryRecord,
+): EnvironmentRecoveryPayload {
+  const value = recovery.payload;
+  if (
+    recovery.kind !== "environment-action-v1"
+    || !recoveryKeysMatch(
+      value as Record<string, unknown>,
+      ["backupRoot", "native", "operation", "schemaVersion", "snapshots"],
+    )
+    || value.schemaVersion !== "2.0.0"
+    || typeof value.backupRoot !== "string"
+    || !isAbsolute(value.backupRoot)
+    || typeof value.operation !== "string"
+    || ![
+      "acquire-agent",
+      "acquire-claude-official-marketplace",
+      "install-package",
+      "materialize-claude-official-adapter",
+      "materialize-runtime-package",
+      "register-claude-official",
+      "register-claude-official-marketplace",
+      "register-opencode-skill",
+      "register-runtime",
+      "remove-owned",
+    ].includes(value.operation)
+    || !Array.isArray(value.snapshots)
+    || value.snapshots.length < 1
+    || value.snapshots.length > 2
+  ) {
+    throw new Error(`invalid environment recovery record: ${recovery.actionId}`);
+  }
+  const native = validatedNativeRecovery(value.native, recovery.actionId);
+  if (native !== null) {
+    const expectedOperation =
+      native.kind === "claude-marketplace-absent"
+        ? "register-claude-official-marketplace"
+        : native.kind === "claude-plugin-absent"
+          ? "register-claude-official"
+          : "register-runtime";
+    if (value.operation !== expectedOperation) {
+      throw new Error(`native recovery operation changed: ${recovery.actionId}`);
+    }
+  }
+  const snapshots = value.snapshots as readonly unknown[];
+  for (const value of snapshots) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error(`invalid recovery snapshot: ${recovery.actionId}`);
+    }
+    const snapshot = value as Record<string, unknown>;
+    if (
+      !recoveryKeysMatch(
+        snapshot,
+        snapshot.existed === true
+          ? ["backup", "digest", "existed", "kind", "target"]
+          : ["existed", "expectedKind", "target"],
+      )
+      || typeof snapshot.target !== "string"
+      || !isAbsolute(snapshot.target)
+      || typeof snapshot.existed !== "boolean"
+      || (
+        snapshot.existed
+        && (
+          typeof snapshot.backup !== "string"
+          || !isAbsolute(snapshot.backup)
+          || typeof snapshot.digest !== "string"
+          || !/^[0-9a-f]{64}$/u.test(snapshot.digest)
+          || !["directory", "file"].includes(String(snapshot.kind))
+        )
+      )
+      || (
+        !snapshot.existed
+        && !["directory", "file"].includes(String(snapshot.expectedKind))
+      )
+    ) {
+      throw new Error(`invalid recovery snapshot: ${recovery.actionId}`);
+    }
+  }
+  if (
+    new Set(
+      snapshots.map((snapshot) =>
+        resolve(String((snapshot as Record<string, unknown>).target))
+      ),
+    ).size !== snapshots.length
+  ) {
+    throw new Error(`duplicate recovery snapshot: ${recovery.actionId}`);
+  }
+  return {
+    backupRoot: value.backupRoot,
+    native,
+    operation: value.operation,
+    schemaVersion: "2.0.0",
+    snapshots: snapshots as readonly EnvironmentRollbackSnapshot[],
+  };
+}
+
+function recoveryTargetAllowed(
+  target: string,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): boolean {
+  const resolvedTarget = resolve(target);
+  if (
+    resolvedTarget === resolve(model.stateRoot)
+    || isPathStrictlyWithin(model.stateRoot, resolvedTarget)
+  ) {
+    return true;
+  }
+  const allowed = new Set(
+    model.openCodeSkills.map(({ target: path }) => resolve(path)),
+  );
+  allowed.add(resolve(openCodeConfigPath(options.env, options.os)));
+  for (const ownership of model.currentReceipt?.ownership ?? []) {
+    if (ownership.scope === "managed") {
+      allowed.add(resolve(ownership.target));
+    }
+  }
+  return allowed.has(resolvedTarget);
+}
+
+function validateRecoverySnapshots(
+  payload: EnvironmentRecoveryPayload,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): { readonly backupRoot: string; readonly backupsExist: boolean } {
+  const rollbackRoot = join(model.stateRoot, "journal", "rollback");
+  const backupRoot = assertSafeManagedRootPath(
+    payload.backupRoot,
+    "rollback backup root",
+  );
+  if (!isPathStrictlyWithin(rollbackRoot, backupRoot)) {
+    throw new Error("rollback backup root escapes managed state");
+  }
+  for (const snapshot of payload.snapshots) {
+    if (!recoveryTargetAllowed(snapshot.target, model, options)) {
+      throw new Error(`rollback target is outside the allowed roots: ${snapshot.target}`);
+    }
+  }
+  if (!existsSync(backupRoot)) {
+    return { backupRoot, backupsExist: false };
+  }
+  const rootStat = lstatSync(backupRoot);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error("rollback backup root is not a real directory");
+  }
+  for (const snapshot of payload.snapshots) {
+    if (!snapshot.existed) continue;
+    if (!isPathStrictlyWithin(backupRoot, snapshot.backup)) {
+      throw new Error(`rollback backup escapes its action root: ${snapshot.backup}`);
+    }
+    const stat = lstatSync(snapshot.backup);
+    if (
+      stat.isSymbolicLink()
+      || (snapshot.kind === "directory") !== stat.isDirectory()
+      || snapshotDigest(snapshot.backup, snapshot.kind) !== snapshot.digest
+    ) {
+      throw new Error(`rollback backup identity changed: ${snapshot.backup}`);
+    }
+  }
+  return { backupRoot, backupsExist: true };
+}
+
+function assertRecoveryAlreadyRestored(
+  payload: EnvironmentRecoveryPayload,
+): void {
+  for (const snapshot of payload.snapshots) {
+    if (!snapshot.existed) {
+      if (existsSync(snapshot.target)) {
+        throw new Error(
+          `rollback backup is missing before target removal: ${snapshot.target}`,
+        );
+      }
+      continue;
+    }
+    if (!existsSync(snapshot.target)) {
+      throw new Error(
+        `rollback backup and original target are both missing: ${snapshot.target}`,
+      );
+    }
+    const stat = lstatSync(snapshot.target);
+    if (
+      stat.isSymbolicLink()
+      || (snapshot.kind === "directory") !== stat.isDirectory()
+      || snapshotDigest(snapshot.target, snapshot.kind) !== snapshot.digest
+    ) {
+      throw new Error(
+        `rollback backup is missing and target is not restored: ${snapshot.target}`,
+      );
+    }
+  }
+}
+
+function rollbackNativeRegistration(
+  native: EnvironmentNativeRecovery | null,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  if (native === null) return;
+  if (
+    native.kind === "codex-runtime-absent"
+    || native.kind === "codex-runtime-previous"
+  ) {
+    const executable = runtimeExecutable("codex", model, options);
+    if (resolve(executable) !== resolve(native.executablePath)) {
+      throw new Error("Codex recovery executable changed");
+    }
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    if (
+      resolve(native.activeRoot) !== resolve(model.managedPayload.activeRoot)
+      || resolve(native.receiptPath) !== resolve(model.receiptPath)
+    ) {
+      throw new Error("Codex runtime recovery identity changed");
+    }
+    if (native.kind === "codex-runtime-previous") {
+      const expectedPrevious = previousManagedPayloadRoot(model);
+      if (
+        expectedPrevious === null
+        || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
+      ) {
+        throw new Error("Codex prior runtime recovery identity changed");
+      }
+      registerCodexRuntime(
+        executable,
+        {
+          activeRoot: native.previousActiveRoot,
+          previousActiveRoot: native.activeRoot,
+          receiptPath: native.receiptPath,
+        },
+        nativeRun,
+      );
+      return;
+    }
+    const state = inspectCodexManagedRuntimeRegistration(
+      executable,
+      {
+        activeRoot: native.activeRoot,
+        receiptPath: native.receiptPath,
+      },
+      nativeRun,
+    );
+    if (state.marketplace === "collision" || state.plugin === "collision") {
+      throw new Error("Codex runtime recovery encountered a collision");
+    }
+    if (state.plugin === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "remove",
+        "oh-my-harness@oh-my-harness",
+        "--json",
+      ]);
+    }
+    if (state.marketplace === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "marketplace",
+        "remove",
+        "oh-my-harness",
+        "--json",
+      ]);
+    }
+    return;
+  }
+  const executable = runtimeExecutable("claude-code", model, options);
+  if (resolve(executable) !== resolve(native.executablePath)) {
+    throw new Error("Claude recovery executable changed");
+  }
+  const nativeRun = (command: string, args: readonly string[]) =>
+    runCommand(command, args, options);
+  if (native.kind === "claude-marketplace-absent") {
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      adapter === null
+      || adapter.name !== native.marketplaceName
+      || resolve(adapter.root) !== resolve(native.marketplaceRoot)
+    ) {
+      throw new Error("Claude marketplace recovery identity changed");
+    }
+    const state = inspectClaudeOfficialMarketplaceRegistration(
+      executable,
+      { name: native.marketplaceName, root: native.marketplaceRoot },
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error("Claude marketplace recovery encountered a collision");
+    }
+    if (state === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "marketplace",
+        "remove",
+        native.marketplaceName,
+      ]);
+    }
+    return;
+  }
+  if (native.kind === "claude-plugin-absent") {
+    const plugin = model.officialMarketplace.state === "ready"
+      ? model.officialMarketplace.plugins.find(
+          ({ capabilityId, selector }) =>
+            capabilityId === native.capabilityId
+            && selector === native.selector,
+        )
+      : undefined;
+    if (plugin === undefined) {
+      throw new Error("Claude plugin recovery identity changed");
+    }
+    const state = inspectClaudeOfficialPluginRegistration(
+      executable,
+      plugin,
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error("Claude plugin recovery encountered a collision");
+    }
+    if (state === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "uninstall",
+        native.selector,
+        "--scope",
+        "user",
+      ]);
+    }
+    return;
+  }
+  if (
+    resolve(native.activeRoot) !== resolve(model.managedPayload.activeRoot)
+    || resolve(native.receiptPath) !== resolve(model.receiptPath)
+  ) {
+    throw new Error("Claude runtime recovery identity changed");
+  }
+  if (native.kind === "claude-runtime-previous") {
+    const expectedPrevious = previousManagedPayloadRoot(model);
+    if (
+      expectedPrevious === null
+      || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
+    ) {
+      throw new Error("Claude prior runtime recovery identity changed");
+    }
+    if (
+      claudeRegistrationReady(
+        executable,
+        {
+          activeRoot: native.previousActiveRoot,
+          receiptPath: native.receiptPath,
+        },
+        [],
+        nativeRun,
+      )
+    ) {
+      return;
+    }
+    registerClaudeRuntime(
+      executable,
+      {
+        activeRoot: native.previousActiveRoot,
+        previousActiveRoot: native.activeRoot,
+        receiptPath: native.receiptPath,
+      },
+      nativeRun,
+    );
+    return;
+  }
+  const state = inspectClaudeManagedRuntimeRegistration(
+    executable,
+    {
+      activeRoot: native.activeRoot,
+      receiptPath: native.receiptPath,
+    },
+    nativeRun,
+  );
+  if (state.plugin === "collision" || state.marketplace === "collision") {
+    throw new Error("Claude runtime recovery encountered a collision");
+  }
+  if (state.plugin === "ready") {
+    nativeRun(executable, [
+      "plugin",
+      "uninstall",
+      "oh-my-harness@oh-my-harness",
+      "--scope",
+      "user",
+    ]);
+  }
+  if (state.marketplace === "ready") {
+    nativeRun(executable, [
+      "plugin",
+      "marketplace",
+      "remove",
+      "oh-my-harness",
+    ]);
+  }
+}
+
+function recoverEnvironmentAction(
+  recovery: ApplyRecoveryRecord,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  const payload = recoveryPayload(recovery);
+  const validation = validateRecoverySnapshots(payload, model, options);
+  if (!validation.backupsExist) {
+    assertRecoveryAlreadyRestored(payload);
+    return;
+  }
+  const failures: unknown[] = [];
+  try {
+    rollbackNativeRegistration(payload.native, model, options);
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    for (const snapshot of [...payload.snapshots].reverse()) {
+      if (existsSync(snapshot.target)) {
+        const current = lstatSync(snapshot.target);
+        const expectedDirectory = snapshot.existed
+          ? snapshot.kind === "directory"
+          : snapshot.expectedKind === "directory";
+        if (
+          current.isSymbolicLink()
+          || current.isDirectory() !== expectedDirectory
+        ) {
+          throw new Error(`rollback target type changed: ${snapshot.target}`);
+        }
+        rmSync(snapshot.target, {
+          force: true,
+          recursive: current.isDirectory(),
+        });
+      }
+      if (snapshot.existed) {
+        cpSync(snapshot.backup, snapshot.target, {
+          errorOnExist: true,
+          force: false,
+          preserveTimestamps: true,
+          recursive: snapshot.kind === "directory",
+        });
+      }
+    }
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      failures.map((error) =>
+        error instanceof Error ? error.message : String(error)
+      ).join("; "),
+    );
+  }
+  rmSync(validation.backupRoot, { force: true, recursive: true });
+}
+
+function commitEnvironmentRecovery(
+  recovery: ApplyRecoveryRecord,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  const payload = recoveryPayload(recovery);
+  const validation = validateRecoverySnapshots(payload, model, options);
+  if (!validation.backupsExist) return;
+  rmSync(validation.backupRoot, { force: true, recursive: true });
+}
+
+function prepareActionRollback(
+  action: PlanAction,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): {
+  readonly commit: () => Promise<void>;
+  readonly recovery: ApplyRecoveryRecord;
+  readonly rollback: () => Promise<void>;
+} | undefined {
+  const operation = payloadString(action, "operation");
+  if (["verify-file", "verify-agent"].includes(operation)) return undefined;
+  let native: EnvironmentNativeRecovery | null = null;
+  if (operation === "register-claude-official-marketplace") {
+    const adapter = model.officialMarketplaceAdapter;
+    if (adapter === null) {
+      throw new Error("Claude official marketplace adapter is unavailable");
+    }
+    const executable = runtimeExecutable("claude-code", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const state = inspectClaudeOfficialMarketplaceRegistration(
+      executable,
+      { name: adapter.name, root: adapter.root },
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error(
+        `Claude marketplace ${adapter.name} points to another source`,
+      );
+    }
+    if (state === "missing") {
+      native = {
+        executablePath: executable,
+        kind: "claude-marketplace-absent",
+        marketplaceName: adapter.name,
+        marketplaceRoot: adapter.root,
+      };
+    }
+  } else if (
+    operation === "register-runtime"
+    && action.payload?.runtimeId === "claude-code"
+  ) {
+    const executable = runtimeExecutable("claude-code", model, options);
+    const previousActiveRoot = typeof action.payload.previousActiveRoot === "string"
+      ? payloadString(action, "previousActiveRoot")
+      : null;
+    if (previousActiveRoot !== null) {
+      const nativeRun = (command: string, args: readonly string[]) =>
+        runCommand(command, args, options);
+      if (
+        !claudeRegistrationReady(
+          executable,
+          {
+            activeRoot: previousActiveRoot,
+            receiptPath: model.receiptPath,
+          },
+          [],
+          nativeRun,
+        )
+      ) {
+        throw new Error(
+          "Claude managed registration no longer matches the prior receipt",
+        );
+      }
+      native = {
+        activeRoot: model.managedPayload.activeRoot,
+        executablePath: executable,
+        kind: "claude-runtime-previous",
+        previousActiveRoot,
+        receiptPath: model.receiptPath,
+      };
+    } else {
+      const nativeRun = (command: string, args: readonly string[]) =>
+        runCommand(command, args, options);
+      const state = inspectClaudeManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace === "collision") {
+        throw new Error(
+          "Claude marketplace oh-my-harness points to another source",
+        );
+      }
+      if (state.plugin === "collision") {
+        throw new Error(
+          "oh-my-harness@oh-my-harness collides with an existing user-owned Claude plugin",
+        );
+      }
+      if (state.marketplace !== state.plugin) {
+        throw new Error(
+          "Claude managed runtime registration is partial and cannot be adopted",
+        );
+      }
+      if (state.marketplace === "missing") {
+        native = {
+          activeRoot: model.managedPayload.activeRoot,
+          executablePath: executable,
+          kind: "claude-runtime-absent",
+          receiptPath: model.receiptPath,
+        };
+      }
+    }
+  } else if (
+    operation === "register-runtime"
+    && action.payload?.runtimeId === "codex"
+  ) {
+    const executable = runtimeExecutable("codex", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const previousActiveRoot = typeof action.payload.previousActiveRoot === "string"
+      ? payloadString(action, "previousActiveRoot")
+      : null;
+    if (previousActiveRoot !== null) {
+      const state = inspectCodexManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: previousActiveRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace !== "ready" || state.plugin !== "ready") {
+        throw new Error(
+          "Codex managed registration no longer matches the prior receipt",
+        );
+      }
+      native = {
+        activeRoot: model.managedPayload.activeRoot,
+        executablePath: executable,
+        kind: "codex-runtime-previous",
+        previousActiveRoot,
+        receiptPath: model.receiptPath,
+      };
+    } else {
+      const state = inspectCodexManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace === "collision") {
+        throw new Error(
+          "Codex marketplace oh-my-harness points to another root",
+        );
+      }
+      if (state.plugin === "collision") {
+        throw new Error(
+          "oh-my-harness@oh-my-harness collides with an existing Codex plugin registration",
+        );
+      }
+      if (state.marketplace !== state.plugin) {
+        throw new Error(
+          "Codex managed runtime registration is partial and cannot be adopted",
+        );
+      }
+      if (state.marketplace === "missing") {
+        native = {
+          activeRoot: model.managedPayload.activeRoot,
+          executablePath: executable,
+          kind: "codex-runtime-absent",
+          receiptPath: model.receiptPath,
+        };
+      }
+    }
+  } else if (operation === "register-claude-official") {
+    const plugin = model.officialMarketplace.state === "ready"
+      ? model.officialMarketplace.plugins.find(
+          ({ capabilityId, selector }) =>
+            capabilityId === payloadString(action, "capabilityId")
+            && selector === payloadString(action, "selector"),
+        )
+      : undefined;
+    if (plugin === undefined) {
+      throw new Error(`${action.id}: official plugin identity is unavailable`);
+    }
+    const executable = runtimeExecutable("claude-code", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const state = inspectClaudeOfficialPluginRegistration(
+      executable,
+      plugin,
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error(
+        `${plugin.selector} collides with an existing user-owned Claude plugin`,
+      );
+    }
+    if (state === "missing") {
+      native = {
+        capabilityId: plugin.capabilityId,
+        executablePath: executable,
+        kind: "claude-plugin-absent",
+        selector: plugin.selector,
+      };
+    }
+  }
+  const targets = [action.target];
+  const observedTarget = action.payload?.observedTarget;
+  if (
+    typeof observedTarget === "string"
+    && !targets.some((target) => resolve(target) === resolve(observedTarget))
+  ) {
+    targets.push(observedTarget);
+  }
+  const backupRoot = assertSafeManagedRootPath(
+    join(
+      model.stateRoot,
+      "journal",
+      "rollback",
+      `${action.id.replaceAll(":", "-")}-${randomBytes(8).toString("hex")}`,
+    ),
+    "rollback backup root",
+  );
+  mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
+  let snapshots: EnvironmentRollbackSnapshot[];
+  try {
+    snapshots = targets.map((target, index) => {
+      if (!existsSync(target)) {
+        const isObservedTarget =
+          typeof observedTarget === "string"
+          && resolve(target) === resolve(observedTarget);
+        return {
+          existed: false as const,
+          expectedKind:
+              (
+                isObservedTarget
+                && action.payload?.observedTargetKind === "directory"
+              )
+              || action.payload?.ownershipKind === "directory"
+            ? "directory" as const
+            : "file" as const,
+          target,
+        };
+      }
+      const stat = lstatSync(target);
+      if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+        throw new Error(`rollback target is not a regular file or directory: ${target}`);
+      }
+      const kind = stat.isDirectory() ? "directory" as const : "file" as const;
+      const backup = join(backupRoot, String(index));
+      cpSync(target, backup, {
+        errorOnExist: true,
+        force: false,
+        preserveTimestamps: true,
+        recursive: stat.isDirectory(),
+      });
+      return {
+        backup,
+        digest: snapshotDigest(backup, kind),
+        existed: true as const,
+        kind,
+        target,
+      };
+    });
+  } catch (error) {
+    rmSync(backupRoot, { force: true, recursive: true });
+    throw error;
+  }
+  const recovery: ApplyRecoveryRecord = {
+    actionId: action.id,
+    kind: "environment-action-v1",
+    payload: {
+      backupRoot,
+      native,
+      operation,
+      schemaVersion: "2.0.0",
+      snapshots,
+    },
+  };
+  return {
+    commit: async () => {
+      commitEnvironmentRecovery(recovery, model, options);
+    },
+    recovery,
+    rollback: async () => {
+      recoverEnvironmentAction(recovery, model, options);
+    },
+  };
+}
+
 function completedActionReady(action: PlanAction): boolean {
+  if (action.payload?.operation === "remove-owned") {
+    return !existsSync(action.target);
+  }
   if (
     action.payload?.operation === "register-runtime"
+    || action.payload?.operation === "register-claude-official-marketplace"
     || action.payload?.operation === "register-claude-official"
+    || action.payload?.operation === "register-opencode-skill"
   ) {
     return false;
   }
@@ -1185,8 +2812,26 @@ export async function applyEnvironment(
     throw new StalePreviewError("environment preview digest is stale");
   }
   const result = await applyExactPlan(preview.plan, expectedDigest, {
-    state: new FileStateStore(model.stateRoot),
+    state: new FileStateStore(model.stateRoot, {
+      validateReceipt(value) {
+        validateContractDocument(
+          "managed-state-receipt",
+          value,
+          normalized.repositoryRoot,
+        );
+        return value as ManagedStateReceipt;
+      },
+    }),
+    commitRecovery: async (recovery) =>
+      commitEnvironmentRecovery(recovery, model, normalized),
     observe: async (action) => actionPreimage(action),
+    prepare: async (action) => prepareActionRollback(
+      action,
+      model,
+      normalized,
+    ),
+    recover: async (recovery) =>
+      recoverEnvironmentAction(recovery, model, normalized),
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
@@ -1210,12 +2855,42 @@ function readReceipt(
   return value as ManagedStateReceipt;
 }
 
+function selectionFromReceipt(
+  receipt: ManagedStateReceipt,
+  stateRoot: string,
+): EnvironmentSelection {
+  return {
+    ...(receipt.desiredState.capabilitySet === undefined
+      ? {}
+      : { capabilitySet: receipt.desiredState.capabilitySet }),
+    profileId: receipt.desiredState.profileId,
+    ...(receipt.desiredState.selectedCapabilities === undefined
+      ? {}
+      : { selectedCapabilities: receipt.desiredState.selectedCapabilities }),
+    selectedAgents: receipt.desiredState.selectedAgents,
+    ...(receipt.desiredState.selectedPackages === undefined
+      ? {}
+      : { selectedPackages: receipt.desiredState.selectedPackages }),
+    stateRoot,
+    ...(receipt.desiredState.instance === undefined
+      ? {}
+      : { target: receipt.desiredState.instance.id }),
+    ...(receipt.desiredState.toolRoutes === undefined
+      ? {}
+      : { toolRoutes: receipt.desiredState.toolRoutes }),
+  };
+}
+
 export function inspectEnvironment(
-  selection: Pick<EnvironmentSelection, "stateRoot">,
+  selection: Pick<EnvironmentSelection, "stateRoot" | "target">,
   options: EnvironmentOrchestratorOptions,
 ): EnvironmentStatus {
   const normalized = normalizedOptions(options);
-  const stateRoot = resolveStateRoot(selection.stateRoot, normalized.env);
+  const stateRoot = resolveStateRoot(
+    selection.stateRoot,
+    normalized.env,
+    selection.target,
+  );
   const receiptPath = join(stateRoot, "receipts", "environment.json");
   const catalog = loadCatalogBundle(normalized.repositoryRoot);
   let receipt: ManagedStateReceipt | null = null;
@@ -1224,6 +2899,14 @@ export function inspectEnvironment(
     receipt = readReceipt(receiptPath, normalized.repositoryRoot);
   } catch (error) {
     receiptFailure = error instanceof Error ? error.message : String(error);
+  }
+  if (
+    receipt !== null
+    && selection.target !== undefined
+    && receipt.desiredState.instance?.id !== selection.target
+  ) {
+    receiptFailure = "receipt environment instance does not match the selected target";
+    receipt = null;
   }
   if (receipt === null) {
     return {
@@ -1239,23 +2922,25 @@ export function inspectEnvironment(
       profileId: null,
       readiness: receiptFailure === null ? "unconfigured" : "unverifiable",
       receiptPath,
-      remediation: ["omh setup --profile personal --agents claude-code"],
+      remediation: [
+        `omh setup${
+          selection.target === undefined ? "" : ` --target ${selection.target}`
+        } --profile personal --agents claude-code`,
+      ],
       schemaVersion: "2.0.0",
       selectedAgents: [],
       stateRoot,
       v2ParityReady: false,
+      instanceId: selection.target ?? null,
+      planDigest: null,
+      receiptFingerprint: null,
     };
   }
-  const preview = previewEnvironment({
-    profileId: receipt.desiredState.profileId,
-    selectedAgents: receipt.desiredState.selectedAgents,
-    stateRoot,
-  }, normalized);
-  const model = buildModel({
-    profileId: receipt.desiredState.profileId,
-    selectedAgents: receipt.desiredState.selectedAgents,
-    stateRoot,
-  }, normalized);
+  const receiptSelection = selectionFromReceipt(receipt, stateRoot);
+  const { model, preview } = buildEnvironmentPreview(
+    receiptSelection,
+    normalized,
+  );
   const runtimeReady = new Map(
     receipt.runtimeReadiness.map(({ agentId, state }) => [agentId, state]),
   );
@@ -1306,9 +2991,63 @@ export function inspectEnvironment(
         ]),
       )
     : new Map<string, VerifiedOfficialPlugin>();
+  let officialMarketplaceRegistrationReady =
+    !model.selectedAgents.includes("claude-code");
+  if (model.officialMarketplaceAdapter !== null) {
+    const actionId = "runtime:claude-code:official-marketplace";
+    const target = capabilityMarkerPath(
+      stateRoot,
+      "claude-code",
+      "official-marketplace",
+    );
+    const content = markerFor(
+      actionId,
+      catalog.revision,
+      target,
+      model.officialMarketplaceAdapter.digest,
+    );
+    const ownership = receipt.ownership.filter(
+      ({ id, kind }) => id === actionId && kind === "registration",
+    );
+    officialMarketplaceRegistrationReady =
+      ownership.length === 1
+      && ownership[0]?.target === target
+      && ownership[0]?.digest === sha256Bytes(content)
+      && existsSync(target)
+      && sha256File(target) === sha256Bytes(content);
+  }
   const capabilities = preview.capabilities.map((entry) => {
     if (entry.state !== "ready") return entry;
-    let registered = payloadReady && nativeReadyById.get(entry.runtimeId) === true;
+    let registered =
+      payloadReady
+      && nativeReadyById.get(entry.runtimeId) === true
+      && (
+        entry.runtimeId !== "claude-code"
+        || officialMarketplaceRegistrationReady
+      );
+    const openCodeSkill = entry.runtimeId === "opencode"
+      ? model.openCodeSkills.find(({ id }) => id === entry.id)
+      : undefined;
+    if (openCodeSkill !== undefined) {
+      const actionId = `capability:opencode:${entry.id}`;
+      const target = capabilityMarkerPath(stateRoot, "opencode", entry.id);
+      const content = markerFor(
+        actionId,
+        catalog.revision,
+        target,
+        openCodeSkill.digest,
+      );
+      const ownership = receipt.ownership.filter(
+        ({ id, kind }) => id === actionId && kind === "registration",
+      );
+      registered = registered
+        && ownership.length === 1
+        && ownership[0]?.target === target
+        && ownership[0]?.digest === sha256Bytes(content)
+        && existsSync(target)
+        && sha256File(target) === sha256Bytes(content)
+        && openCodeSkillsReady([openCodeSkill]);
+    }
     const official = entry.runtimeId === "claude-code"
       ? officialByCapability.get(entry.id)
       : undefined;
@@ -1413,6 +3152,9 @@ export function inspectEnvironment(
       && nativeReady
       && payloadReady
       && capabilities.every(({ state }) => state === "ready"),
+    instanceId: receipt.desiredState.instance?.id ?? null,
+    planDigest: receipt.planDigest,
+    receiptFingerprint: sha256Bytes(stableJson(receipt)),
   };
 }
 
@@ -1430,6 +3172,7 @@ function nativeDoctorIssues(
             options.env,
             options.os,
           )
+          || !openCodeSkillsReady(model.openCodeSkills)
         ) {
           issues.push("native:opencode:registration-drift");
         }
@@ -1446,16 +3189,33 @@ function nativeDoctorIssues(
         const expectedOfficialPlugins =
           model.officialMarketplace.state === "ready"
             ? model.officialMarketplace.plugins.filter(({ capabilityId }) =>
-                model.profile.capabilities.some((id) => id === capabilityId)
+                model.desired.selectedCapabilities?.some(
+                  (id) => id === capabilityId,
+                ) ?? model.profile.capabilities.some(
+                  (id) => id === capabilityId,
+                )
               )
             : [];
+        const officialMarketplace = model.officialMarketplaceAdapter === null
+          ? undefined
+          : {
+              name: model.officialMarketplaceAdapter.name,
+              root: model.officialMarketplaceAdapter.root,
+            };
         if (
           model.officialMarketplace.state !== "ready"
+          || officialMarketplace === undefined
+          || !claudeOfficialMarketplaceReady(
+            executable,
+            officialMarketplace,
+            nativeRun,
+          )
           || !claudeRegistrationReady(
             executable,
             registration,
             expectedOfficialPlugins,
             nativeRun,
+            officialMarketplace,
           )
         ) {
           issues.push("native:claude-code:registration-drift");
@@ -1473,7 +3233,7 @@ function nativeDoctorIssues(
 }
 
 export function diagnoseEnvironment(
-  selection: Pick<EnvironmentSelection, "stateRoot">,
+  selection: Pick<EnvironmentSelection, "stateRoot" | "target">,
   options: EnvironmentOrchestratorOptions,
 ): EnvironmentStatus {
   const status = inspectEnvironment(selection, options);
@@ -1484,11 +3244,12 @@ export function diagnoseEnvironment(
     return status;
   }
   const normalized = normalizedOptions(options);
-  const model = buildModel({
-    profileId: status.profileId,
-    selectedAgents: status.selectedAgents,
-    stateRoot: status.stateRoot,
-  }, normalized);
+  const receipt = readReceipt(status.receiptPath, normalized.repositoryRoot);
+  if (receipt === null) return status;
+  const model = buildModel(
+    selectionFromReceipt(receipt, status.stateRoot),
+    normalized,
+  );
   const issues = nativeDoctorIssues(model, normalized);
   if (issues.length === 0) return status;
   const blockers = [...new Set([...status.blockers, ...issues])];

@@ -5,14 +5,28 @@ import {
   PACKAGE_IDS,
   SUPPORTED_AGENT_IDS,
 } from "../domain/catalog.js";
+import {
+  CAPABILITY_SETS,
+  ENVIRONMENT_TARGET_IDS,
+  isCapabilitySet,
+  isEnvironmentTargetId,
+  targetRootMatches,
+  type CapabilitySet,
+  type EnvironmentInstanceId,
+} from "../domain/environment-instance.js";
 
 export interface CliSelectionOptions {
   readonly agents: string[];
   readonly apply: boolean;
+  readonly capabilitySet: CapabilitySet;
+  readonly clean: boolean;
   readonly digest: string | undefined;
+  readonly distribution: "Ubuntu" | undefined;
   readonly json: boolean;
   readonly profile: string;
   readonly root: string | undefined;
+  readonly target: EnvironmentInstanceId | undefined;
+  readonly toolRoute: "wsl-ubuntu" | undefined;
   readonly tools: string[];
 }
 
@@ -43,11 +57,13 @@ export type ParsedOmhArguments =
       readonly command: "status";
       readonly json: boolean;
       readonly root: string | undefined;
+      readonly target: EnvironmentInstanceId | "all" | undefined;
     }
   | {
       readonly command: "doctor";
       readonly json: boolean;
       readonly root: string | undefined;
+      readonly target: EnvironmentInstanceId | "all" | undefined;
     }
   | {
       readonly command: "startup";
@@ -179,6 +195,12 @@ function parseSelection(
   let json = false;
   let profile = "personal";
   let root: string | undefined;
+  let capabilitySet: CapabilitySet = "profile";
+  let capabilitySetExplicit = false;
+  let clean = false;
+  let distribution: "Ubuntu" | undefined;
+  let target: EnvironmentInstanceId | undefined;
+  let toolRoute: "wsl-ubuntu" | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--json") {
@@ -205,6 +227,45 @@ function parseSelection(
     if (flag === "--root") {
       root = absolute(valueAfter(argv, index, flag), "--root");
       index += 1;
+      continue;
+    }
+    if (flag === "--target") {
+      const value = valueAfter(argv, index, flag);
+      if (!isEnvironmentTargetId(value)) {
+        fail(`--target must be one of: ${ENVIRONMENT_TARGET_IDS.join(", ")}`);
+      }
+      if (value === "all") fail("--target all is read-only");
+      target = value;
+      index += 1;
+      continue;
+    }
+    if (flag === "--capability-set") {
+      const value = valueAfter(argv, index, flag);
+      if (!isCapabilitySet(value)) {
+        fail(`--capability-set must be one of: ${CAPABILITY_SETS.join(", ")}`);
+      }
+      capabilitySet = value;
+      capabilitySetExplicit = true;
+      index += 1;
+      continue;
+    }
+    if (flag === "--distribution") {
+      const value = valueAfter(argv, index, flag);
+      if (value !== "Ubuntu") fail("--distribution must be Ubuntu");
+      distribution = value;
+      index += 1;
+      continue;
+    }
+    if (flag === "--tool-route") {
+      const value = valueAfter(argv, index, flag);
+      if (value !== "wsl-ubuntu") fail("--tool-route must be wsl-ubuntu");
+      toolRoute = value;
+      index += 1;
+      continue;
+    }
+    if (flag === "--clean") {
+      if (!input.allowApply) fail("--clean is not valid for this command");
+      clean = true;
       continue;
     }
     if (flag === "--agents" || (flag === "--only" && input.allowAgents)) {
@@ -235,7 +296,87 @@ function parseSelection(
     fail("--apply requires the exact --digest printed by preview");
   }
   if (!apply && digest !== undefined) fail("--digest requires --apply");
-  return { agents, apply, digest, json, profile, root, tools };
+  if (target === "windows-native" && !capabilitySetExplicit) {
+    capabilitySet = "workflow-only";
+  }
+  if (distribution !== undefined && target !== "wsl-ubuntu") {
+    fail("--distribution is only valid for wsl-ubuntu");
+  }
+  if (target === "wsl-ubuntu" && distribution === undefined) {
+    distribution = "Ubuntu";
+  }
+  if (toolRoute !== undefined && target !== "windows-native") {
+    if (toolRoute === target) fail("an environment instance cannot route to itself");
+    fail("--tool-route is only valid for windows-native");
+  }
+  if (clean && target === undefined) fail("--clean requires --target");
+  if (target === undefined && capabilitySet !== "profile") {
+    fail("--capability-set requires --target");
+  }
+  if (
+    target !== undefined
+    && root !== undefined
+    && !targetRootMatches(target, root)
+  ) {
+    fail(`target root must end with ${target}`);
+  }
+  return {
+    agents,
+    apply,
+    capabilitySet,
+    clean,
+    digest,
+    distribution,
+    json,
+    profile,
+    root,
+    target,
+    toolRoute,
+    tools,
+  };
+}
+
+function parseReadOnlyTargetSelection(
+  argv: readonly string[],
+): {
+  readonly json: boolean;
+  readonly root: string | undefined;
+  readonly target: EnvironmentInstanceId | "all" | undefined;
+} {
+  let json = false;
+  let root: string | undefined;
+  let target: EnvironmentInstanceId | "all" | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index];
+    if (flag === "--json") {
+      json = true;
+      continue;
+    }
+    if (flag === "--root") {
+      root = absolute(valueAfter(argv, index, flag), "--root");
+      index += 1;
+      continue;
+    }
+    if (flag === "--target") {
+      const value = valueAfter(argv, index, flag);
+      if (!isEnvironmentTargetId(value)) {
+        fail(`--target must be one of: ${ENVIRONMENT_TARGET_IDS.join(", ")}`);
+      }
+      target = value;
+      index += 1;
+      continue;
+    }
+    fail(`unknown option: ${String(flag)}`);
+  }
+  if (
+    target !== undefined
+    && target !== "all"
+    && root !== undefined
+    && !targetRootMatches(target, root)
+  ) {
+    fail(`target root must end with ${target}`);
+  }
+  return { json, root, target };
 }
 
 function parseKeyValueOptions(
@@ -500,13 +641,12 @@ export function parseOmhArguments(
     if (argv.slice(1).includes("--apply")) {
       fail("--apply is not valid for this command");
     }
-    const parsed = parseKeyValueOptions(argv.slice(1), ["--root"]);
+    const parsed = parseReadOnlyTargetSelection(argv.slice(1));
     return {
       command,
       json: parsed.json,
-      root: parsed.values.has("--root")
-        ? absolute(requiredOption(parsed.values, "--root"), "--root")
-        : undefined,
+      root: parsed.root,
+      target: parsed.target,
     };
   }
   if (command === "profiles") return parseProfiles(argv.slice(1));

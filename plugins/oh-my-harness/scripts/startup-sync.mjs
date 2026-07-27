@@ -169,6 +169,12 @@ function minimalEnvironment(environment) {
   for (const [key, value] of Object.entries(environment)) {
     if (value !== undefined && MINIMAL_ENV_KEYS.has(key)) result[key] = value;
   }
+  if (process.platform === "win32") {
+    // Windows restores the parent PATH when it is omitted from a child
+    // environment block. An explicit empty value prevents ambient executables
+    // from becoming reachable by the receipt-bound reconciler.
+    result.PATH = "";
+  }
   return result;
 }
 

@@ -35,6 +35,7 @@ function packageRow(entry: PackageCatalogEntry): readonly string[] {
     entry.supportedPlatforms.join(", "),
     entry.version ?? "manager-provided",
     entry.versionPolicy,
+    [...new Set(entry.installationSources.map(({ sourceId }) => sourceId))].join(", "),
   ];
 }
 
@@ -70,6 +71,7 @@ export function renderPackageCatalogTable(catalog: CatalogBundle): string {
       "Supported OS",
       "Exact version",
       "Provenance policy",
+      "Reviewed source",
     ],
     catalog.packages.packages.map(packageRow),
   );

@@ -6,7 +6,7 @@ import {
   cliToolServiceIdsForPolicy,
   executeCliTool,
   formatCliToolResult,
-  listCliToolStatus,
+  listCliToolStatusForPolicy,
   loadToolPolicySnapshot,
   redactCliOutput,
   staleSessionToolPolicy,
@@ -168,7 +168,10 @@ async function callTool(id, params) {
     if (name === STATUS_TOOL.name) {
       const serviceIds = cliToolServiceIdsForPolicy(activePolicy);
       const services = activePolicy.mode === "ready"
-        ? listCliToolStatus({ serviceIds, workspace: args.cwd })
+        ? await listCliToolStatusForPolicy(activePolicy, {
+            serviceIds,
+            workspace: args.cwd,
+          })
         : [];
       result(id, {
         content: [{

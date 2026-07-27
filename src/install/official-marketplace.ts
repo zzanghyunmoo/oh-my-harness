@@ -14,6 +14,7 @@ import type {
   OfficialCapabilityCandidate,
   OfficialCapabilityLock,
 } from "./capabilities.js";
+import { hashManagedDirectory } from "./managed-payload.js";
 import { readBoundedRegularFile } from "../environment/filesystem.js";
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -25,6 +26,7 @@ export interface VerifiedOfficialPlugin {
   readonly pluginName: string;
   readonly selector: string;
   readonly pathTree: string;
+  readonly runtimeContentSha256: string;
   readonly version: string | null;
 }
 
@@ -163,43 +165,77 @@ function acceptedCandidates(
 export function inspectOfficialClaudeMarketplace(
   lock: OfficialCapabilityLock,
   env: NodeJS.ProcessEnv,
+  options: {
+    readonly contentSha256?: string;
+    readonly marketplaceName?: string;
+    readonly marketplaceSha256?: string;
+    readonly root?: string;
+    readonly verifyContentDigest?: boolean;
+    readonly verifyGitTrees?: boolean;
+  } = {},
 ): OfficialMarketplaceInspection {
   let root: string | null = null;
   try {
-    root = join(
-      configRoot(env),
-      "plugins",
-      "marketplaces",
-      "claude-plugins-official",
-    );
+    root = options.root === undefined
+      ? join(
+          configRoot(env),
+          "plugins",
+          "marketplaces",
+          "claude-plugins-official",
+        )
+      : resolve(options.root);
     const rootStat = lstatSync(root);
     if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
       throw new Error("official marketplace root must be a real directory");
     }
-    const commitPath = join(root, ".gcs-sha");
-    const commitStat = lstatSync(commitPath);
-    if (
-      commitStat.isSymbolicLink()
-      || !commitStat.isFile()
-      || commitStat.size > 256
-    ) {
-      throw new Error("official marketplace commit marker is unsafe");
-    }
-    const commit = readBoundedRegularFile(commitPath, 256)
-      .toString("utf8")
-      .trim();
-    if (commit !== lock.repository.commit) {
-      throw new Error("official marketplace commit does not match the reviewed lock");
+    if (options.verifyContentDigest === true) {
+      if (
+        hashManagedDirectory(root)
+        !== (options.contentSha256 ?? lock.repository.contentSha256)
+      ) {
+        throw new Error(
+          "official marketplace content digest does not match the reviewed lock",
+        );
+      }
+    } else if (options.root === undefined) {
+      const commitPath = join(root, ".gcs-sha");
+      const commitStat = lstatSync(commitPath);
+      if (
+        commitStat.isSymbolicLink()
+        || !commitStat.isFile()
+        || commitStat.size > 256
+      ) {
+        throw new Error("official marketplace commit marker is unsafe");
+      }
+      const observedCommit = readBoundedRegularFile(commitPath, 256)
+        .toString("utf8")
+        .trim();
+      if (observedCommit !== lock.repository.commit) {
+        throw new Error("official marketplace commit does not match the reviewed lock");
+      }
     }
     const manifestPath = join(root, lock.repository.marketplace.path);
-    if (sha256File(manifestPath) !== lock.repository.marketplace.sha256) {
+    if (
+      sha256File(manifestPath)
+      !== (options.marketplaceSha256 ?? lock.repository.marketplace.sha256)
+    ) {
       throw new Error("official marketplace manifest digest does not match the reviewed lock");
     }
-    const entries = pluginEntries(
-      JSON.parse(
+    const manifest = JSON.parse(
         readBoundedRegularFile(manifestPath, MAX_FILE_BYTES).toString("utf8"),
-      ) as unknown,
-    );
+      ) as unknown;
+    if (
+      options.marketplaceName !== undefined
+      && (
+        !manifest
+        || typeof manifest !== "object"
+        || Array.isArray(manifest)
+        || (manifest as Record<string, unknown>).name !== options.marketplaceName
+      )
+    ) {
+      throw new Error("official marketplace name does not match the runtime adapter");
+    }
+    const entries = pluginEntries(manifest);
     const verifiedRoot = root;
     const plugins = acceptedCandidates(lock).map((candidate) => {
       const entry = entries.find(({ name }) => name === candidate.pluginName);
@@ -216,7 +252,10 @@ export function inspectOfficialClaudeMarketplace(
         );
       }
       const path = join(verifiedRoot, candidate.path);
-      if (gitTreeSha1(path) !== candidate.pathTree) {
+      if (
+        options.verifyGitTrees !== false
+        && gitTreeSha1(path) !== candidate.pathTree
+      ) {
         throw new Error(
           `${candidate.capabilityId}: official plugin tree does not match the reviewed lock`,
         );
@@ -225,14 +264,18 @@ export function inspectOfficialClaudeMarketplace(
         capabilityId: candidate.capabilityId,
         pathTree: candidate.pathTree,
         pluginName: candidate.pluginName,
-        selector: `${candidate.pluginName}@claude-plugins-official`,
+        runtimeContentSha256: candidate.runtimeContentSha256,
+        selector:
+          `${candidate.pluginName}@${
+            options.marketplaceName ?? "claude-plugins-official"
+          }`,
         version: typeof entry.version === "string" ? entry.version : null,
       };
     });
     return {
-      commit,
+      commit: lock.repository.commit,
       detail:
-        `verified claude-plugins-official ${commit} and ${plugins.length} selected plugin trees`,
+        `verified claude-plugins-official ${lock.repository.commit} and ${plugins.length} selected plugin trees`,
       plugins,
       root,
       state: "ready",

@@ -21,15 +21,15 @@
           "os": "darwin",
           "kind": "command",
           "command": "npm",
-          "args": ["install", "--global", "@notionhq/notion-cli@0.19.0", "--ignore-scripts"],
-          "guidance": "Install Notion CLI with `npm install --global @notionhq/notion-cli@0.19.0 --ignore-scripts`."
+          "args": ["install", "--global", "ntn@0.19.0", "--ignore-scripts"],
+          "guidance": "Install Notion CLI with `npm install --global ntn@0.19.0 --ignore-scripts`."
         },
         {
           "os": "linux",
           "kind": "command",
           "command": "npm",
-          "args": ["install", "--global", "@notionhq/notion-cli@0.19.0", "--ignore-scripts"],
-          "guidance": "Install Notion CLI with `npm install --global @notionhq/notion-cli@0.19.0 --ignore-scripts`."
+          "args": ["install", "--global", "ntn@0.19.0", "--ignore-scripts"],
+          "guidance": "Install Notion CLI with `npm install --global ntn@0.19.0 --ignore-scripts`."
         }
       ],
       "authentication": {

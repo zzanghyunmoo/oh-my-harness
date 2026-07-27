@@ -78,6 +78,14 @@ const MAX_SNAPSHOT_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 
 type OwnershipEntry = ManagedStateReceipt["ownership"][number];
+type TrustedCommandResolver = (
+  commands: readonly string[],
+  options: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly platform: NodeJS.Platform;
+    readonly workspace: string;
+  },
+) => string | undefined;
 
 export interface StartupOwnedArtifactRepairInput {
   readonly artifact: PinnedManagedArtifact;
@@ -86,6 +94,7 @@ export interface StartupOwnedArtifactRepairInput {
 
 export interface RuntimeStartupServiceOperations {
   readonly state: StatePort;
+  readonly resolveTrustedCommand?: TrustedCommandResolver;
   observeOwnedArtifact?(
     ownership: OwnershipEntry,
   ): Promise<ManagedArtifactObservation>;
@@ -472,6 +481,7 @@ function packageObservations(
     readonly environment: Readonly<Record<string, string | undefined>>;
     readonly platform: NodeJS.Platform;
     readonly profile: EnvironmentProfile;
+    readonly resolveCommand: TrustedCommandResolver;
     readonly workspace: string;
   },
 ): readonly RuntimePackageObservation[] {
@@ -492,7 +502,7 @@ function packageObservations(
     if (os === null || !entry.supportedPlatforms.includes(os)) {
       return { id, state: "unsupported" };
     }
-    const executablePath = resolveTrustedCommand(entry.executables, {
+    const executablePath = input.resolveCommand(entry.executables, {
       env: input.environment as NodeJS.ProcessEnv,
       platform: input.platform,
       workspace: input.workspace,
@@ -549,6 +559,7 @@ function capabilityObservations(
     readonly platform: NodeJS.Platform;
     readonly profile: EnvironmentProfile;
     readonly receipt: ManagedStateReceipt;
+    readonly resolveCommand: TrustedCommandResolver;
     readonly runtimeId: AgentId;
     readonly workspace: string;
   },
@@ -600,7 +611,7 @@ function capabilityObservations(
       ) {
         state = "unsupported";
       } else if (
-        resolveTrustedCommand(entry.languageServer.executables, {
+        input.resolveCommand(entry.languageServer.executables, {
           env: input.environment as NodeJS.ProcessEnv,
           platform: input.platform,
           workspace: input.workspace,
@@ -833,12 +844,15 @@ async function finalizeStartup(
   const profile = receipt === null
     ? undefined
     : catalog.profiles.find(({ id }) => id === receipt.desiredState.profileId);
+  const resolveCommand = operations.resolveTrustedCommand
+    ?? resolveTrustedCommand;
   const packageState = receipt !== null && profile !== undefined
     ? packageObservations({
         catalog,
         environment: request.environment ?? process.env,
         platform: request.platform ?? process.platform,
         profile,
+        resolveCommand,
         workspace: request.workspace,
       })
     : [];
@@ -849,6 +863,7 @@ async function finalizeStartup(
         platform: request.platform ?? process.platform,
         profile,
         receipt,
+        resolveCommand,
         runtimeId: request.runtimeId,
         workspace: request.workspace,
       })

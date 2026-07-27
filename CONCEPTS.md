@@ -12,6 +12,24 @@ A versioned declaration of the coding agents, required and optional machine-shar
 
 `personal` and `company` are built-in Environment Profiles. A custom Environment Profile is validated and previewed locally, then becomes reusable only after its repository change is reviewed, merged, and distributed.
 
+### Environment Instance
+
+A platform-specific realization of one Environment Profile with its own state root, Exact Apply Plan, Managed-state Receipt, ownership set, and Environment Readiness.
+
+One machine may host multiple Environment Instances, such as Windows native and Ubuntu WSL. Each instance mutates and repairs only its own receipt-bound state; aggregate status may read several instances but does not become a shared mutation authority.
+
+### WSL Tool Bridge
+
+A bounded runtime-tool route that lets a Windows Environment Instance use profile-selected CLI backends owned by a ready WSL Environment Instance.
+
+The bridge preserves trusted executable resolution, argument allowlists, timeouts, output limits, Confirmed CLI Write enforcement, and CLI-owned Authentication. It is not a general shell and never copies WSL credentials into Windows or falls back to ambient Windows executables.
+
+Each routed package is bound in the Windows Managed-state Receipt to the target
+WSL Environment Instance and the canonical fingerprint of its ready receipt.
+Both sides revalidate that fingerprint and the route policy before execution;
+the bridge does not share state roots or give Windows mutation authority over
+the WSL instance.
+
 ### Capability Catalog
 
 The runtime-neutral source of truth for the skills, plugins, hooks, language-server integrations, and external CLI packages known to Oh My Harness.

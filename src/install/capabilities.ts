@@ -25,6 +25,18 @@ const MAX_PROVENANCE_BYTES = 4 * 1024 * 1024;
 const MAX_MANAGED_ENTRIES = 4_096;
 const MAX_MANAGED_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_MANAGED_TOTAL_BYTES = 64 * 1024 * 1024;
+const RESERVED_OFFICIAL_MARKETPLACE_TOKENS = new Set([
+  "anthropic",
+  "claude",
+  "official",
+]);
+
+export function isReservedOfficialMarketplaceName(name: string): boolean {
+  return name
+    .toLowerCase()
+    .split("-")
+    .some((token) => RESERVED_OFFICIAL_MARKETPLACE_TOKENS.has(token));
+}
 
 export interface CapabilitySurfaces {
   readonly skills: readonly string[];
@@ -58,6 +70,7 @@ export interface OfficialCapabilityCandidate {
   readonly path: string;
   readonly pathTree: string;
   readonly contentSha256: string;
+  readonly runtimeContentSha256: string;
   readonly marketplaceEntrySha256: string;
   readonly license: {
     readonly spdx: string;
@@ -81,10 +94,16 @@ export interface OfficialCapabilityLock {
     readonly branch: string;
     readonly commit: string;
     readonly tree: string;
+    readonly contentSha256: string;
     readonly reviewedAt: string;
     readonly marketplace: {
       readonly path: string;
       readonly sha256: string;
+    };
+    readonly runtimeMarketplace: {
+      readonly name: string;
+      readonly manifestSha256: string;
+      readonly contentSha256: string;
     };
   };
   readonly candidates: readonly OfficialCapabilityCandidate[];
@@ -313,8 +332,10 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
       "branch",
       "commit",
       "tree",
+      "contentSha256",
       "reviewedAt",
       "marketplace",
+      "runtimeMarketplace",
     ],
     [],
     "official repository",
@@ -325,6 +346,11 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
   assertString(value.repository.branch, "official repository.branch");
   assertDigest(value.repository.commit, SHA1_PATTERN, "official repository.commit");
   assertDigest(value.repository.tree, SHA1_PATTERN, "official repository.tree");
+  assertDigest(
+    value.repository.contentSha256,
+    SHA256_PATTERN,
+    "official repository.contentSha256",
+  );
   assertString(value.repository.reviewedAt, "official repository.reviewedAt");
   if (Number.isNaN(Date.parse(`${value.repository.reviewedAt}T00:00:00Z`))) {
     fail("official repository.reviewedAt must be an ISO date");
@@ -345,6 +371,35 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
     SHA256_PATTERN,
     "official repository.marketplace.sha256",
   );
+  assertRecord(
+    value.repository.runtimeMarketplace,
+    "official repository.runtimeMarketplace",
+  );
+  assertExactKeys(
+    value.repository.runtimeMarketplace,
+    ["name", "manifestSha256", "contentSha256"],
+    [],
+    "official repository.runtimeMarketplace",
+  );
+  assertString(
+    value.repository.runtimeMarketplace.name,
+    "official repository.runtimeMarketplace.name",
+  );
+  if (!STABLE_ID_PATTERN.test(value.repository.runtimeMarketplace.name)) {
+    fail("official repository.runtimeMarketplace.name must be a stable ID");
+  }
+  if (isReservedOfficialMarketplaceName(value.repository.runtimeMarketplace.name)) {
+    fail(
+      "official repository.runtimeMarketplace.name uses reserved provider branding",
+    );
+  }
+  for (const key of ["manifestSha256", "contentSha256"] as const) {
+    assertDigest(
+      value.repository.runtimeMarketplace[key],
+      SHA256_PATTERN,
+      `official repository.runtimeMarketplace.${key}`,
+    );
+  }
 
   if (!Array.isArray(value.candidates) || value.candidates.length === 0) {
     fail("official capability lock requires candidates");
@@ -362,6 +417,7 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
         "path",
         "pathTree",
         "contentSha256",
+        "runtimeContentSha256",
         "marketplaceEntrySha256",
         "license",
         "dependencyLock",
@@ -386,6 +442,11 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
     assertSafeRelativePath(candidate.path, `${label}.path`);
     assertDigest(candidate.pathTree, SHA1_PATTERN, `${label}.pathTree`);
     assertDigest(candidate.contentSha256, SHA256_PATTERN, `${label}.contentSha256`);
+    assertDigest(
+      candidate.runtimeContentSha256,
+      SHA256_PATTERN,
+      `${label}.runtimeContentSha256`,
+    );
     assertDigest(
       candidate.marketplaceEntrySha256,
       SHA256_PATTERN,

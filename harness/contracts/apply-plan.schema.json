@@ -64,6 +64,16 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "desiredState": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/legacyDesiredState"
+        },
+        {
+          "$ref": "#/$defs/explicitDesiredState"
+        }
+      ]
+    },
+    "legacyDesiredState": {
       "type": "object",
       "additionalProperties": false,
       "required": ["profileId", "selectedAgents"],
@@ -73,12 +83,170 @@
           "pattern": "^[a-z][a-z0-9-]*$"
         },
         "selectedAgents": {
+          "$ref": "#/$defs/selectedAgents"
+        }
+      }
+    },
+    "explicitDesiredState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "selectedAgents",
+        "instance",
+        "capabilitySet",
+        "selectedCapabilities",
+        "selectedPackages",
+        "toolRoutes"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "selectedAgents": {
+          "$ref": "#/$defs/selectedAgents"
+        },
+        "instance": {
+          "$ref": "#/$defs/environmentInstance"
+        },
+        "capabilitySet": {
+          "enum": ["profile", "workflow-only"]
+        },
+        "selectedCapabilities": {
+          "$ref": "#/$defs/selectedCapabilities"
+        },
+        "selectedPackages": {
+          "$ref": "#/$defs/selectedPackages"
+        },
+        "toolRoutes": {
           "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
           "items": {
-            "enum": ["claude-code", "opencode", "codex"]
+            "$ref": "#/$defs/toolRoute"
           }
+        }
+      }
+    },
+    "selectedAgents": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["claude-code", "opencode", "codex"]
+      }
+    },
+    "selectedCapabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "lsp-jdtls",
+          "lsp-kotlin",
+          "lsp-csharp",
+          "lsp-clangd",
+          "lsp-gopls",
+          "lsp-pyright",
+          "lsp-typescript",
+          "goal",
+          "deep-research",
+          "ideation",
+          "brainstorm",
+          "plan",
+          "code-review",
+          "doc-review",
+          "skill-creator",
+          "ralph-loop",
+          "security-guidance"
+        ]
+      }
+    },
+    "selectedPackages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["notion", "linear", "jira", "confluence", "github", "gitlab"]
+      }
+    },
+    "environmentInstance": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "transport", "platform", "stateRoot"],
+          "properties": {
+            "id": {
+              "const": "windows-native"
+            },
+            "transport": {
+              "const": "local"
+            },
+            "platform": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["os", "arch"],
+              "properties": {
+                "os": {
+                  "const": "win32"
+                },
+                "arch": {
+                  "enum": ["arm64", "x64"]
+                }
+              }
+            },
+            "stateRoot": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "transport", "distribution", "platform", "stateRoot"],
+          "properties": {
+            "id": {
+              "const": "wsl-ubuntu"
+            },
+            "transport": {
+              "const": "wsl"
+            },
+            "distribution": {
+              "const": "Ubuntu"
+            },
+            "platform": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["os", "arch"],
+              "properties": {
+                "os": {
+                  "const": "linux"
+                },
+                "arch": {
+                  "enum": ["arm64", "x64"]
+                }
+              }
+            },
+            "stateRoot": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "toolRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageId", "targetInstanceId", "receiptFingerprint"],
+      "properties": {
+        "packageId": {
+          "enum": ["notion", "linear", "jira", "confluence", "github", "gitlab"]
+        },
+        "targetInstanceId": {
+          "const": "wsl-ubuntu"
+        },
+        "receiptFingerprint": {
+          "$ref": "#/$defs/sha256"
         }
       }
     },
