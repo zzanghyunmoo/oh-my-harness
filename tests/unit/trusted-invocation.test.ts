@@ -52,3 +52,45 @@ test("Windows npm uses its Node entrypoint without spawning a shell shim", () =>
     rmSync(root, { force: true, recursive: true });
   }
 });
+
+test("POSIX Node-bundled npm remains trusted when PATH is empty", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-posix-npm-"));
+  const nodeExecutable = join(root, "bin", "node");
+  const npmTarget = join(
+    root,
+    "lib",
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  const workspace = join(root, "workspace");
+  const originalExecPath = process.execPath;
+  mkdirSync(join(root, "bin"), { recursive: true });
+  mkdirSync(join(root, "lib", "node_modules", "npm", "bin"), {
+    recursive: true,
+  });
+  mkdirSync(workspace);
+  try {
+    // Given a POSIX Node installation that carries npm under its prefix
+    writeFileSync(nodeExecutable, "");
+    writeFileSync(npmTarget, "#!/usr/bin/env node\n");
+    process.execPath = nodeExecutable;
+
+    // When ambient command discovery is unavailable
+    const invocation = resolveTrustedInvocation(["npm"], {
+      env: { PATH: "" },
+      platform: process.platform,
+      workspace,
+    });
+
+    // Then the bundled npm entrypoint runs through that Node binary
+    assert.ok(invocation);
+    assert.equal(invocation.command, nodeExecutable);
+    assert.equal(invocation.executablePath, realpathSync(npmTarget));
+    assert.deepEqual(invocation.argsPrefix, [realpathSync(npmTarget)]);
+  } finally {
+    process.execPath = originalExecPath;
+    rmSync(root, { force: true, recursive: true });
+  }
+});

@@ -661,6 +661,33 @@ function resolveWindowsCmdShim(
   return target && hasNodeShebang(target) ? target : undefined;
 }
 
+function bundledNpmTarget(
+  workspace: string,
+  platform: NodeJS.Platform,
+): string | undefined {
+  const binaryDirectory = dirname(process.execPath);
+  const candidates = [
+    resolve(binaryDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
+    resolve(
+      dirname(binaryDirectory),
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    ),
+  ];
+  for (const candidate of candidates) {
+    const target = trustedRegularFile(candidate, {
+      executable: false,
+      platform,
+      workspace,
+    });
+    if (target && hasNodeShebang(target)) return target;
+  }
+  return undefined;
+}
+
 export function resolveTrustedFile(
   path: string,
   options: {
@@ -746,6 +773,16 @@ export function resolveTrustedInvocation(
           }
         }
       }
+    }
+  }
+  if (commands.includes("npm")) {
+    const target = bundledNpmTarget(canonicalRoot, platform);
+    if (target) {
+      return Object.freeze({
+        argsPrefix: Object.freeze([target]),
+        command: process.execPath,
+        executablePath: target,
+      });
     }
   }
   return undefined;
