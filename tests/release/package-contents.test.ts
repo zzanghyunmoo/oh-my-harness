@@ -5,13 +5,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { once } from "node:events";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
@@ -247,7 +248,10 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       };
     };
     assert.equal(result.preview.profileId, "personal");
-    assert.equal(result.preview.stateRoot, stateRoot);
+    assert.equal(
+      result.preview.stateRoot,
+      join(realpathSync(dirname(stateRoot)), basename(stateRoot)),
+    );
     assert.match(result.preview.readiness, /^(?:preview|blocked)$/);
     assert.equal(existsSync(stateRoot), false);
   } finally {
