@@ -266,7 +266,6 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "-c",
         "core.longpaths=true",
         "clone",
-        "--filter=blob:none",
         "--no-checkout",
         "https://example.test/repository",
         "C:\\managed\\checkout",

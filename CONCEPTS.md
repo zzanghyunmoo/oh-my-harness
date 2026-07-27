@@ -36,6 +36,21 @@ The runtime-neutral source of truth for the skills, plugins, hooks, language-ser
 
 The Capability Catalog records semantic intent, provenance, platform support, and per-runtime readiness. Claude Code is the first delivery target and preferred official-plugin source, but its manifest format is not the catalog schema.
 
+### Default Runtime Add-on
+
+An agent-scoped, reviewed native package that becomes desired state whenever
+that agent is selected, independently of the Environment Profile and capability
+set.
+
+A Default Runtime Add-on can contribute several native agents, hooks, skills,
+or MCP servers, so it is not modeled as one semantic capability. OpenCode uses
+the exact reviewed OMO package spec, Codex uses the exact reviewed LazyCodex
+marketplace snapshot, and Claude Code currently has no OMO default. The Exact
+Apply Plan adopts an exact registration, adds an absent one, and rejects a
+different version, source, tree, or duplicate as a collision. Version or source
+replacement requires a newly approved preview and never happens through
+Approved Startup Synchronization.
+
 ### Claude-first Delivery
 
 The sequencing rule that makes the Claude Code Environment Profile path the first complete, releasable implementation before OpenCode and Codex parity.

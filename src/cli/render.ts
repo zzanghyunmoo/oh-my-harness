@@ -118,6 +118,11 @@ function renderPreview(preview: EnvironmentPreview): string {
       `- ${entry.id}@${entry.expectedVersion}: ${entry.state} — ${entry.detail}`
     ),
     "",
+    "Default runtime add-ons:",
+    ...preview.addons.map((entry) =>
+      `- ${entry.agentId}/${entry.id}@${entry.version}: ${entry.state} — ${entry.detail}`
+    ),
+    "",
     "External CLI executables (machine-shared; authentication not probed):",
     ...preview.packages.map((entry) =>
       `- ${entry.id}: ${entry.status} (${entry.required ? "required" : "optional"})`
@@ -167,6 +172,15 @@ function renderStatus(status: EnvironmentStatus, doctor: boolean): string {
       "Agents:",
       ...status.agents.map((entry) =>
         `- ${entry.id}: ${entry.state} — ${entry.detail}`
+      ),
+    );
+  }
+  if (status.addons.length > 0) {
+    lines.push(
+      "",
+      "Default add-ons:",
+      ...status.addons.map((entry) =>
+        `- ${entry.agentId}/${entry.id}@${entry.version}: ${entry.state} — ${entry.detail}`
       ),
     );
   }

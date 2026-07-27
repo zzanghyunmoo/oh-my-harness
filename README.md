@@ -40,20 +40,20 @@ npm run build
 Windows PowerShell에서는 `.\omh.cmd`를 사용합니다.
 
 ```powershell
-# 1. Ubuntu WSL이 agent, package, workflow, LSP를 소유한다.
+# 1. Ubuntu WSL이 세 agent, package, workflow를 소유한다.
 .\omh.cmd setup --target wsl-ubuntu --profile personal `
-  --agents claude-code,opencode --tools github,linear,notion `
-  --capability-set profile --clean --json
+  --agents claude-code,opencode,codex --tools github,linear,notion `
+  --capability-set workflow-only --clean --json
 .\omh.cmd setup --target wsl-ubuntu --profile personal `
-  --agents claude-code,opencode --tools github,linear,notion `
-  --capability-set profile --clean --json --apply --digest <wsl-digest>
+  --agents claude-code,opencode,codex --tools github,linear,notion `
+  --capability-set workflow-only --clean --json --apply --digest <wsl-digest>
 
 # 2. Windows는 workflow만 설치하고 package 실행을 준비된 WSL receipt에 고정한다.
 .\omh.cmd setup --target windows-native --profile personal `
-  --agents claude-code,opencode --tools github,linear,notion `
+  --agents claude-code,opencode,codex --tools github,linear,notion `
   --capability-set workflow-only --tool-route wsl-ubuntu --clean --json
 .\omh.cmd setup --target windows-native --profile personal `
-  --agents claude-code,opencode --tools github,linear,notion `
+  --agents claude-code,opencode,codex --tools github,linear,notion `
   --capability-set workflow-only --tool-route wsl-ubuntu --clean --json `
   --apply --digest <windows-digest>
 
@@ -64,7 +64,8 @@ Before release, run the live Windows/Ubuntu validator after the canonical gate.
 It checks operator-owned Node, Git, and all seven LSP executables before any OMH
 preview or apply. It then verifies ordered WSL/Windows preview and apply,
 stale-digest rejection, aggregate status and doctor, idempotent reapply,
-stopped-WSL degradation, and preservation of Codex plus CLI-owned auth state.
+stopped-WSL degradation, exact OpenCode/Codex OMO readiness, managed Codex
+stability after apply, and preservation of CLI-owned auth state.
 
 ```powershell
 powershell -File scripts/validate-dual-environment.ps1 -Distro Ubuntu
@@ -115,8 +116,9 @@ omh profiles publish --file profile.json --repo /absolute/checkout --digest sha2
 `doctor`는 인증이나 원격 서비스 호출 없이 exact runtime의 native list/config만
 bounded inspection합니다. Claude는 marketplace/plugin/enablement/hook/MCP/skill
 inventory를, OpenCode는 loopback-only server의 health/config/tool/LSP와 native
-skill discovery를 검사합니다. session이나 prompt를 만들지 않으므로 이 검증은
-workflow skill을 호출하거나 모델 출력을 평가하지 않습니다.
+skill discovery 및 exact OMO package resolution을, Codex는 exact local
+marketplace와 enabled OMO plugin을 검사합니다. session이나 prompt를 만들지
+않으므로 이 검증은 workflow skill을 호출하거나 모델 출력을 평가하지 않습니다.
 
 Managed launch가 필요하면 `omh run`을 사용합니다. 이 경로는 receipt에 기록된
 Node, reconciler, runtime digest를 검증하고 runtime discovery 전에 startup
@@ -137,12 +139,32 @@ Node·agent executable과 사용자 소유 native 등록은 OMH가 제거하거�
 아래 블록은 contract test가 카탈로그로부터 생성해 README drift를 거부합니다.
 
 <!-- catalog:agents:start -->
-| Agent | Command | Exact version | Reviewed platforms |
-| --- | --- | --- | --- |
-| claude-code | claude | 2.1.210 | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
-| opencode | opencode | 1.18.0 | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
-| codex | codex | 0.144.4 | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
+| Agent | Command | Exact version | Default add-ons | Reviewed platforms |
+| --- | --- | --- | --- | --- |
+| claude-code | claude | 2.1.210 | none | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
+| opencode | opencode | 1.18.0 | OMO Ultimate 4.19.2 | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
+| codex | codex | 0.144.4 | LazyCodex OMO Light 4.19.2 | darwin-arm64, darwin-x64, linux-x64, win32-arm64, win32-x64 |
 <!-- catalog:agents:end -->
+
+OpenCode나 Codex를 선택하면 표의 reviewed default add-on도 같은 Exact Apply
+Plan에 자동으로 포함됩니다. OpenCode는 exact
+`oh-my-openagent@4.19.2`, Codex는 exact reviewed LazyCodex snapshot의
+`omo@sisyphuslabs`를 각 runtime-native surface에 등록합니다. Claude Code만
+선택한 plan에는 OMO add-on이 없습니다.
+
+기존 exact 등록은 재사용하고 다른 version/source/중복 등록은 user-owned
+collision으로 차단합니다. version 교체나 source 교체는 startup에서 자동으로
+진행하지 않으며, 해당 등록의 소유권을 증명하는 별도 removal/replacement
+preview가 먼저 승인되어야 합니다. 일반 `setup --clean`은 이 collision을
+추정 삭제하지 않습니다.
+직접 실행 중이던 OpenCode/Codex session은 native discovery를 다시 읽도록
+재시작하거나 새 session을 열어야 합니다. OMH는 OMO telemetry, provider,
+Codex sandbox 또는 approval policy를 변경하지 않습니다.
+
+Windows에서 실행 중인 Codex가 plugin cache를 잠근 상태라면 Codex plugin
+세대 교체가 `os error 32`로 중단될 수 있습니다. 이 경우 기존 receipt와
+등록은 보존되므로 Codex session을 모두 종료한 뒤 새 preview/digest로 apply를
+다시 실행합니다.
 
 Reviewed tuple이 없는 Linux ARM64는 `unsupported`입니다. PATH에 같은 명령이
 있어도 exact executable SHA-256이 다르면 OMH는 그 파일을 덮어쓰거나

@@ -22,6 +22,11 @@ function agentRow(entry: AgentCatalogEntry): readonly string[] {
     entry.id,
     entry.command,
     entry.version,
+    entry.defaultAddons.length === 0
+      ? "none"
+      : entry.defaultAddons
+        .map((addon) => `${addon.displayName} ${addon.version}`)
+        .join(", "),
     entry.supportedPlatforms.join(", "),
   ];
 }
@@ -56,7 +61,13 @@ function capabilityRow(entry: CapabilityCatalogEntry): readonly string[] {
 
 export function renderAgentCatalogTable(catalog: CatalogBundle): string {
   return table(
-    ["Agent", "Command", "Exact version", "Reviewed platforms"],
+    [
+      "Agent",
+      "Command",
+      "Exact version",
+      "Default add-ons",
+      "Reviewed platforms",
+    ],
     catalog.agents.agents.map(agentRow),
   );
 }

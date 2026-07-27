@@ -26,6 +26,15 @@ export interface DesiredState {
   selectedCapabilities?: CapabilityId[];
   selectedPackages?: PackageId[];
   toolRoutes?: readonly ToolRoute[];
+  runtimeAddons?: readonly RuntimeAddonPin[];
+}
+
+export interface RuntimeAddonPin {
+  readonly agentId: AgentId;
+  readonly fingerprint: string;
+  readonly id: "omo";
+  readonly kind: "codex-marketplace" | "opencode-package";
+  readonly version: string;
 }
 
 export function resolveDesiredState(

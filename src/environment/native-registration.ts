@@ -18,8 +18,11 @@ import { pathToFileURL } from "node:url";
 
 import {
   applyEdits,
+  getNodeValue,
   modify,
   parse as parseJsonc,
+  parseTree,
+  type ParseError,
 } from "jsonc-parser";
 
 import type {
@@ -33,6 +36,7 @@ import {
   assertSafeManagedRootPath,
   atomicWriteFile,
   readBoundedRegularFile,
+  sha256File,
 } from "./filesystem.js";
 
 export type NativeCommandRunner = (
@@ -73,16 +77,56 @@ export interface ClaudeManagedRuntimeRegistrationState {
   readonly plugin: ClaudeRegistrationState;
 }
 
+export interface OpenCodePackageAddonRegistration {
+  readonly packageName: "oh-my-openagent";
+  readonly spec: string;
+}
+
+export interface CodexMarketplaceAddonRegistration {
+  readonly manifestPath: ".agents/plugins/marketplace.json";
+  readonly manifestSha256: string;
+  readonly marketplaceName: "sisyphuslabs";
+  readonly marketplaceRoot: string;
+  readonly pluginContentSha256: string;
+  readonly pluginPath: "plugins/omo";
+  readonly repository: string;
+  readonly selector: "omo@sisyphuslabs";
+  readonly version: string;
+}
+
+export type RuntimeAddonRegistrationState =
+  | "missing"
+  | "ready"
+  | "collision";
+
+export interface CodexMarketplaceAddonState {
+  readonly marketplace: RuntimeAddonRegistrationState;
+  readonly plugin: RuntimeAddonRegistrationState;
+}
+
+export type CodexMarketplaceTrustVerifier = (
+  root: string,
+  repository: string,
+) => boolean;
+
 const MAX_OPEN_CODE_CONFIG_BYTES = 1024 * 1024;
 
 export function openCodeConfigPath(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
 ): string {
+  const explicitConfigRoot = env.OPENCODE_CONFIG_DIR;
+  if (explicitConfigRoot !== undefined) {
+    if (!isAbsolute(explicitConfigRoot)) {
+      throw new Error("OpenCode explicit config directory must be absolute");
+    }
+    return join(explicitConfigRoot, "opencode.json");
+  }
+  const userHome = env.HOME
+    ?? (platform === "win32" ? env.USERPROFILE : undefined)
+    ?? homedir();
   const configRoot = env.XDG_CONFIG_HOME
-    ?? (platform === "win32"
-      ? env.APPDATA
-      : join(env.HOME ?? homedir(), ".config"));
+    ?? join(userHome, ".config");
   if (!configRoot || !isAbsolute(configRoot)) {
     throw new Error("OpenCode user configuration root must be absolute");
   }
@@ -972,6 +1016,151 @@ export function registerOpenCodeRuntime(
   atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
 }
 
+function openCodePluginEntries(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): {
+  readonly configPath: string;
+  readonly current: string;
+  readonly plugins: readonly string[];
+} {
+  const configPath = openCodeConfigPath(env, platform);
+  const current = existsSync(configPath)
+    ? readBoundedRegularFile(configPath, MAX_OPEN_CODE_CONFIG_BYTES)
+      .toString("utf8")
+    : "{}\n";
+  const errors: ParseError[] = [];
+  const root = parseTree(current, errors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  });
+  const pluginProperties = root?.children?.filter(
+    (node) =>
+      node.type === "property"
+      && node.children?.[0]?.value === "plugin",
+  ) ?? [];
+  const parsed = root === undefined
+    ? undefined
+    : getNodeValue(root) as { readonly plugin?: unknown };
+  if (
+    errors.length > 0
+    || root?.type !== "object"
+    || pluginProperties.length > 1
+    || parsed === undefined
+    || (parsed.plugin !== undefined && !Array.isArray(parsed.plugin))
+    || (
+      Array.isArray(parsed.plugin)
+      && parsed.plugin.some((entry) => typeof entry !== "string")
+    )
+  ) {
+    throw new Error("OpenCode plugin configuration is not a string array");
+  }
+  return {
+    configPath,
+    current,
+    plugins: (parsed.plugin ?? []) as readonly string[],
+  };
+}
+
+function isOpenCodeOmoSpec(value: string): boolean {
+  return /^(?:oh-my-openagent|oh-my-opencode)(?:@|$)/u.test(value);
+}
+
+export function inspectOpenCodePackageAddon(
+  registration: OpenCodePackageAddonRegistration,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): RuntimeAddonRegistrationState {
+  try {
+    const { plugins } = openCodePluginEntries(env, platform);
+    const matches = plugins.filter(isOpenCodeOmoSpec);
+    if (matches.length === 0) return "missing";
+    return matches.length === 1 && matches[0] === registration.spec
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
+  }
+}
+
+export function registerOpenCodePackageAddon(
+  registration: OpenCodePackageAddonRegistration,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): void {
+  const state = inspectOpenCodePackageAddon(registration, env, platform);
+  if (state === "ready") return;
+  if (state === "collision") {
+    throw new Error(
+      `${registration.packageName} collides with an existing OpenCode plugin registration`,
+    );
+  }
+  const { configPath, current, plugins } = openCodePluginEntries(env, platform);
+  const edits = modify(current, ["plugin"], [...plugins, registration.spec], {
+    formattingOptions: { insertSpaces: true, tabSize: 2 },
+  });
+  atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
+  if (inspectOpenCodePackageAddon(registration, env, platform) !== "ready") {
+    throw new Error("OpenCode OMO registration could not be verified");
+  }
+}
+
+export function openCodePackageAddonResolved(
+  executable: string,
+  registration: OpenCodePackageAddonRegistration,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  run: NativeCommandRunner,
+): boolean {
+  if (inspectOpenCodePackageAddon(registration, env, platform) !== "ready") {
+    return false;
+  }
+  try {
+    const output = run(executable, ["debug", "config"]);
+    let value: unknown;
+    try {
+      value = JSON.parse(output);
+    } catch {
+      const errors: ParseError[] = [];
+      const root = parseTree(output, errors, {
+        allowTrailingComma: false,
+        disallowComments: true,
+      });
+      const pluginProperties = root?.children?.filter(
+        (node) =>
+          node.type === "property"
+          && node.children?.[0]?.value === "plugin",
+      ) ?? [];
+      const pluginNode = pluginProperties[0]?.children?.[1];
+      const pluginEnd = pluginNode === undefined
+        ? 0
+        : pluginNode.offset + pluginNode.length;
+      if (
+        root?.type !== "object"
+        || pluginProperties.length !== 1
+        || pluginNode?.type !== "array"
+        || output[pluginEnd - 1] !== "]"
+        || errors.some((error) => error.offset < pluginEnd)
+      ) {
+        return false;
+      }
+      value = { plugin: getNodeValue(pluginNode) };
+    }
+    if (
+      typeof value !== "object"
+      || value === null
+      || Array.isArray(value)
+    ) {
+      return false;
+    }
+    const plugins = (value as Record<string, unknown>).plugin;
+    return Array.isArray(plugins)
+      && plugins.filter((entry) => entry === registration.spec).length === 1;
+  } catch {
+    return false;
+  }
+}
+
 export function openCodeRegistrationReady(
   runtimePackageRoot: string,
   env: NodeJS.ProcessEnv,
@@ -1001,4 +1190,274 @@ export function openCodeRegistrationReady(
   } catch {
     return false;
   }
+}
+
+interface CodexMarketplaceObservation {
+  readonly name: string;
+  readonly root: string;
+  readonly source: {
+    readonly source: string;
+    readonly sourceType: string;
+  } | null;
+}
+
+function codexMarketplaceObservations(
+  output: string,
+): readonly CodexMarketplaceObservation[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    throw new Error("Codex marketplace list did not return JSON");
+  }
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+    || !Array.isArray((value as Record<string, unknown>).marketplaces)
+  ) {
+    throw new Error("Codex marketplace list does not match the native contract");
+  }
+  return (value as { marketplaces: unknown[] }).marketplaces.map((item) => {
+    if (
+      typeof item !== "object"
+      || item === null
+      || Array.isArray(item)
+    ) {
+      throw new Error("Codex marketplace entry does not match the native contract");
+    }
+    const entry = item as Record<string, unknown>;
+    if (
+      typeof entry.name !== "string"
+      || typeof entry.root !== "string"
+      || !isAbsolute(entry.root)
+    ) {
+      throw new Error("Codex marketplace entry does not match the native contract");
+    }
+    const marketplaceSource = entry.marketplaceSource;
+    if (marketplaceSource === undefined) {
+      return { name: entry.name, root: entry.root, source: null };
+    }
+    if (
+      typeof marketplaceSource !== "object"
+      || marketplaceSource === null
+      || Array.isArray(marketplaceSource)
+      || typeof (marketplaceSource as Record<string, unknown>).sourceType
+        !== "string"
+      || typeof (marketplaceSource as Record<string, unknown>).source
+        !== "string"
+    ) {
+      throw new Error(
+        "Codex marketplace source does not match the native contract",
+      );
+    }
+    return {
+      name: entry.name,
+      root: entry.root,
+      source: {
+        source: String(
+          (marketplaceSource as Record<string, unknown>).source,
+        ),
+        sourceType: String(
+          (marketplaceSource as Record<string, unknown>).sourceType,
+        ),
+      },
+    };
+  });
+}
+
+function codexAddonMarketplaceContentExact(
+  root: string,
+  registration: CodexMarketplaceAddonRegistration,
+): boolean {
+  try {
+    return sha256File(join(root, registration.manifestPath))
+        === registration.manifestSha256
+      && hashManagedDirectory(join(root, registration.pluginPath), {
+        ignoreTopLevel: [".in_use"],
+      }) === registration.pluginContentSha256;
+  } catch {
+    return false;
+  }
+}
+
+function codexAddonPluginState(
+  output: string,
+  registration: CodexMarketplaceAddonRegistration,
+  marketplaceRoot: string | null,
+): RuntimeAddonRegistrationState {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    throw new Error("Codex plugin list did not return JSON");
+  }
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+    || !Array.isArray((value as Record<string, unknown>).installed)
+  ) {
+    throw new Error("Codex plugin list does not match the native contract");
+  }
+  const matches = (value as { installed: unknown[] }).installed.filter(
+    (item) =>
+      typeof item === "object"
+      && item !== null
+      && !Array.isArray(item)
+      && (item as Record<string, unknown>).pluginId === registration.selector,
+  );
+  if (matches.length === 0) return "missing";
+  if (matches.length !== 1) return "collision";
+  const plugin = matches[0] as Record<string, unknown>;
+  const source = plugin.source;
+  if (
+    plugin.installed !== true
+    || plugin.enabled !== true
+    || plugin.marketplaceName !== registration.marketplaceName
+    || plugin.version !== registration.version
+    || typeof source !== "object"
+    || source === null
+    || Array.isArray(source)
+    || (source as Record<string, unknown>).source !== "local"
+    || typeof (source as Record<string, unknown>).path !== "string"
+    || !isAbsolute(String((source as Record<string, unknown>).path))
+    || marketplaceRoot === null
+    || resolve(String((source as Record<string, unknown>).path))
+      !== resolve(join(marketplaceRoot, registration.pluginPath))
+  ) {
+    return "collision";
+  }
+  try {
+    return hashManagedDirectory(
+        String((source as Record<string, unknown>).path),
+        { ignoreTopLevel: [".in_use"] },
+      ) === registration.pluginContentSha256
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
+  }
+}
+
+export function inspectCodexMarketplaceAddon(
+  executable: string,
+  registration: CodexMarketplaceAddonRegistration,
+  verifyGitMarketplace: CodexMarketplaceTrustVerifier,
+  run: NativeCommandRunner,
+): CodexMarketplaceAddonState {
+  try {
+    const matches = codexMarketplaceObservations(
+      run(executable, ["plugin", "marketplace", "list", "--json"]),
+    ).filter(({ name }) => name === registration.marketplaceName);
+    let marketplace: RuntimeAddonRegistrationState;
+    let marketplaceRoot: string | null = null;
+    if (matches.length === 0) {
+      marketplace = "missing";
+    } else if (matches.length !== 1) {
+      marketplace = "collision";
+    } else {
+      const observation = matches[0];
+      if (observation === undefined) {
+        marketplace = "collision";
+      } else {
+        const localRootExact =
+          resolve(observation.root) === resolve(registration.marketplaceRoot);
+        const sourceExact = observation.source === null
+          ? localRootExact
+          : observation.source.sourceType === "local"
+            ? localRootExact
+              && isAbsolute(observation.source.source)
+              && resolve(observation.source.source)
+                === resolve(registration.marketplaceRoot)
+            : observation.source.sourceType === "git"
+              && observation.source.source === registration.repository
+              && verifyGitMarketplace(
+                observation.root,
+                registration.repository,
+              );
+        marketplace = sourceExact
+            && codexAddonMarketplaceContentExact(
+              observation.root,
+              registration,
+            )
+          ? "ready"
+          : "collision";
+        if (marketplace === "ready") {
+          marketplaceRoot = observation.root;
+        }
+      }
+    }
+    const plugin = codexAddonPluginState(
+      run(executable, ["plugin", "list", "--json"]),
+      registration,
+      marketplaceRoot,
+    );
+    return { marketplace, plugin };
+  } catch {
+    return { marketplace: "collision", plugin: "collision" };
+  }
+}
+
+export function registerCodexMarketplaceAddon(
+  executable: string,
+  registration: CodexMarketplaceAddonRegistration,
+  verifyGitMarketplace: CodexMarketplaceTrustVerifier,
+  run: NativeCommandRunner,
+): void {
+  const state = inspectCodexMarketplaceAddon(
+    executable,
+    registration,
+    verifyGitMarketplace,
+    run,
+  );
+  if (state.marketplace === "collision" || state.plugin === "collision") {
+    throw new Error(
+      `${registration.selector} collides with an existing Codex registration`,
+    );
+  }
+  if (state.marketplace === "missing" && state.plugin === "ready") {
+    throw new Error(
+      `${registration.selector} exists without its exact marketplace`,
+    );
+  }
+  if (state.marketplace === "missing") {
+    run(executable, [
+      "plugin",
+      "marketplace",
+      "add",
+      registration.marketplaceRoot,
+      "--json",
+    ]);
+  }
+  if (state.plugin === "missing") {
+    run(executable, ["plugin", "add", registration.selector, "--json"]);
+  }
+  const verified = inspectCodexMarketplaceAddon(
+    executable,
+    registration,
+    verifyGitMarketplace,
+    run,
+  );
+  if (
+    verified.marketplace !== "ready"
+    || verified.plugin !== "ready"
+  ) {
+    throw new Error("Codex OMO registration could not be verified");
+  }
+}
+
+export function codexMarketplaceAddonReady(
+  executable: string,
+  registration: CodexMarketplaceAddonRegistration,
+  verifyGitMarketplace: CodexMarketplaceTrustVerifier,
+  run: NativeCommandRunner,
+): boolean {
+  const state = inspectCodexMarketplaceAddon(
+    executable,
+    registration,
+    verifyGitMarketplace,
+    run,
+  );
+  return state.marketplace === "ready" && state.plugin === "ready";
 }

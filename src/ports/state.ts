@@ -4,6 +4,7 @@ import type {
   EnvironmentInstance,
   ToolRoute,
 } from "../domain/environment-instance.js";
+import type { RuntimeAddonPin } from "../domain/desired-state.js";
 
 export interface ApplyJournal {
   readonly schemaVersion: "2.0.0";
@@ -38,6 +39,7 @@ export interface ManagedStateReceipt {
     readonly selectedCapabilities?: readonly string[];
     readonly selectedPackages?: readonly string[];
     readonly toolRoutes?: readonly ToolRoute[];
+    readonly runtimeAddons?: readonly RuntimeAddonPin[];
   };
   readonly startupConsent: {
     readonly repairPinned: boolean;

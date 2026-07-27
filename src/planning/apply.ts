@@ -295,6 +295,9 @@ function receiptFor(
     desiredState: {
       profileId: plan.desiredState.profileId,
       selectedAgents,
+      ...(plan.desiredState.runtimeAddons === undefined
+        ? {}
+        : { runtimeAddons: plan.desiredState.runtimeAddons }),
       ...(plan.desiredState.instance === undefined
         ? {}
         : {
