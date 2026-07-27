@@ -190,8 +190,7 @@ export function resolveStateRoot(
   if (!isAbsolute(configured) && !win32.isAbsolute(configured)) {
     throw new Error("managed state root must be absolute");
   }
-  assertSafeManagedRootPath(configured, "managed state root");
-  return resolve(configured);
+  return assertSafeManagedRootPath(configured, "managed state root");
 }
 
 export function isPathWithin(parent: string, child: string): boolean {

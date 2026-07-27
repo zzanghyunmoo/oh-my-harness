@@ -11,7 +11,19 @@ import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
 
+import {
+  assertSafeManagedRootPath,
+  resolveStateRoot,
+} from "../../dist/environment/filesystem.js";
 import { FileStateStore } from "../../dist/state/receipt.js";
+
+test("U3 state root preserves its canonical ancestor identity", () => {
+  const configured = join(tmpdir(), "omh-canonical-state-root");
+  assert.equal(
+    resolveStateRoot(configured, {}),
+    assertSafeManagedRootPath(configured, "test state root"),
+  );
+});
 
 test("U3 state lock admits one writer and bounded waiters observe serialized publication", async () => {
   const root = await mkdtemp(join(tmpdir(), "omh-state-lock-"));
