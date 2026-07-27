@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   claudeOfficialMarketplaceReady,
@@ -213,9 +214,8 @@ test("clean runtime registration replaces only the exact prior managed roots", (
     const configRoot = join(root, "config");
     const configPath = join(configRoot, "opencode", "opencode.json");
     mkdirSync(join(configRoot, "opencode"), { recursive: true });
-    const previousPlugin = new URL(
-      `file:///${join(previousRoot, ".opencode", "plugins", "oh-my-harness.js")
-        .replaceAll("\\", "/")}`,
+    const previousPlugin = pathToFileURL(
+      join(previousRoot, ".opencode", "plugins", "oh-my-harness.js"),
     ).href;
     writeFileSync(
       configPath,

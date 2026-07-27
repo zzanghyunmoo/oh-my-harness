@@ -89,7 +89,7 @@ test("U6 managed skills are runtime-neutral active packages and official plugins
   for (const managed of provenance.managed.capabilities) {
     const skillPath = join(REPO_ROOT, managed.path, "SKILL.md");
     assert.equal(existsSync(skillPath), true, `${managed.capabilityId} is missing SKILL.md`);
-    const skill = readFileSync(skillPath, "utf8");
+    const skill = readFileSync(skillPath, "utf8").replace(/\r\n?/gu, "\n");
     assert.match(skill, /^---\nname: /);
     assert.match(skill, /## Workflow/);
     assert.match(skill, /## Side effects and approval/);

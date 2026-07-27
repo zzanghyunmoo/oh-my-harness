@@ -28,7 +28,7 @@ test("U15 README agent, package, and capability tables are generated from the ca
   const readme = readFileSync(
     new URL("../../README.md", import.meta.url),
     "utf8",
-  );
+  ).replace(/\r\n?/gu, "\n");
 
   assert.equal(
     documentedBlock(readme, "agents"),
