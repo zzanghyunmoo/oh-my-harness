@@ -5,7 +5,7 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { join, posix, relative, resolve, sep } from "node:path";
 import { gzipSync } from "node:zlib";
 
 import type { OmhResult } from "../cli/render.js";
@@ -15,17 +15,30 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
 const MAX_BUNDLE_ENTRIES = 8_192;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const LINUX_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const TRANSPORT_SOURCES = [
+const DEFAULT_APPLY_TIMEOUT_MS = 15 * 60_000;
+export const SYSTEM_LINUX_PATH =
+  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const WSL_TRANSPORT_SOURCES = [
   ".agents",
   ".claude-plugin",
-  ".opencode",
+  ".opencode/package.json",
+  ".opencode/plugins",
   "dist",
   "harness",
   "plugins",
   "package.json",
+  "scripts/harness/acquisition.mjs",
+  "node_modules/b4a",
+  "node_modules/bare-events",
+  "node_modules/events-universal",
+  "node_modules/fast-fifo",
   "node_modules/jsonc-parser",
+  "node_modules/pend",
+  "node_modules/streamx",
+  "node_modules/tar-stream",
+  "node_modules/text-decoder",
   "node_modules/typebox",
+  "node_modules/yauzl",
   "node_modules/zod",
 ] as const;
 
@@ -57,6 +70,31 @@ export interface WslDistribution {
   readonly version: 2;
 }
 
+export function wslTargetExecutionTimeout(
+  argv: readonly string[],
+  defaultTimeoutMs: number,
+  applyTimeoutMs: number,
+): number {
+  return argv.includes("--apply") ? applyTimeoutMs : defaultTimeoutMs;
+}
+
+export function decodeWslOutput(value: Buffer): string {
+  if (value.length === 0) return "";
+  const hasUtf16Bom =
+    value.length >= 2
+    && value[0] === 0xff
+    && value[1] === 0xfe;
+  const sampledPairs = Math.min(Math.floor(value.length / 2), 256);
+  let oddNulls = 0;
+  for (let index = 0; index < sampledPairs; index += 1) {
+    if (value[(index * 2) + 1] === 0) oddNulls += 1;
+  }
+  if (hasUtf16Bom || (sampledPairs > 0 && oddNulls / sampledPairs > 0.6)) {
+    return value.toString("utf16le").replace(/^\uFEFF/u, "");
+  }
+  return value.toString("utf8");
+}
+
 interface WslTargetEnvelope {
   readonly schemaVersion: "1.0.0";
   readonly targetId: "wsl-ubuntu";
@@ -76,6 +114,25 @@ function boundedText(value: string, maximumBytes: number, label: string): string
     throw new Error(`${label} exceeded the bounded output limit`);
   }
   return value.replaceAll("\0", "").trim();
+}
+
+export function parseWslHome(output: string): string {
+  const home = boundedText(output, 64 * 1024, "WSL home");
+  if (
+    !posix.isAbsolute(home)
+    || posix.normalize(home) !== home
+    || home === "/"
+    || home.startsWith("/mnt/")
+    || home.includes(":")
+  ) {
+    throw new Error("WSL home is not a trusted Linux path");
+  }
+  return home;
+}
+
+export function trustedWslUserPath(home: string): string {
+  const trustedHome = parseWslHome(home);
+  return `${posix.join(trustedHome, ".local", "bin")}:${SYSTEM_LINUX_PATH}`;
 }
 
 function errorDetail(value: string): string {
@@ -270,7 +327,7 @@ function collectBundleFiles(
       path: archivePath.split(sep).join("/"),
     });
   }
-  for (const path of TRANSPORT_SOURCES) {
+  for (const path of WSL_TRANSPORT_SOURCES) {
     const source = resolve(repositoryRoot, path);
     if (!existsSync(source)) throw new Error(`transport source is missing: ${path}`);
     const candidate = relative(resolve(repositoryRoot), source);
@@ -340,8 +397,8 @@ class NodeWslProcessRunner implements WslProcessRunner {
         options.signal?.removeEventListener("abort", abort);
         resolveResult({
           exitCode: code ?? 1,
-          stderr: Buffer.concat(stderr).toString("utf8"),
-          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: decodeWslOutput(Buffer.concat(stderr)),
+          stdout: decodeWslOutput(Buffer.concat(stdout)),
         });
       });
       if (options.stdin === undefined) child.stdin.end();
@@ -350,7 +407,7 @@ class NodeWslProcessRunner implements WslProcessRunner {
   }
 }
 
-function resolveWslExecutable(environment: NodeJS.ProcessEnv): string {
+export function resolveWslExecutable(environment: NodeJS.ProcessEnv): string {
   const systemRoot = environment.SystemRoot ?? environment.WINDIR;
   if (!systemRoot) throw new Error("SystemRoot is required to locate trusted wsl.exe");
   const executable = join(systemRoot, "System32", "wsl.exe");
@@ -379,6 +436,7 @@ export class WslTargetPort implements TargetPort {
   readonly environment: NodeJS.ProcessEnv;
   readonly executable: string;
   readonly runner: WslProcessRunner;
+  readonly applyTimeoutMs: number;
   readonly timeoutMs: number;
 
   constructor(options: {
@@ -386,6 +444,7 @@ export class WslTargetPort implements TargetPort {
     readonly environment?: NodeJS.ProcessEnv;
     readonly executable?: string;
     readonly runner?: WslProcessRunner;
+    readonly applyTimeoutMs?: number;
     readonly timeoutMs?: number;
   } = {}) {
     this.environment = options.environment ?? process.env;
@@ -393,6 +452,7 @@ export class WslTargetPort implements TargetPort {
       ?? resolveWslExecutable(this.environment);
     this.runner = options.runner ?? new NodeWslProcessRunner();
     this.bundle = options.bundle ?? createWslTransportBundle;
+    this.applyTimeoutMs = options.applyTimeoutMs ?? DEFAULT_APPLY_TIMEOUT_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
@@ -400,13 +460,14 @@ export class WslTargetPort implements TargetPort {
     args: readonly string[],
     request: TargetRequest,
     stdin?: Buffer,
+    timeoutMs = this.timeoutMs,
   ): Promise<WslProcessResult> {
     return this.runner.run(this.executable, args, {
       environment: sanitizeWindowsEnvironment(this.environment),
       maximumOutputBytes: MAX_OUTPUT_BYTES,
       ...(request.signal === undefined ? {} : { signal: request.signal }),
       ...(stdin === undefined ? {} : { stdin }),
-      timeoutMs: this.timeoutMs,
+      timeoutMs,
     });
   }
 
@@ -446,17 +507,33 @@ export class WslTargetPort implements TargetPort {
       );
     }
 
+    let home: string;
     let nodeProbe: NodeProbe;
     try {
+      home = parseWslHome(
+        await this.required(
+          [
+            "-d",
+            "Ubuntu",
+            "--cd",
+            "~",
+            "-e",
+            "/bin/pwd",
+          ],
+          request,
+          "WSL home",
+        ),
+      );
+      const linuxPath = trustedWslUserPath(home);
       nodeProbe = parseNodeProbe(
         await this.required(
           [
-            "--distribution",
+            "-d",
             "Ubuntu",
-            "--exec",
+            "-e",
             "/usr/bin/env",
             "-i",
-            `PATH=${LINUX_PATH}`,
+            `PATH=${linuxPath}`,
             "node",
             "--input-type=module",
             "--eval",
@@ -468,9 +545,9 @@ export class WslTargetPort implements TargetPort {
       );
       const translatedRepository = await this.required(
         [
-          "--distribution",
+          "-d",
           "Ubuntu",
-          "--exec",
+          "-e",
           "/usr/bin/wslpath",
           "-a",
           "-u",
@@ -490,9 +567,9 @@ export class WslTargetPort implements TargetPort {
     }
     const temporary = await this.required(
       [
-        "--distribution",
+        "-d",
         "Ubuntu",
-        "--exec",
+        "-e",
         "/usr/bin/mktemp",
         "--directory",
         "/tmp/omh-transport.XXXXXXXX",
@@ -509,9 +586,9 @@ export class WslTargetPort implements TargetPort {
       const archive = await this.bundle(request.repositoryRoot);
       await this.required(
         [
-          "--distribution",
+          "-d",
           "Ubuntu",
-          "--exec",
+          "-e",
           "/bin/tar",
           "--extract",
           "--gzip",
@@ -528,13 +605,13 @@ export class WslTargetPort implements TargetPort {
       );
       const execution = await this.execute(
         [
-          "--distribution",
+          "-d",
           "Ubuntu",
-          "--exec",
+          "-e",
           "/usr/bin/env",
           "-i",
           `HOME=${nodeProbe.home}`,
-          `PATH=${LINUX_PATH}`,
+          `PATH=${trustedWslUserPath(nodeProbe.home)}`,
           nodeProbe.execPath,
           `${temporary}/dist/cli/wsl-bootstrap.js`,
           "--repository-root",
@@ -543,6 +620,12 @@ export class WslTargetPort implements TargetPort {
           ...request.argv,
         ],
         request,
+        undefined,
+        wslTargetExecutionTimeout(
+          request.argv,
+          this.timeoutMs,
+          this.applyTimeoutMs,
+        ),
       );
       let envelope: unknown;
       try {
@@ -550,7 +633,12 @@ export class WslTargetPort implements TargetPort {
           boundedText(execution.stdout, MAX_OUTPUT_BYTES, "WSL target result"),
         );
       } catch {
-        throw new Error("WSL target did not return bounded JSON");
+        const stderr = errorDetail(execution.stderr);
+        throw new Error(
+          `WSL target did not return bounded JSON${
+            stderr === "" ? "" : `: ${stderr}`
+          }`,
+        );
       }
       if (
         !envelope
@@ -575,9 +663,9 @@ export class WslTargetPort implements TargetPort {
       try {
         await this.required(
           [
-            "--distribution",
+            "-d",
             "Ubuntu",
-            "--exec",
+            "-e",
             "/bin/rm",
             "--recursive",
             "--force",

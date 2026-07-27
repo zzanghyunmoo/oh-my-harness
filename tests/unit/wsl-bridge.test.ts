@@ -218,6 +218,13 @@ test("U6 Windows bridge uses stopped-safe direct WSL argv and a scrubbed environ
           stdout: "/mnt/c/workspace\n",
         };
       }
+      if (args.includes("/bin/pwd")) {
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "/home/test\n",
+        };
+      }
       const request = JSON.parse(
         options.stdin?.toString("utf8") ?? "{}",
       ) as { input?: { cwd?: string } };
@@ -265,19 +272,28 @@ test("U6 Windows bridge uses stopped-safe direct WSL argv and a scrubbed environ
     },
   );
   assert.equal(result.executablePath, "/usr/bin/linear");
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   for (const call of calls) {
     assert.equal(call.options.environment.WSLENV, "");
     assert.equal(call.options.environment.GH_TOKEN, undefined);
   }
-  const bridgeArgs = calls[2]?.args ?? [];
-  assert.deepEqual(bridgeArgs.slice(0, 6), [
-    "--distribution",
+  assert.deepEqual(calls[2]?.args.slice(0, 6), [
+    "-d",
     "Ubuntu",
-    "--exec",
+    "--cd",
+    "~",
+    "-e",
+    "/bin/pwd",
+  ]);
+  const bridgeArgs = calls[3]?.args ?? [];
+  assert.deepEqual(bridgeArgs.slice(0, 7), [
+    "-d",
+    "Ubuntu",
+    "-e",
     "/usr/bin/env",
     "-i",
-    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    `PATH=/home/test/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    "node",
   ]);
   assert.equal(bridgeArgs.includes("ghp_must_not_cross"), false);
 });

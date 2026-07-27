@@ -351,10 +351,21 @@ test("U8 managed prelaunch verifies exact bindings, omits PATH, and resists recu
     "--format",
     "json",
   ]);
-  assert.equal("PATH" in calls[0]!.env, false);
+  if (process.platform === "win32") {
+    assert.equal(calls[0]!.env.PATH, "");
+  } else {
+    assert.equal("PATH" in calls[0]!.env, false);
+  }
   assert.equal("ANTHROPIC_API_KEY" in calls[0]!.env, false);
   assert.equal(calls[1]!.executablePath, "/managed/runtime/claude");
   assert.deepEqual(calls[1]!.args, ["--continue"]);
+  assert.equal(
+    calls[1]!.env.OH_MY_HARNESS_RECEIPT_PATH,
+    "/managed/receipts/environment.json",
+  );
+  assert.equal(calls[1]!.env.OH_MY_HARNESS_RUNTIME, "claude-code");
+  assert.equal(calls[1]!.env.OH_MY_HARNESS_STATE_ROOT, "/managed");
+  assert.equal(calls[1]!.env.OH_MY_HARNESS_MANAGED_LAUNCH_DEPTH, "1");
 
   await assert.rejects(
     launchManagedRuntime(

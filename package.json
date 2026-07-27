@@ -35,6 +35,7 @@
     "plugins/",
     "scripts/harness/",
     "scripts/profile-pack.mjs",
+    "scripts/validate-dual-environment.ps1",
     "scripts/tools/"
   ],
   "engines": {

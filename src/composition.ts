@@ -34,6 +34,7 @@ import {
 import type { EnvironmentInstanceId } from "./domain/environment-instance.js";
 import { repairManagedDirectory } from "./install/managed-payload.js";
 import { StalePreviewError } from "./planning/apply.js";
+import type { ManagedStateReceipt } from "./ports/state.js";
 import { runManagedRuntime } from "./runtime/managed-service.js";
 import { runReceiptDrivenStartupService } from "./runtime/startup-service.js";
 import { FileStateStore } from "./state/receipt.js";
@@ -396,7 +397,16 @@ export async function runOmh(
             target: ownership.target,
           });
         },
-        state: new FileStateStore(stateRoot),
+        state: new FileStateStore(stateRoot, {
+          validateReceipt(value) {
+            validateContractDocument(
+              "managed-state-receipt",
+              value,
+              activeRepositoryRoot,
+            );
+            return value as ManagedStateReceipt;
+          },
+        }),
       },
     );
     return {

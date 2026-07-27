@@ -156,23 +156,49 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     for (const path of [
       ".agents",
       ".claude-plugin",
-      ".opencode",
       "dist",
       "plugins",
     ]) {
       cpSync(path, join(repositoryRoot, path), { recursive: true });
     }
+    mkdirSync(join(repositoryRoot, ".opencode"), { recursive: true });
+    copyFileSync(
+      join(".opencode", "package.json"),
+      join(repositoryRoot, ".opencode", "package.json"),
+    );
+    cpSync(
+      join(".opencode", "plugins"),
+      join(repositoryRoot, ".opencode", "plugins"),
+      { recursive: true },
+    );
+    mkdirSync(join(repositoryRoot, "scripts", "harness"), {
+      recursive: true,
+    });
+    copyFileSync(
+      join("scripts", "harness", "acquisition.mjs"),
+      join(repositoryRoot, "scripts", "harness", "acquisition.mjs"),
+    );
     copyFileSync("package.json", join(repositoryRoot, "package.json"));
-    cpSync(
-      join("node_modules", "zod"),
-      join(repositoryRoot, "node_modules", "zod"),
-      { recursive: true },
-    );
-    cpSync(
-      join("node_modules", "typebox"),
-      join(repositoryRoot, "node_modules", "typebox"),
-      { recursive: true },
-    );
+    for (const dependency of [
+      "b4a",
+      "bare-events",
+      "events-universal",
+      "fast-fifo",
+      "jsonc-parser",
+      "pend",
+      "streamx",
+      "tar-stream",
+      "text-decoder",
+      "typebox",
+      "yauzl",
+      "zod",
+    ]) {
+      cpSync(
+        join("node_modules", dependency),
+        join(repositoryRoot, "node_modules", dependency),
+        { recursive: true },
+      );
+    }
     const claudeConfigRoot = join(root, "claude");
     const officialInstallPaths = createOfficialMarketplaceFixture(
       repositoryRoot,
@@ -322,6 +348,37 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(existsSync(stateRoot), false);
     assert.equal(calls.length, 0);
     assert.ok(first.preview?.digest);
+    const payloadAction = first.preview.plan?.actions.find(
+      ({ id }) => id === "plugin:runtime-package",
+    );
+    const reconcilerIdentity = payloadAction?.payload?.receiptIdentity as
+      | { readonly target?: unknown }
+      | undefined;
+    assert.equal(
+      reconcilerIdentity?.target,
+      join(payloadAction?.target ?? "", "dist", "cli", "main.js"),
+      "preview must bind reconciliation to the stable managed generation",
+    );
+
+    const userOwnedMarketplace = join(root, "user-owned-marketplace");
+    mkdirSync(userOwnedMarketplace);
+    marketplaces.set("oh-my-harness", userOwnedMarketplace);
+    const blockedByUserMarketplace = await runOmh(
+      [...previewArgs, "--apply", "--digest", first.preview.digest],
+      commonOptions,
+    );
+    assert.equal(blockedByUserMarketplace.state, "partial-unready");
+    assert.match(
+      blockedByUserMarketplace.apply?.failure ?? "",
+      /Claude marketplace oh-my-harness points to another source/u,
+    );
+    assert.doesNotMatch(
+      blockedByUserMarketplace.apply?.failure ?? "",
+      /rollback failed/u,
+    );
+    assert.equal(marketplaces.get("oh-my-harness"), userOwnedMarketplace);
+    assert.equal(pluginInstalled, false);
+    marketplaces.delete("oh-my-harness");
 
     const applied = await runOmh(
       [...previewArgs, "--apply", "--digest", first.preview.digest],
@@ -475,9 +532,12 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       commonOptions,
     );
     assert.equal(startup.envelope?.context.profileId, "personal");
+    const expectedStartupMode = process.platform === "win32"
+      ? "degraded"
+      : "ready";
     assert.equal(
       startup.envelope?.context.mode,
-      "ready",
+      expectedStartupMode,
       JSON.stringify(startup.envelope, null, 2),
     );
     assert.match(startup.envelope?.renderedContext ?? "", /profile: personal/);
@@ -488,6 +548,14 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       ({ id }) => id === "plugin:runtime-package",
     );
     assert.ok(payload?.repairSource);
+    const reconciler = receipt.ownership.find(
+      ({ id }) => id === "omh-reconciler",
+    );
+    assert.equal(
+      reconciler?.target,
+      join(payload.target, "dist", "cli", "main.js"),
+      "startup reconciliation must use the target-owned managed generation",
+    );
     rmSync(payload.target, { recursive: true, force: true });
     const drifted = await runOmh(
       ["status", "--root", stateRoot],
@@ -509,7 +577,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       ],
       commonOptions,
     );
-    assert.equal(repaired.envelope?.context.mode, "ready");
+    assert.equal(repaired.envelope?.context.mode, expectedStartupMode);
     assert.equal(existsSync(payload.target), true);
 
     const callsBeforeStale = calls.length;

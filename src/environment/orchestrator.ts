@@ -8,6 +8,7 @@ import {
   rmSync,
 } from "node:fs";
 import {
+  isAbsolute,
   join,
   resolve,
 } from "node:path";
@@ -77,6 +78,7 @@ import {
   type PackageInstallPlanEntry,
 } from "../install/packages.js";
 import type {
+  ApplyRecoveryRecord,
   ManagedStateReceipt,
 } from "../ports/state.js";
 import {
@@ -97,6 +99,7 @@ import type {
 import { FileStateStore } from "../state/receipt.js";
 import {
   atomicWriteFile,
+  assertSafeManagedRootPath,
   findTrustedExecutable,
   isPathStrictlyWithin,
   observeRegularFile,
@@ -112,6 +115,8 @@ import {
   codexRegistrationReady,
   inspectClaudeOfficialMarketplaceRegistration,
   inspectClaudeOfficialPluginRegistration,
+  inspectClaudeManagedRuntimeRegistration,
+  inspectCodexManagedRuntimeRegistration,
   inspectOpenCodeSkillRegistration,
   openCodeSkillsReady,
   openCodeConfigPath,
@@ -875,6 +880,23 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
+function previousManagedPayloadRoot(model: EnvironmentModel): string | null {
+  if (!model.clean || model.currentReceipt === null) return null;
+  const ownership = model.currentReceipt.ownership.find(
+    ({ id, kind, scope }) =>
+      id === "plugin:runtime-package"
+      && kind === "directory"
+      && scope === "managed",
+  );
+  if (
+    ownership === undefined
+    || resolve(ownership.target) === resolve(model.managedPayload.activeRoot)
+  ) {
+    return null;
+  }
+  return ownership.target;
+}
+
 function capabilityMarkerPath(
   stateRoot: string,
   runtimeId: AgentId,
@@ -988,8 +1010,19 @@ function planActions(
     Pick<EnvironmentOrchestratorOptions, "env" | "os" | "repositoryRoot">
   >,
 ): PlanAction[] {
-  const reconcilerPath = resolve(options.repositoryRoot, "dist", "cli", "main.js");
-  const reconcilerDigest = sha256File(reconcilerPath);
+  const reconcilerSource = resolve(
+    options.repositoryRoot,
+    "dist",
+    "cli",
+    "main.js",
+  );
+  const reconcilerDigest = sha256File(reconcilerSource);
+  const reconcilerTarget = join(
+    model.managedPayload.activeRoot,
+    "dist",
+    "cli",
+    "main.js",
+  );
   const actions: PlanAction[] = [
     {
       id: "omh-node",
@@ -1005,19 +1038,6 @@ function planActions(
       target: process.execPath,
     },
     {
-      id: RECONCILER_ACTION_ID,
-      kind: "write",
-      payload: {
-        contentDigest: reconcilerDigest,
-        operation: "verify-file",
-        ownershipKind: "file",
-        ownershipScope: "external",
-      },
-      preimage: observeRegularFile(reconcilerPath),
-      required: true,
-      target: reconcilerPath,
-    },
-    {
       id: "plugin:runtime-package",
       kind: "acquire",
       payload: {
@@ -1026,6 +1046,13 @@ function planActions(
         ownershipKind: "directory",
         ownershipScope: "managed",
         repairSource: model.managedPayload.storeRoot,
+        receiptIdentity: {
+          digest: reconcilerDigest,
+          id: RECONCILER_ACTION_ID,
+          kind: "file",
+          scope: "external",
+          target: reconcilerTarget,
+        },
       },
       preimage: observeManagedPath(model.managedPayload.activeRoot),
       required: true,
@@ -1234,6 +1261,7 @@ function planActions(
       options.os,
       target,
     );
+    const previousActiveRoot = previousManagedPayloadRoot(model);
     actions.push({
       id: `runtime:${runtimeId}:native`,
       kind: "register",
@@ -1245,6 +1273,7 @@ function planActions(
         operation: "register-runtime",
         ownershipKind: "registration",
         ownershipScope: "managed",
+        ...(previousActiveRoot === null ? {} : { previousActiveRoot }),
         receiptPath: model.receiptPath,
         runtimeId,
       },
@@ -1630,7 +1659,9 @@ async function executeAction(
           model.officialMarketplaceLock,
           createOfficialMarketplaceGitOperations(
             currentGit,
-            (command, args) => runCommand(command, args, options),
+            (command, args, env) =>
+              runCommand(command, args, { ...options, env }),
+            options.env,
           ),
         );
       }
@@ -1781,6 +1812,11 @@ async function executeAction(
     const executable = runtimeExecutable(rawId, model, options);
     const registration = {
       activeRoot: model.managedPayload.activeRoot,
+      ...(action.payload?.previousActiveRoot === undefined
+        ? {}
+        : {
+            previousActiveRoot: payloadString(action, "previousActiveRoot"),
+          }),
       receiptPath: model.receiptPath,
     };
     const nativeRun = (command: string, args: readonly string[]) =>
@@ -1803,17 +1839,642 @@ async function executeAction(
   throw new Error(`unsupported environment action: ${operation}`);
 }
 
+type EnvironmentRollbackSnapshot =
+  | {
+      readonly existed: false;
+      readonly expectedKind: "directory" | "file";
+      readonly target: string;
+    }
+  | {
+      readonly backup: string;
+      readonly digest: string;
+      readonly existed: true;
+      readonly kind: "directory" | "file";
+      readonly target: string;
+    };
+
+type EnvironmentNativeRecovery =
+  | {
+      readonly executablePath: string;
+      readonly kind: "claude-marketplace-absent";
+      readonly marketplaceName: string;
+      readonly marketplaceRoot: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "claude-runtime-absent";
+      readonly receiptPath: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "claude-runtime-previous";
+      readonly previousActiveRoot: string;
+      readonly receiptPath: string;
+    }
+  | {
+      readonly capabilityId: string;
+      readonly executablePath: string;
+      readonly kind: "claude-plugin-absent";
+      readonly selector: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "codex-runtime-absent";
+      readonly receiptPath: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly executablePath: string;
+      readonly kind: "codex-runtime-previous";
+      readonly previousActiveRoot: string;
+      readonly receiptPath: string;
+    };
+
+interface EnvironmentRecoveryPayload {
+  readonly backupRoot: string;
+  readonly native: EnvironmentNativeRecovery | null;
+  readonly operation: string;
+  readonly schemaVersion: "2.0.0";
+  readonly snapshots: readonly EnvironmentRollbackSnapshot[];
+}
+
+function recoveryKeysMatch(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+function validatedNativeRecovery(
+  value: unknown,
+  actionId: string,
+): EnvironmentNativeRecovery | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "object"
+    || Array.isArray(value)
+    || value === null
+    || typeof (value as Record<string, unknown>).kind !== "string"
+  ) {
+    throw new Error(`invalid native recovery record: ${actionId}`);
+  }
+  const native = value as Record<string, unknown>;
+  const kind = native.kind;
+  const keySets: Readonly<Record<string, readonly string[]>> = {
+    "claude-marketplace-absent": [
+      "executablePath",
+      "kind",
+      "marketplaceName",
+      "marketplaceRoot",
+    ],
+    "claude-plugin-absent": [
+      "capabilityId",
+      "executablePath",
+      "kind",
+      "selector",
+    ],
+    "claude-runtime-absent": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "receiptPath",
+    ],
+    "claude-runtime-previous": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "previousActiveRoot",
+      "receiptPath",
+    ],
+    "codex-runtime-absent": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "receiptPath",
+    ],
+    "codex-runtime-previous": [
+      "activeRoot",
+      "executablePath",
+      "kind",
+      "previousActiveRoot",
+      "receiptPath",
+    ],
+  };
+  const expectedKeys = keySets[String(kind)];
+  if (
+    expectedKeys === undefined
+    || !recoveryKeysMatch(native, expectedKeys)
+    || expectedKeys.some(
+      (key) =>
+        key !== "kind"
+        && (
+          typeof native[key] !== "string"
+          || String(native[key]).length === 0
+        ),
+    )
+    || expectedKeys.some(
+      (key) =>
+        [
+          "activeRoot",
+          "executablePath",
+          "marketplaceRoot",
+          "previousActiveRoot",
+          "receiptPath",
+        ].includes(key)
+        && !isAbsolute(String(native[key])),
+    )
+  ) {
+    throw new Error(`invalid native recovery record: ${actionId}`);
+  }
+  return native as unknown as EnvironmentNativeRecovery;
+}
+
+function snapshotDigest(
+  target: string,
+  kind: "directory" | "file",
+): string {
+  return kind === "directory"
+    ? hashManagedDirectory(target)
+    : sha256File(target);
+}
+
+function recoveryPayload(
+  recovery: ApplyRecoveryRecord,
+): EnvironmentRecoveryPayload {
+  const value = recovery.payload;
+  if (
+    recovery.kind !== "environment-action-v1"
+    || !recoveryKeysMatch(
+      value as Record<string, unknown>,
+      ["backupRoot", "native", "operation", "schemaVersion", "snapshots"],
+    )
+    || value.schemaVersion !== "2.0.0"
+    || typeof value.backupRoot !== "string"
+    || !isAbsolute(value.backupRoot)
+    || typeof value.operation !== "string"
+    || ![
+      "acquire-agent",
+      "acquire-claude-official-marketplace",
+      "install-package",
+      "materialize-claude-official-adapter",
+      "materialize-runtime-package",
+      "register-claude-official",
+      "register-claude-official-marketplace",
+      "register-opencode-skill",
+      "register-runtime",
+      "remove-owned",
+    ].includes(value.operation)
+    || !Array.isArray(value.snapshots)
+    || value.snapshots.length < 1
+    || value.snapshots.length > 2
+  ) {
+    throw new Error(`invalid environment recovery record: ${recovery.actionId}`);
+  }
+  const native = validatedNativeRecovery(value.native, recovery.actionId);
+  if (native !== null) {
+    const expectedOperation =
+      native.kind === "claude-marketplace-absent"
+        ? "register-claude-official-marketplace"
+        : native.kind === "claude-plugin-absent"
+          ? "register-claude-official"
+          : "register-runtime";
+    if (value.operation !== expectedOperation) {
+      throw new Error(`native recovery operation changed: ${recovery.actionId}`);
+    }
+  }
+  const snapshots = value.snapshots as readonly unknown[];
+  for (const value of snapshots) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error(`invalid recovery snapshot: ${recovery.actionId}`);
+    }
+    const snapshot = value as Record<string, unknown>;
+    if (
+      !recoveryKeysMatch(
+        snapshot,
+        snapshot.existed === true
+          ? ["backup", "digest", "existed", "kind", "target"]
+          : ["existed", "expectedKind", "target"],
+      )
+      || typeof snapshot.target !== "string"
+      || !isAbsolute(snapshot.target)
+      || typeof snapshot.existed !== "boolean"
+      || (
+        snapshot.existed
+        && (
+          typeof snapshot.backup !== "string"
+          || !isAbsolute(snapshot.backup)
+          || typeof snapshot.digest !== "string"
+          || !/^[0-9a-f]{64}$/u.test(snapshot.digest)
+          || !["directory", "file"].includes(String(snapshot.kind))
+        )
+      )
+      || (
+        !snapshot.existed
+        && !["directory", "file"].includes(String(snapshot.expectedKind))
+      )
+    ) {
+      throw new Error(`invalid recovery snapshot: ${recovery.actionId}`);
+    }
+  }
+  if (
+    new Set(
+      snapshots.map((snapshot) =>
+        resolve(String((snapshot as Record<string, unknown>).target))
+      ),
+    ).size !== snapshots.length
+  ) {
+    throw new Error(`duplicate recovery snapshot: ${recovery.actionId}`);
+  }
+  return {
+    backupRoot: value.backupRoot,
+    native,
+    operation: value.operation,
+    schemaVersion: "2.0.0",
+    snapshots: snapshots as readonly EnvironmentRollbackSnapshot[],
+  };
+}
+
+function recoveryTargetAllowed(
+  target: string,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): boolean {
+  const resolvedTarget = resolve(target);
+  if (
+    resolvedTarget === resolve(model.stateRoot)
+    || isPathStrictlyWithin(model.stateRoot, resolvedTarget)
+  ) {
+    return true;
+  }
+  const allowed = new Set(
+    model.openCodeSkills.map(({ target: path }) => resolve(path)),
+  );
+  allowed.add(resolve(openCodeConfigPath(options.env, options.os)));
+  for (const ownership of model.currentReceipt?.ownership ?? []) {
+    if (ownership.scope === "managed") {
+      allowed.add(resolve(ownership.target));
+    }
+  }
+  return allowed.has(resolvedTarget);
+}
+
+function validateRecoverySnapshots(
+  payload: EnvironmentRecoveryPayload,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): { readonly backupRoot: string; readonly backupsExist: boolean } {
+  const rollbackRoot = join(model.stateRoot, "journal", "rollback");
+  const backupRoot = assertSafeManagedRootPath(
+    payload.backupRoot,
+    "rollback backup root",
+  );
+  if (!isPathStrictlyWithin(rollbackRoot, backupRoot)) {
+    throw new Error("rollback backup root escapes managed state");
+  }
+  for (const snapshot of payload.snapshots) {
+    if (!recoveryTargetAllowed(snapshot.target, model, options)) {
+      throw new Error(`rollback target is outside the allowed roots: ${snapshot.target}`);
+    }
+  }
+  if (!existsSync(backupRoot)) {
+    return { backupRoot, backupsExist: false };
+  }
+  const rootStat = lstatSync(backupRoot);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error("rollback backup root is not a real directory");
+  }
+  for (const snapshot of payload.snapshots) {
+    if (!snapshot.existed) continue;
+    if (!isPathStrictlyWithin(backupRoot, snapshot.backup)) {
+      throw new Error(`rollback backup escapes its action root: ${snapshot.backup}`);
+    }
+    const stat = lstatSync(snapshot.backup);
+    if (
+      stat.isSymbolicLink()
+      || (snapshot.kind === "directory") !== stat.isDirectory()
+      || snapshotDigest(snapshot.backup, snapshot.kind) !== snapshot.digest
+    ) {
+      throw new Error(`rollback backup identity changed: ${snapshot.backup}`);
+    }
+  }
+  return { backupRoot, backupsExist: true };
+}
+
+function assertRecoveryAlreadyRestored(
+  payload: EnvironmentRecoveryPayload,
+): void {
+  for (const snapshot of payload.snapshots) {
+    if (!snapshot.existed) {
+      if (existsSync(snapshot.target)) {
+        throw new Error(
+          `rollback backup is missing before target removal: ${snapshot.target}`,
+        );
+      }
+      continue;
+    }
+    if (!existsSync(snapshot.target)) {
+      throw new Error(
+        `rollback backup and original target are both missing: ${snapshot.target}`,
+      );
+    }
+    const stat = lstatSync(snapshot.target);
+    if (
+      stat.isSymbolicLink()
+      || (snapshot.kind === "directory") !== stat.isDirectory()
+      || snapshotDigest(snapshot.target, snapshot.kind) !== snapshot.digest
+    ) {
+      throw new Error(
+        `rollback backup is missing and target is not restored: ${snapshot.target}`,
+      );
+    }
+  }
+}
+
+function rollbackNativeRegistration(
+  native: EnvironmentNativeRecovery | null,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  if (native === null) return;
+  if (
+    native.kind === "codex-runtime-absent"
+    || native.kind === "codex-runtime-previous"
+  ) {
+    const executable = runtimeExecutable("codex", model, options);
+    if (resolve(executable) !== resolve(native.executablePath)) {
+      throw new Error("Codex recovery executable changed");
+    }
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    if (
+      resolve(native.activeRoot) !== resolve(model.managedPayload.activeRoot)
+      || resolve(native.receiptPath) !== resolve(model.receiptPath)
+    ) {
+      throw new Error("Codex runtime recovery identity changed");
+    }
+    if (native.kind === "codex-runtime-previous") {
+      const expectedPrevious = previousManagedPayloadRoot(model);
+      if (
+        expectedPrevious === null
+        || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
+      ) {
+        throw new Error("Codex prior runtime recovery identity changed");
+      }
+      registerCodexRuntime(
+        executable,
+        {
+          activeRoot: native.previousActiveRoot,
+          previousActiveRoot: native.activeRoot,
+          receiptPath: native.receiptPath,
+        },
+        nativeRun,
+      );
+      return;
+    }
+    const state = inspectCodexManagedRuntimeRegistration(
+      executable,
+      {
+        activeRoot: native.activeRoot,
+        receiptPath: native.receiptPath,
+      },
+      nativeRun,
+    );
+    if (state.marketplace === "collision" || state.plugin === "collision") {
+      throw new Error("Codex runtime recovery encountered a collision");
+    }
+    if (state.plugin === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "remove",
+        "oh-my-harness@oh-my-harness",
+        "--json",
+      ]);
+    }
+    if (state.marketplace === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "marketplace",
+        "remove",
+        "oh-my-harness",
+        "--json",
+      ]);
+    }
+    return;
+  }
+  const executable = runtimeExecutable("claude-code", model, options);
+  if (resolve(executable) !== resolve(native.executablePath)) {
+    throw new Error("Claude recovery executable changed");
+  }
+  const nativeRun = (command: string, args: readonly string[]) =>
+    runCommand(command, args, options);
+  if (native.kind === "claude-marketplace-absent") {
+    const adapter = model.officialMarketplaceAdapter;
+    if (
+      adapter === null
+      || adapter.name !== native.marketplaceName
+      || resolve(adapter.root) !== resolve(native.marketplaceRoot)
+    ) {
+      throw new Error("Claude marketplace recovery identity changed");
+    }
+    const state = inspectClaudeOfficialMarketplaceRegistration(
+      executable,
+      { name: native.marketplaceName, root: native.marketplaceRoot },
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error("Claude marketplace recovery encountered a collision");
+    }
+    if (state === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "marketplace",
+        "remove",
+        native.marketplaceName,
+      ]);
+    }
+    return;
+  }
+  if (native.kind === "claude-plugin-absent") {
+    const plugin = model.officialMarketplace.state === "ready"
+      ? model.officialMarketplace.plugins.find(
+          ({ capabilityId, selector }) =>
+            capabilityId === native.capabilityId
+            && selector === native.selector,
+        )
+      : undefined;
+    if (plugin === undefined) {
+      throw new Error("Claude plugin recovery identity changed");
+    }
+    const state = inspectClaudeOfficialPluginRegistration(
+      executable,
+      plugin,
+      nativeRun,
+    );
+    if (state === "collision") {
+      throw new Error("Claude plugin recovery encountered a collision");
+    }
+    if (state === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "uninstall",
+        native.selector,
+        "--scope",
+        "user",
+      ]);
+    }
+    return;
+  }
+  if (
+    resolve(native.activeRoot) !== resolve(model.managedPayload.activeRoot)
+    || resolve(native.receiptPath) !== resolve(model.receiptPath)
+  ) {
+    throw new Error("Claude runtime recovery identity changed");
+  }
+  if (native.kind === "claude-runtime-previous") {
+    const expectedPrevious = previousManagedPayloadRoot(model);
+    if (
+      expectedPrevious === null
+      || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
+    ) {
+      throw new Error("Claude prior runtime recovery identity changed");
+    }
+    if (
+      claudeRegistrationReady(
+        executable,
+        {
+          activeRoot: native.previousActiveRoot,
+          receiptPath: native.receiptPath,
+        },
+        [],
+        nativeRun,
+      )
+    ) {
+      return;
+    }
+    registerClaudeRuntime(
+      executable,
+      {
+        activeRoot: native.previousActiveRoot,
+        previousActiveRoot: native.activeRoot,
+        receiptPath: native.receiptPath,
+      },
+      nativeRun,
+    );
+    return;
+  }
+  const state = inspectClaudeManagedRuntimeRegistration(
+    executable,
+    {
+      activeRoot: native.activeRoot,
+      receiptPath: native.receiptPath,
+    },
+    nativeRun,
+  );
+  if (state.plugin === "collision" || state.marketplace === "collision") {
+    throw new Error("Claude runtime recovery encountered a collision");
+  }
+  if (state.plugin === "ready") {
+    nativeRun(executable, [
+      "plugin",
+      "uninstall",
+      "oh-my-harness@oh-my-harness",
+      "--scope",
+      "user",
+    ]);
+  }
+  if (state.marketplace === "ready") {
+    nativeRun(executable, [
+      "plugin",
+      "marketplace",
+      "remove",
+      "oh-my-harness",
+    ]);
+  }
+}
+
+function recoverEnvironmentAction(
+  recovery: ApplyRecoveryRecord,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  const payload = recoveryPayload(recovery);
+  const validation = validateRecoverySnapshots(payload, model, options);
+  if (!validation.backupsExist) {
+    assertRecoveryAlreadyRestored(payload);
+    return;
+  }
+  const failures: unknown[] = [];
+  try {
+    rollbackNativeRegistration(payload.native, model, options);
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    for (const snapshot of [...payload.snapshots].reverse()) {
+      if (existsSync(snapshot.target)) {
+        const current = lstatSync(snapshot.target);
+        const expectedDirectory = snapshot.existed
+          ? snapshot.kind === "directory"
+          : snapshot.expectedKind === "directory";
+        if (
+          current.isSymbolicLink()
+          || current.isDirectory() !== expectedDirectory
+        ) {
+          throw new Error(`rollback target type changed: ${snapshot.target}`);
+        }
+        rmSync(snapshot.target, {
+          force: true,
+          recursive: current.isDirectory(),
+        });
+      }
+      if (snapshot.existed) {
+        cpSync(snapshot.backup, snapshot.target, {
+          errorOnExist: true,
+          force: false,
+          preserveTimestamps: true,
+          recursive: snapshot.kind === "directory",
+        });
+      }
+    }
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      failures.map((error) =>
+        error instanceof Error ? error.message : String(error)
+      ).join("; "),
+    );
+  }
+  rmSync(validation.backupRoot, { force: true, recursive: true });
+}
+
+function commitEnvironmentRecovery(
+  recovery: ApplyRecoveryRecord,
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): void {
+  const payload = recoveryPayload(recovery);
+  const validation = validateRecoverySnapshots(payload, model, options);
+  if (!validation.backupsExist) return;
+  rmSync(validation.backupRoot, { force: true, recursive: true });
+}
+
 function prepareActionRollback(
   action: PlanAction,
   model: EnvironmentModel,
   options: ReturnType<typeof normalizedOptions>,
 ): {
   readonly commit: () => Promise<void>;
+  readonly recovery: ApplyRecoveryRecord;
   readonly rollback: () => Promise<void>;
 } | undefined {
   const operation = payloadString(action, "operation");
   if (["verify-file", "verify-agent"].includes(operation)) return undefined;
-  let rollbackNative: (() => void) | undefined;
+  let native: EnvironmentNativeRecovery | null = null;
   if (operation === "register-claude-official-marketplace") {
     const adapter = model.officialMarketplaceAdapter;
     if (adapter === null) {
@@ -1833,14 +2494,144 @@ function prepareActionRollback(
       );
     }
     if (state === "missing") {
-      rollbackNative = () => {
-        nativeRun(executable, [
-          "plugin",
-          "marketplace",
-          "remove",
-          adapter.name,
-        ]);
+      native = {
+        executablePath: executable,
+        kind: "claude-marketplace-absent",
+        marketplaceName: adapter.name,
+        marketplaceRoot: adapter.root,
       };
+    }
+  } else if (
+    operation === "register-runtime"
+    && action.payload?.runtimeId === "claude-code"
+  ) {
+    const executable = runtimeExecutable("claude-code", model, options);
+    const previousActiveRoot = typeof action.payload.previousActiveRoot === "string"
+      ? payloadString(action, "previousActiveRoot")
+      : null;
+    if (previousActiveRoot !== null) {
+      const nativeRun = (command: string, args: readonly string[]) =>
+        runCommand(command, args, options);
+      if (
+        !claudeRegistrationReady(
+          executable,
+          {
+            activeRoot: previousActiveRoot,
+            receiptPath: model.receiptPath,
+          },
+          [],
+          nativeRun,
+        )
+      ) {
+        throw new Error(
+          "Claude managed registration no longer matches the prior receipt",
+        );
+      }
+      native = {
+        activeRoot: model.managedPayload.activeRoot,
+        executablePath: executable,
+        kind: "claude-runtime-previous",
+        previousActiveRoot,
+        receiptPath: model.receiptPath,
+      };
+    } else {
+      const nativeRun = (command: string, args: readonly string[]) =>
+        runCommand(command, args, options);
+      const state = inspectClaudeManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace === "collision") {
+        throw new Error(
+          "Claude marketplace oh-my-harness points to another source",
+        );
+      }
+      if (state.plugin === "collision") {
+        throw new Error(
+          "oh-my-harness@oh-my-harness collides with an existing user-owned Claude plugin",
+        );
+      }
+      if (state.marketplace !== state.plugin) {
+        throw new Error(
+          "Claude managed runtime registration is partial and cannot be adopted",
+        );
+      }
+      if (state.marketplace === "missing") {
+        native = {
+          activeRoot: model.managedPayload.activeRoot,
+          executablePath: executable,
+          kind: "claude-runtime-absent",
+          receiptPath: model.receiptPath,
+        };
+      }
+    }
+  } else if (
+    operation === "register-runtime"
+    && action.payload?.runtimeId === "codex"
+  ) {
+    const executable = runtimeExecutable("codex", model, options);
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const previousActiveRoot = typeof action.payload.previousActiveRoot === "string"
+      ? payloadString(action, "previousActiveRoot")
+      : null;
+    if (previousActiveRoot !== null) {
+      const state = inspectCodexManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: previousActiveRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace !== "ready" || state.plugin !== "ready") {
+        throw new Error(
+          "Codex managed registration no longer matches the prior receipt",
+        );
+      }
+      native = {
+        activeRoot: model.managedPayload.activeRoot,
+        executablePath: executable,
+        kind: "codex-runtime-previous",
+        previousActiveRoot,
+        receiptPath: model.receiptPath,
+      };
+    } else {
+      const state = inspectCodexManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
+      if (state.marketplace === "collision") {
+        throw new Error(
+          "Codex marketplace oh-my-harness points to another root",
+        );
+      }
+      if (state.plugin === "collision") {
+        throw new Error(
+          "oh-my-harness@oh-my-harness collides with an existing Codex plugin registration",
+        );
+      }
+      if (state.marketplace !== state.plugin) {
+        throw new Error(
+          "Codex managed runtime registration is partial and cannot be adopted",
+        );
+      }
+      if (state.marketplace === "missing") {
+        native = {
+          activeRoot: model.managedPayload.activeRoot,
+          executablePath: executable,
+          kind: "codex-runtime-absent",
+          receiptPath: model.receiptPath,
+        };
+      }
     }
   } else if (operation === "register-claude-official") {
     const plugin = model.officialMarketplace.state === "ready"
@@ -1867,14 +2658,11 @@ function prepareActionRollback(
       );
     }
     if (state === "missing") {
-      rollbackNative = () => {
-        nativeRun(executable, [
-          "plugin",
-          "uninstall",
-          plugin.selector,
-          "--scope",
-          "user",
-        ]);
+      native = {
+        capabilityId: plugin.capabilityId,
+        executablePath: executable,
+        kind: "claude-plugin-absent",
+        selector: plugin.selector,
       };
     }
   }
@@ -1886,26 +2674,17 @@ function prepareActionRollback(
   ) {
     targets.push(observedTarget);
   }
-  const backupRoot = join(
-    model.stateRoot,
-    "journal",
-    "rollback",
-    `${action.id.replaceAll(":", "-")}-${randomBytes(8).toString("hex")}`,
+  const backupRoot = assertSafeManagedRootPath(
+    join(
+      model.stateRoot,
+      "journal",
+      "rollback",
+      `${action.id.replaceAll(":", "-")}-${randomBytes(8).toString("hex")}`,
+    ),
+    "rollback backup root",
   );
   mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
-  let snapshots: Array<
-    | {
-        readonly existed: false;
-        readonly expectedKind: "directory" | "file";
-        readonly target: string;
-      }
-    | {
-        readonly backup: string;
-        readonly existed: true;
-        readonly kind: "directory" | "file";
-        readonly target: string;
-      }
-  >;
+  let snapshots: EnvironmentRollbackSnapshot[];
   try {
     snapshots = targets.map((target, index) => {
       if (!existsSync(target)) {
@@ -1929,6 +2708,7 @@ function prepareActionRollback(
       if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
         throw new Error(`rollback target is not a regular file or directory: ${target}`);
       }
+      const kind = stat.isDirectory() ? "directory" as const : "file" as const;
       const backup = join(backupRoot, String(index));
       cpSync(target, backup, {
         errorOnExist: true,
@@ -1938,8 +2718,9 @@ function prepareActionRollback(
       });
       return {
         backup,
+        digest: snapshotDigest(backup, kind),
         existed: true as const,
-        kind: stat.isDirectory() ? "directory" as const : "file" as const,
+        kind,
         target,
       };
     });
@@ -1947,52 +2728,24 @@ function prepareActionRollback(
     rmSync(backupRoot, { force: true, recursive: true });
     throw error;
   }
+  const recovery: ApplyRecoveryRecord = {
+    actionId: action.id,
+    kind: "environment-action-v1",
+    payload: {
+      backupRoot,
+      native,
+      operation,
+      schemaVersion: "2.0.0",
+      snapshots,
+    },
+  };
   return {
     commit: async () => {
-      rmSync(backupRoot, { force: true, recursive: true });
+      commitEnvironmentRecovery(recovery, model, options);
     },
+    recovery,
     rollback: async () => {
-      let nativeFailure: unknown;
-      try {
-        rollbackNative?.();
-      } catch (error) {
-        nativeFailure = error;
-      }
-      let filesystemFailure: unknown;
-      try {
-        for (const snapshot of [...snapshots].reverse()) {
-          if (existsSync(snapshot.target)) {
-            const current = lstatSync(snapshot.target);
-            const expectedDirectory = snapshot.existed
-              ? snapshot.kind === "directory"
-              : snapshot.expectedKind === "directory";
-            if (current.isSymbolicLink() || current.isDirectory() !== expectedDirectory) {
-              throw new Error(`rollback target type changed: ${snapshot.target}`);
-            }
-            rmSync(snapshot.target, {
-              force: true,
-              recursive: current.isDirectory(),
-            });
-          }
-          if (snapshot.existed) {
-            cpSync(snapshot.backup, snapshot.target, {
-              errorOnExist: true,
-              force: false,
-              preserveTimestamps: true,
-              recursive: snapshot.kind === "directory",
-            });
-          }
-        }
-        rmSync(backupRoot, { force: true, recursive: true });
-      } catch (error) {
-        filesystemFailure = error;
-      }
-      const failures = [nativeFailure, filesystemFailure]
-        .filter((error) => error !== undefined)
-        .map((error) => error instanceof Error ? error.message : String(error));
-      if (failures.length > 0) {
-        throw new Error(failures.join("; "));
-      }
+      recoverEnvironmentAction(recovery, model, options);
     },
   };
 }
@@ -2033,13 +2786,26 @@ export async function applyEnvironment(
     throw new StalePreviewError("environment preview digest is stale");
   }
   const result = await applyExactPlan(preview.plan, expectedDigest, {
-    state: new FileStateStore(model.stateRoot),
+    state: new FileStateStore(model.stateRoot, {
+      validateReceipt(value) {
+        validateContractDocument(
+          "managed-state-receipt",
+          value,
+          normalized.repositoryRoot,
+        );
+        return value as ManagedStateReceipt;
+      },
+    }),
+    commitRecovery: async (recovery) =>
+      commitEnvironmentRecovery(recovery, model, normalized),
     observe: async (action) => actionPreimage(action),
     prepare: async (action) => prepareActionRollback(
       action,
       model,
       normalized,
     ),
+    recover: async (recovery) =>
+      recoverEnvironmentAction(recovery, model, normalized),
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),

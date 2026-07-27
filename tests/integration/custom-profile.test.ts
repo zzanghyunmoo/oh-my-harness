@@ -126,7 +126,11 @@ test("U12 publication refuses occupied targets, symlink escapes, and stale previ
   const outside = mkdtempSync(join(tmpdir(), "omh-custom-outside-"));
   try {
     const customRoot = join(symlinkRoot, "harness", "profiles", "custom");
-    symlinkSync(outside, customRoot);
+    symlinkSync(
+      outside,
+      customRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     assert.throws(
       () => previewCustomProfilePublication({
         repositoryRoot: symlinkRoot,

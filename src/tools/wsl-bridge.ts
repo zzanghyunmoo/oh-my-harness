@@ -1,8 +1,4 @@
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  lstatSync,
-} from "node:fs";
 import { homedir } from "node:os";
 import {
   isAbsolute,
@@ -15,7 +11,11 @@ import { fileURLToPath } from "node:url";
 import type { ToolRoute } from "../domain/environment-instance.js";
 import {
   parseWslDistributionList,
+  parseWslHome,
+  resolveWslExecutable,
   sanitizeWindowsEnvironment,
+  SYSTEM_LINUX_PATH,
+  trustedWslUserPath,
   type WslProcessOptions,
   type WslProcessResult,
   type WslProcessRunner,
@@ -42,7 +42,6 @@ import {
 } from "./policy.js";
 
 const BRIDGE_SCHEMA_VERSION = "1.0.0";
-const LINUX_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const MAX_BRIDGE_BYTES = 1024 * 1024;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -146,20 +145,6 @@ function boundedText(value: string, label: string): string {
   return value.replaceAll("\0", "").trim();
 }
 
-function resolveWslExecutable(environment: NodeJS.ProcessEnv): string {
-  const systemRoot = environment.SystemRoot ?? environment.WINDIR;
-  if (!systemRoot) throw new Error("SystemRoot is required to locate trusted wsl.exe");
-  const executable = join(systemRoot, "System32", "wsl.exe");
-  if (!existsSync(executable)) {
-    throw new Error(`trusted wsl.exe is missing: ${executable}`);
-  }
-  const stat = lstatSync(executable);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error(`trusted wsl.exe is not a regular file: ${executable}`);
-  }
-  return executable;
-}
-
 class NodeWslBridgeRunner implements WslProcessRunner {
   run(
     command: string,
@@ -224,7 +209,7 @@ export const WSL_BRIDGE_BOOTSTRAP = String.raw`
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 const maxReceipt=1024*1024,maxFile=16*1024*1024,maxTotal=64*1024*1024,maxEntries=4096;
 const stable=(v)=>Array.isArray(v)?"["+v.map(stable).join(",")+"]":v&&typeof v==="object"?"{"+Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,e])=>JSON.stringify(k)+":"+stable(e)).join(",")+"}":JSON.stringify(v);
@@ -241,14 +226,17 @@ if(receipt?.desiredState?.instance?.id!=="wsl-ubuntu"||resolve(receipt.desiredSt
 const owned=(receipt.ownership||[]).filter((entry)=>entry.id==="plugin:runtime-package"&&entry.kind==="directory"&&entry.scope==="managed");
 if(owned.length!==1)throw new Error("WSL receipt has no unique managed runtime payload");
 const payload=owned[0],payloadRoot=resolve(payload.target);
-if(relative(resolve(stateRoot),payloadRoot).startsWith(".."+sep))throw new Error("WSL payload escapes its state root");
+const payloadRelative=relative(resolve(stateRoot),payloadRoot);
+if(payloadRelative===""||payloadRelative===".."||payloadRelative.startsWith(".."+sep)||isAbsolute(payloadRelative))throw new Error("WSL payload escapes its state root");
+const payloadStat=lstatSync(payloadRoot);
+if(payloadStat.isSymbolicLink()||!payloadStat.isDirectory())throw new Error("WSL payload root is not a regular directory");
 let entries=0,total=0;
 const files=[];
 const visit=(root,path,prefix)=>{const stat=lstatSync(path);if(stat.isSymbolicLink())throw new Error("WSL payload contains a symbolic link");entries+=1;if(entries>maxEntries)throw new Error("WSL payload has too many entries");if(stat.isDirectory()){for(const entry of readdirSync(path,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)))visit(root,join(path,entry.name),join(prefix,entry.name));return;}if(!stat.isFile()||stat.size>maxFile)throw new Error("WSL payload contains an invalid file");total+=stat.size;if(total>maxTotal)throw new Error("WSL payload exceeds the byte limit");files.push({path:relative(root,join(root,prefix)).split(sep).join("/"),digest:createHash("sha256").update(readFileSync(path)).digest("hex")});};
 for(const entry of readdirSync(payloadRoot,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)))visit(payloadRoot,join(payloadRoot,entry.name),entry.name);
 const digest=createHash("sha256");for(const file of files.sort((a,b)=>a.path.localeCompare(b.path)))digest.update(file.path+"\0"+file.digest+"\0","utf8");
 if(digest.digest("hex")!==payload.digest)throw new Error("WSL managed runtime payload drifted");
-process.env.HOME=homedir();process.env.PATH=${JSON.stringify(LINUX_PATH)};
+process.env.HOME=homedir();process.env.PATH=join(process.env.HOME,".local","bin")+":"+${JSON.stringify(SYSTEM_LINUX_PATH)};
 const bridge=await import(pathToFileURL(join(payloadRoot,"dist","tools","wsl-bridge.js")).href);
 await bridge.runWslBridgeFromProcess({expectedReceiptFingerprint:expected});
 `;
@@ -467,9 +455,9 @@ async function invokeBridge(
     runner,
     executable,
     [
-      "--distribution",
+      "-d",
       "Ubuntu",
-      "--exec",
+      "-e",
       "/usr/bin/wslpath",
       "-a",
       "-u",
@@ -483,6 +471,17 @@ async function invokeBridge(
   if (!/^\/mnt\/[a-z]\//u.test(linuxCwd)) {
     throw new Error("WSL workspace translation returned an unsafe path");
   }
+  const home = parseWslHome(
+    await requireSuccess(
+      runner,
+      executable,
+      ["-d", "Ubuntu", "--cd", "~", "-e", "/bin/pwd"],
+      environment,
+      timeoutMs,
+      "WSL home",
+      options.signal,
+    ),
+  );
   const request = requestValue.kind === "execute"
     ? { ...requestValue, input: { ...requestValue.input, cwd: linuxCwd } }
     : { ...requestValue, cwd: linuxCwd };
@@ -494,12 +493,12 @@ async function invokeBridge(
     runner,
     executable,
     [
-      "--distribution",
+      "-d",
       "Ubuntu",
-      "--exec",
+      "-e",
       "/usr/bin/env",
       "-i",
-      `PATH=${LINUX_PATH}`,
+      `PATH=${trustedWslUserPath(home)}`,
       "node",
       "--input-type=module",
       "--eval",

@@ -10,6 +10,7 @@ import {
 import { createApplyPlan } from "../../dist/planning/preview.js";
 import type {
   ApplyJournal,
+  ApplyRecoveryRecord,
   ManagedStateReceipt,
   StatePort,
 } from "../../dist/ports/state.js";
@@ -62,6 +63,10 @@ class MemoryState implements StatePort {
 
   async readJournal(): Promise<ApplyJournal | null> {
     return this.journal;
+  }
+
+  async readReceipt(): Promise<ManagedStateReceipt | null> {
+    return this.receipt;
   }
 
   async writeJournal(journal: ApplyJournal): Promise<void> {
@@ -251,4 +256,212 @@ test("U3 receipt publication failure rolls back all prepared mutations", async (
   assert.match(result.failure ?? "", /receipt publication failed/);
   assert.deepEqual([...active], []);
   assert.equal(state.receipt, null);
+});
+
+test("U3 journals recovery before mutation and clears it after receipt publication", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const recovery: ApplyRecoveryRecord = {
+    actionId: "one",
+    kind: "fixture",
+    payload: { backup: "/managed/backup" },
+  };
+  let observedDuringExecute: ApplyJournal | null = null;
+
+  const result = await applyExactPlan(exact, exact.digest, {
+    state,
+    observe: async () => ({ kind: "missing" }),
+    prepare: async (action) => action.id === "one"
+      ? {
+          commit: async () => {},
+          recovery,
+          rollback: async () => {},
+        }
+      : undefined,
+    execute: async (action) => {
+      if (action.id === "one") {
+        observedDuringExecute = structuredClone(state.journal);
+      }
+      return { verified: true };
+    },
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(observedDuringExecute?.pendingRecoveries, [recovery]);
+  assert.deepEqual(state.journal?.pendingRecoveries, []);
+});
+
+test("U3 recovers a simulated process death before accepting another apply", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const recovery: ApplyRecoveryRecord = {
+    actionId: "one",
+    kind: "fixture",
+    payload: { backup: "/managed/backup" },
+  };
+  state.journal = {
+    catalogRevision: exact.catalogRevision,
+    completedActionIds: ["one"],
+    kind: "apply-journal",
+    pendingRecoveries: [recovery],
+    planDigest: exact.digest,
+    schemaVersion: "2.0.0",
+    status: "applying",
+  };
+  const active = new Set(["one"]);
+  const events: string[] = [];
+
+  const result = await applyExactPlan(exact, exact.digest, {
+    state,
+    observe: async (action) => {
+      events.push(`observe:${action.id}`);
+      return active.has(action.id)
+        ? {
+            kind: "file",
+            sha256: String(action.payload?.contentDigest),
+            size: 1,
+          }
+        : { kind: "missing" };
+    },
+    recover: async (record) => {
+      events.push(`recover:${record.actionId}`);
+      active.delete(record.actionId);
+    },
+    execute: async (action) => {
+      events.push(`execute:${action.id}`);
+      active.add(action.id);
+      return { verified: true };
+    },
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(events[0], "recover:one");
+  assert.deepEqual([...active].sort(), ["one", "two"]);
+  assert.deepEqual(state.journal?.pendingRecoveries, []);
+});
+
+test("U3 a published receipt commits crash-left backups instead of rolling back", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const recovery: ApplyRecoveryRecord = {
+    actionId: "two",
+    kind: "fixture",
+    payload: { backup: "/managed/backup" },
+  };
+  const completedActionIds = exact.actions.map(({ id }) => id);
+  state.receipt = {
+    $schema: "../contracts/managed-state-receipt.schema.json",
+    appliedAt: "2026-07-24T00:00:00.000Z",
+    catalogRevision: exact.catalogRevision,
+    completedActionIds,
+    desiredState: {
+      profileId: "personal",
+      selectedAgents: ["claude-code"],
+    },
+    kind: "managed-state-receipt",
+    ownership: [],
+    planDigest: exact.digest,
+    runtimeReadiness: [{ agentId: "claude-code", state: "ready" }],
+    schemaVersion: "2.0.0",
+    startupConsent: {
+      addReviewedContent: true,
+      artifactClasses: ["managed-skill"],
+      channelId: "stable",
+      permissionScopes: ["workspace:read"],
+      profileId: "personal",
+      repairPinned: true,
+    },
+  };
+  state.journal = {
+    catalogRevision: exact.catalogRevision,
+    completedActionIds,
+    kind: "apply-journal",
+    pendingRecoveries: [recovery],
+    planDigest: exact.digest,
+    schemaVersion: "2.0.0",
+    status: "applying",
+  };
+  let recovered = 0;
+  let committed = 0;
+
+  const result = await applyExactPlan(exact, exact.digest, {
+    state,
+    commitRecovery: async () => {
+      committed += 1;
+    },
+    observe: async (action) => ({
+      kind: "file",
+      sha256: String(action.payload?.contentDigest),
+      size: 1,
+    }),
+    recover: async () => {
+      recovered += 1;
+    },
+    verifyCompleted: async () => true,
+    execute: async () => {
+      throw new Error("completed actions must not execute");
+    },
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(committed, 1);
+  assert.equal(recovered, 0);
+  assert.deepEqual(state.journal?.pendingRecoveries, []);
+});
+
+test("U3 a post-receipt journal failure remains ready and retries cleanup", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const recovery: ApplyRecoveryRecord = {
+    actionId: "one",
+    kind: "fixture",
+    payload: { backup: "/managed/backup" },
+  };
+  const durableWriteJournal = state.writeJournal.bind(state);
+  state.writeJournal = async (journal) => {
+    if (state.receipt !== null && journal.status === "ready") {
+      throw new Error("simulated post-receipt journal failure");
+    }
+    await durableWriteJournal(journal);
+  };
+
+  const applied = await applyExactPlan(exact, exact.digest, {
+    state,
+    observe: async () => ({ kind: "missing" }),
+    prepare: async (action) => action.id === "one"
+      ? {
+          commit: async () => {},
+          recovery,
+          rollback: async () => {},
+        }
+      : undefined,
+    execute: async () => ({ verified: true }),
+  });
+
+  assert.equal(applied.status, "ready");
+  assert.equal(state.receipt?.planDigest, exact.digest);
+  assert.equal(state.journal?.status, "applying");
+  assert.deepEqual(state.journal?.pendingRecoveries, [recovery]);
+
+  state.writeJournal = durableWriteJournal;
+  let committed = 0;
+  const retried = await applyExactPlan(exact, exact.digest, {
+    state,
+    commitRecovery: async () => {
+      committed += 1;
+    },
+    observe: async (action) => ({
+      kind: "file",
+      sha256: String(action.payload?.contentDigest),
+      size: 1,
+    }),
+    verifyCompleted: async () => true,
+    execute: async () => {
+      throw new Error("completed actions must not execute");
+    },
+  });
+
+  assert.equal(retried.status, "ready");
+  assert.equal(committed, 1);
+  assert.deepEqual(state.journal?.pendingRecoveries, []);
 });

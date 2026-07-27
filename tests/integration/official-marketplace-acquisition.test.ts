@@ -67,7 +67,7 @@ function fixture(root: string) {
   const adapterManifest = JSON.parse(
     readFileSync(adapterManifestPath, "utf8"),
   ) as Record<string, unknown>;
-  adapterManifest.name = "oh-my-harness-anthropic-official";
+  adapterManifest.name = "oh-my-harness-reviewed-upstream";
   writeFileSync(
     adapterManifestPath,
     `${JSON.stringify(adapterManifest, null, 2)}\n`,
@@ -75,7 +75,7 @@ function fixture(root: string) {
   lock.repository.runtimeMarketplace = {
     contentSha256: hashManagedDirectory(adapterFixture),
     manifestSha256: sha256(adapterManifestPath),
-    name: "oh-my-harness-anthropic-official",
+    name: "oh-my-harness-reviewed-upstream",
   };
 
   let cloneCount = 0;
@@ -228,13 +228,24 @@ test("U4 cleans a failed staging area, retries safely, and never overwrites a co
 });
 
 test("U4 production Git operations use shell-free exact checkout arguments", () => {
-  const calls: Array<{ command: string; args: readonly string[] }> = [];
+  const calls: Array<{
+    command: string;
+    args: readonly string[];
+    environment: NodeJS.ProcessEnv;
+  }> = [];
   const git = resolve("git-fixture");
   const operations = createOfficialMarketplaceGitOperations(
     git,
-    (command, args) => {
-      calls.push({ args, command });
+    (command, args, environment) => {
+      calls.push({ args, command, environment });
       return `${"a".repeat(40)}\n`;
+    },
+    {
+      GIT_CONFIG_GLOBAL: "hostile",
+      GIT_OBJECT_DIRECTORY: "hostile",
+      PATH: "hostile",
+      SYSTEMROOT: "C:\\Windows",
+      USERPROFILE: "C:\\Users\\fixture",
     },
   );
   operations.clone("https://example.test/repository", "C:\\managed\\checkout");
@@ -250,6 +261,10 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "core.autocrlf=false",
         "-c",
         "core.eol=lf",
+        "-c",
+        "core.hooksPath=",
+        "-c",
+        "core.longpaths=true",
         "clone",
         "--filter=blob:none",
         "--no-checkout",
@@ -257,6 +272,7 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "C:\\managed\\checkout",
       ],
       command: git,
+      environment: calls[0]!.environment,
     },
     {
       args: [
@@ -264,6 +280,10 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "core.autocrlf=false",
         "-c",
         "core.eol=lf",
+        "-c",
+        "core.hooksPath=",
+        "-c",
+        "core.longpaths=true",
         "-C",
         "C:\\managed\\checkout",
         "checkout",
@@ -272,6 +292,7 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "b".repeat(40),
       ],
       command: git,
+      environment: calls[0]!.environment,
     },
     {
       args: [
@@ -282,8 +303,16 @@ test("U4 production Git operations use shell-free exact checkout arguments", () 
         "HEAD^{tree}",
       ],
       command: git,
+      environment: calls[0]!.environment,
     },
   ]);
+  assert.equal(calls[0]?.environment.GIT_CONFIG_NOSYSTEM, "1");
+  assert.equal(
+    calls[0]?.environment.GIT_CONFIG_GLOBAL,
+    process.platform === "win32" ? "NUL" : "/dev/null",
+  );
+  assert.equal(calls[0]?.environment.GIT_OBJECT_DIRECTORY, undefined);
+  assert.equal(calls[0]?.environment.PATH, resolve(git, ".."));
 });
 
 test("U5 derives an exact collision-safe Claude runtime marketplace alias", () => {
@@ -313,7 +342,7 @@ test("U5 derives an exact collision-safe Claude runtime marketplace alias", () =
     if (inspection.state === "ready") {
       assert.equal(
         inspection.plugins[0]?.selector,
-        `${item.lock.candidates[0]!.pluginName}@oh-my-harness-anthropic-official`,
+        `${item.lock.candidates[0]!.pluginName}@oh-my-harness-reviewed-upstream`,
       );
     }
 

@@ -25,6 +25,18 @@ const MAX_PROVENANCE_BYTES = 4 * 1024 * 1024;
 const MAX_MANAGED_ENTRIES = 4_096;
 const MAX_MANAGED_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_MANAGED_TOTAL_BYTES = 64 * 1024 * 1024;
+const RESERVED_OFFICIAL_MARKETPLACE_TOKENS = new Set([
+  "anthropic",
+  "claude",
+  "official",
+]);
+
+export function isReservedOfficialMarketplaceName(name: string): boolean {
+  return name
+    .toLowerCase()
+    .split("-")
+    .some((token) => RESERVED_OFFICIAL_MARKETPLACE_TOKENS.has(token));
+}
 
 export interface CapabilitySurfaces {
   readonly skills: readonly string[];
@@ -375,6 +387,11 @@ function validateOfficialLock(value: unknown): asserts value is OfficialCapabili
   );
   if (!STABLE_ID_PATTERN.test(value.repository.runtimeMarketplace.name)) {
     fail("official repository.runtimeMarketplace.name must be a stable ID");
+  }
+  if (isReservedOfficialMarketplaceName(value.repository.runtimeMarketplace.name)) {
+    fail(
+      "official repository.runtimeMarketplace.name uses reserved provider branding",
+    );
   }
   for (const key of ["manifestSha256", "contentSha256"] as const) {
     assertDigest(

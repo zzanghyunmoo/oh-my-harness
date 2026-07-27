@@ -52,42 +52,74 @@ export interface OfficialMarketplaceGitOperations {
 export type OfficialMarketplaceCommandRunner = (
   command: string,
   args: readonly string[],
+  environment: NodeJS.ProcessEnv,
 ) => string;
+
+const EXACT_CHECKOUT_CONFIG = [
+  "-c",
+  "core.autocrlf=false",
+  "-c",
+  "core.eol=lf",
+  "-c",
+  "core.hooksPath=",
+  "-c",
+  "core.longpaths=true",
+] as const;
+
+function isolatedGitEnvironment(
+  gitExecutable: string,
+  base: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    GIT_ATTR_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_PAGER: "cat",
+    GIT_TERMINAL_PROMPT: "0",
+    HOME: process.platform === "win32"
+      ? base.USERPROFILE ?? base.HOME ?? ""
+      : "/dev/null",
+    LC_ALL: "C",
+    PATH: dirname(gitExecutable),
+  };
+  const systemRoot = base.SYSTEMROOT ?? base.SystemRoot;
+  if (systemRoot !== undefined) environment.SYSTEMROOT = systemRoot;
+  return environment;
+}
 
 export function createOfficialMarketplaceGitOperations(
   gitExecutable: string,
   run: OfficialMarketplaceCommandRunner,
+  baseEnvironment: NodeJS.ProcessEnv = process.env,
 ): OfficialMarketplaceGitOperations {
   if (!isAbsolute(gitExecutable)) {
     throw new Error("official marketplace Git executable must be absolute");
   }
+  const environment = isolatedGitEnvironment(gitExecutable, baseEnvironment);
   return {
     checkout(repository, commit) {
       run(gitExecutable, [
-        "-c",
-        "core.autocrlf=false",
-        "-c",
-        "core.eol=lf",
+        ...EXACT_CHECKOUT_CONFIG,
         "-C",
         repository,
         "checkout",
         "--force",
         "--detach",
         commit,
-      ]);
+      ], environment);
     },
     clone(repository, destination) {
       run(gitExecutable, [
-        "-c",
-        "core.autocrlf=false",
-        "-c",
-        "core.eol=lf",
+        ...EXACT_CHECKOUT_CONFIG,
         "clone",
         "--filter=blob:none",
         "--no-checkout",
         repository,
         destination,
-      ]);
+      ], environment);
     },
     resolveRevision(repository, revision) {
       return run(gitExecutable, [
@@ -96,7 +128,7 @@ export function createOfficialMarketplaceGitOperations(
         "rev-parse",
         "--verify",
         revision,
-      ]).trim();
+      ], environment).trim();
     },
   };
 }

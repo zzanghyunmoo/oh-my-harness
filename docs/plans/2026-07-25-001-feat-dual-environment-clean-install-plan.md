@@ -7,7 +7,7 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
-deepened: 2026-07-25
+deepened: 2026-07-27
 ---
 
 # Dual-environment Clean Install - Plan
@@ -43,7 +43,7 @@ The operator needs a clean-machine path that either plans exact acquisition or r
 ### Key Decisions
 
 - **Independent Environment Instances:** Windows and Ubuntu WSL use separate state roots, receipts, previews, digests, journals, and readiness. A cross-platform composite receipt would make platform ownership and partial-failure recovery ambiguous.
-- **WSL-owned package backends:** Ubuntu WSL owns GitHub, Linear, and Notion CLI installation and authentication. Windows-native agents reach those exact backends through a bounded bridge rather than installing an unsupported Windows Notion package.
+- **WSL-hosted package backends:** Ubuntu WSL hosts the GitHub, Linear, and Notion executables and their CLI-owned authentication stores. OMH records only managed or adopted executable ownership, always treats authentication as external, and lets Windows-native agents reach those exact backends through a bounded bridge rather than installing an unsupported Windows Notion package.
 - **Ownership-preserving clean install:** Clean install replaces or repairs only receipt-owned OMH artifacts. External runtimes, user configuration, authentication state, and user-owned plugins remain untouched.
 - **Asymmetric capability scope:** Ubuntu WSL receives the workflow skills and all seven LSP capabilities. Windows receives the workflow skills only and does not claim LSP readiness.
 - **External Node prerequisite:** Ubuntu WSL must provide a trusted Node.js version satisfying the repository engine range before preview. OMH verifies and adopts it as external state without owning or repairing Node.
@@ -145,14 +145,14 @@ flowchart TB
 
 ### Acceptance Examples
 
-- AE1. **Covers R1-R5, R11-R15.** Given Ubuntu WSL with trusted Node 22.19 or newer and no OMH receipt, when the operator previews the WSL `personal` environment, then the command creates no state and returns either an exact digest or itemized required blockers.
-- AE2. **Covers R6-R10.** Given a missing Claude official marketplace snapshot, when either Claude target is previewed, then OMH plans reviewed acquisition or reports a structured provenance blocker without throwing an unhandled exception.
+- AE1. **Covers R1-R3, R11-R15.** Given Ubuntu WSL with trusted Node 22.19 or newer and no OMH receipt, when the operator previews the WSL `personal` environment, then the command creates no state and returns either an exact digest or itemized required blockers.
+- AE2. **Covers R9-R10.** Given a missing Claude official marketplace snapshot, when either Claude target is previewed, then OMH plans reviewed acquisition or reports a structured provenance blocker without throwing an unhandled exception.
 - AE3. **Covers R6-R8.** Given an external Claude installation and user-owned plugin configuration, when clean install is previewed and applied, then OMH preserves both and installs a separate managed runtime or reports a collision.
-- AE4. **Covers R12-R15, R23-R27.** Given a complete WSL apply, when WSL status runs, then Claude Code and OpenCode registrations, all workflow skills, seven LSP registrations and executables, and three package versions are ready without invoking a skill or remote API.
-- AE5. **Covers R16-R22.** Given a ready WSL instance, when the Windows instance is applied, then Windows Claude Code and OpenCode expose workflow skills and only the GitHub, Linear, and Notion WSL-backed tools while Codex and Windows user state remain unchanged.
+- AE4. **Covers R12-R15, R23-R26.** Given a complete WSL apply, when WSL status runs, then Claude Code and OpenCode registrations, all workflow skills, seven LSP registrations and executables, and three package versions are ready without invoking a skill or remote API.
+- AE5. **Covers R16-R18.** Given a ready WSL instance, when the Windows instance is applied, then Windows Claude Code and OpenCode expose workflow skills and only the GitHub, Linear, and Notion WSL-backed tools while Codex and Windows user state remain unchanged.
 - AE6. **Covers R18-R22.** Given WSL is stopped or the Notion executable drifts, when Windows status runs, then the bridge is `partial-unready` and does not fall back to a Windows npm shim.
-- AE7. **Covers R3-R5, R27.** Given both instances are ready, when one instance's preview becomes stale, then its apply performs zero mutation and the other receipt remains valid.
-- AE8. **Covers R19-R21.** Given a bridged write-shaped tool request without exact user intent or `confirmedWrite=true`, when execution is attempted, then it is rejected before the WSL CLI runs.
+- AE7. **Covers R3-R4.** Given both instances are ready, when one instance's preview becomes stale, then its apply performs zero mutation and the other receipt remains valid.
+- AE8. **Covers R19-R20.** Given a bridged write-shaped tool request without exact user intent or `confirmedWrite=true`, when execution is attempted, then it is rejected before the WSL CLI runs.
 
 ### Success Criteria
 
@@ -221,12 +221,12 @@ flowchart TB
 - KTD4. **Keep target state under target-native homes.** Explicit targets default to `~/.oh-my-harness/instances/windows-native` on Windows and `~/.oh-my-harness/instances/wsl-ubuntu` inside Ubuntu. WSL paths never appear in Windows ownership entries, and Windows paths never appear in WSL ownership entries.
 - KTD5. **Resolve an Environment Instance overlay without changing the profile.** Add a capability-set selector with `profile` and `workflow-only`. The WSL command uses `profile`; the Windows command uses `workflow-only`. New receipts record the exact selected package and capability IDs so status and runtime adapters do not re-expand a later profile revision.
 - KTD6. **Represent Windows packages as receipt-bound WSL routes.** The Windows receipt records logical routes for `github`, `linear`, and `notion`, the expected WSL target identity, and the dependent WSL receipt fingerprint. It does not claim ownership of Linux executables or contain authentication data.
-- KTD7. **Revalidate bridge policy on both sides.** The Windows adapter classifies the tool request, checks the Windows receipt, and requires `confirmedWrite=true` for a write. It launches `wsl.exe` with an allowlisted Windows environment and clears `WSLENV` so Windows credentials cannot cross implicitly. A bounded internal WSL bridge command reads JSON from stdin, loads the WSL receipt, re-derives its tool policy, resolves the trusted Linux executable, reconstructs only the selected CLI's allowlisted Linux environment, repeats classification and write confirmation, and spawns without a shell.
+- KTD7. **Revalidate bridge policy on both sides.** The Windows adapter classifies the tool request, checks the Windows receipt, and requires both exact user intent and `confirmedWrite=true` for a write; the boolean is necessary but never sufficient authority by itself. It launches `wsl.exe` with an allowlisted Windows environment and clears `WSLENV` so Windows credentials cannot cross implicitly. A bounded internal WSL bridge command reads JSON from stdin, loads the WSL receipt, re-derives its tool policy, resolves the trusted Linux executable, reconstructs only the selected CLI's allowlisted Linux environment, repeats classification and write confirmation, and spawns without a shell.
 - KTD8. **Acquire the reviewed Claude marketplace into OMH-managed storage.** A missing user cache becomes an `acquire-official-marketplace` action. Apply stages the exact reviewed commit, verifies the full repository tree, marketplace SHA-256, and accepted plugin trees, then atomically publishes a content-addressed local marketplace. An existing registration with the same ID and another source remains a user-owned collision.
 - KTD9. **Use OpenCode's native skill surface.** Install each selected workflow as a receipt-owned `~/.config/opencode/skills/<id>/SKILL.md` directory after collision checks. Keep the OMH OpenCode plugin for lifecycle context and profile-scoped CLI tools, but remove workflow-as-`omh_*`-custom-tool exposure so discovery evidence matches OpenCode's documented skill mechanism.
 - KTD10. **Treat language servers and Node as external prerequisites.** OMH installs and verifies runtime registrations but does not claim ownership of Node or LSP executables. WSL preview remains blocked until Node satisfies `>=22.19.0` and all seven selected LSP executables resolve to trusted Linux files. Windows excludes LSP IDs before readiness is computed.
 - KTD11. **Make clean install an exact staged ownership operation.** `--clean` adds removal intent only for managed ownership entries in the selected instance's valid receipt. Apply stages and verifies all replacement content first, switches receipt-owned native registrations with journaled compensation, removes superseded active artifacts while retaining their content-addressed repair stores, and publishes the new receipt. Any failure before durable receipt publication restores the prior registrations and active generation from that store. Obsolete store garbage collection is a retryable non-readiness tail after success. External ownership and unreceipted runtime configuration are never removed.
-- KTD12. **Verify registration without model execution.** Claude evidence comes from marketplace/plugin JSON plus exact installed trees and hook/MCP/skill inventory. OpenCode starts a bounded loopback-only headless server, reads health/config, `/experimental/tool/ids`, tool schema descriptions, and `/lsp`, then shuts it down without creating a session or sending a prompt. File and adapter checks corroborate native skill frontmatter and plugin identity; no verification command calls a model or remote workspace API.
+- KTD12. **Verify registration without model execution.** Claude evidence comes from marketplace/plugin JSON plus exact installed trees and hook/MCP/skill inventory. OpenCode starts a bounded loopback-only headless server with an ephemeral port and per-run authentication, reads health/config, `/experimental/tool/ids`, tool schema descriptions, and `/lsp`, then shuts it down without creating a session or sending a prompt. Unauthenticated requests and probe attempts to create a session are rejected. File and adapter checks corroborate native skill frontmatter and plugin identity; no verification command calls a model or remote workspace API.
 
 ### High-Level Technical Design
 
@@ -292,12 +292,12 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 ### Edge Cases and Failure Semantics
 
 - A missing, renamed, WSL1, or inaccessible Ubuntu distribution is a target preflight blocker; preview/apply may start a stopped distro but never installs or unregisters one.
-- Aggregate status never starts a stopped Ubuntu distribution. It reports the WSL instance unavailable with explicit remediation; an explicit WSL preview/apply is the action that may start it.
+- Target-scoped and aggregate `status` and `doctor` never start a stopped Ubuntu distribution. They report the WSL instance unavailable with explicit remediation; only an explicit WSL preview/apply may start it.
 - A WSL Node path that resolves through `/mnt/c`, a Windows `.exe`, a symlink, or a version below `22.19.0` is rejected.
 - A WSL target result with invalid JSON, unexpected target identity, excess output, timeout, or mismatched catalog revision is `unverifiable`.
 - A WSL receipt that changes after the Windows preview makes the Windows digest stale. A change after session startup invalidates the bridge policy until restart.
 - Concurrent applies serialize independently inside each target root. Aggregate status never holds both apply locks.
-- A bridged Windows working directory is accepted only when it maps to an existing WSL path inside the same workspace; otherwise the bridge uses the WSL workspace root or rejects the call.
+- A bridged Windows working directory is accepted only when it maps to an existing WSL path inside the same workspace; otherwise the bridge rejects the call with targeted remediation and never falls back to another working directory.
 - Tool arguments containing credential flags, browser/login commands, response files, path escape, or interactive modes remain denied before process launch.
 - Bridge cancellation terminates `wsl.exe`; the Linux helper also enforces its own timeout so an orphaned backend cannot outlive the request indefinitely.
 - `WSLENV` and credential-bearing Windows variables are removed from both target-management and bridge launches; the Linux helper receives authentication only from Ubuntu's own CLI environment and stores.
@@ -312,6 +312,7 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 |---|---|---|
 | WSL argv and path translation drift | Wrong executable or workspace could run | Use direct `--exec`, exact distribution, absolute Linux paths, bounded `wslpath` translation, a transport-only bootstrap entry, and contract tests with a fake target port |
 | Claude marketplace source behavior changes | Reviewed plugins cannot register | Own the staged exact snapshot, verify every pinned identity, and report a structured blocker rather than falling back to mutable `latest` |
+| Target-native Git is missing or leaks across the Windows/WSL boundary | Exact marketplace acquisition cannot run safely | Resolve an absolute trusted Git executable before planning acquisition, reject Windows or `/mnt/c` leakage in WSL, and bind the executable pre-image to the exact action |
 | OpenCode discovery behavior changes | Skill files exist but are not visible | Pin the reviewed OpenCode runtime, keep native discovery fixtures, and fail readiness when adapter discovery evidence is absent |
 | Receipt schema expansion breaks legacy state | Existing status/startup becomes unavailable | Parse legacy v2 receipts with absent instance fields, keep local compatibility routing, and add migration fixtures |
 | WSL bridge bypasses local policy | Unapproved remote writes could execute | Classify and confirm on both sides, fingerprint both receipts, deny general shell/login surfaces, and revalidate immediately before spawn |
@@ -322,11 +323,11 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 ### Sequencing
 
 - U1 and U2 establish the contract and transport boundary.
-- U3 depends on U1 and makes planning, receipts, cleanup, and backward compatibility target-aware.
+- U3 depends on U1 and makes planning, receipts, cleanup, and backward compatibility target-aware after U1 establishes the exact package identities consumed by target planning.
 - U4 depends on U3 because marketplace acquisition must be owned by the correct instance.
 - U5 depends on U3 and U4 because native registrations consume the finalized capability selection and marketplace store.
 - U6 depends on U2, U3, and U5 because the bridge validates both target receipts and runs through installed runtime surfaces.
-- U7 integrates target status, documentation, and packaged entrypoints after U1-U6.
+- U7 integrates target status, generated documentation, and packaged entrypoints after U1-U6; package identities themselves are established in U1.
 - U8 executes the full automated and live acceptance path after all implementation units pass their focused tests.
 
 ---
@@ -337,9 +338,9 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 
 - **Goal:** Make explicit target identity, capability-set selection, package selection, and route dependency part of deterministic desired state.
 - **Requirements:** R1-R5, R16-R18, R27.
-- **Files:** `src/cli/arguments.ts`, `src/domain/desired-state.ts`, `src/planning/actions.ts`, `src/planning/preview.ts`, `src/ports/state.ts`, `harness/contracts/apply-plan.schema.json`, `harness/contracts/managed-state-receipt.schema.json`, `tests/unit/cli-arguments.test.ts`, `tests/unit/preview.test.ts`, `tests/contracts/receipt.test.ts`.
-- **Approach:** Add closed `EnvironmentInstance`, `CapabilitySet`, and `ToolRoute` types; include their resolved exact values in the plan digest and new receipts; retain legacy parsing when the explicit-target fields are absent.
-- **Test scenarios:** Reject unknown targets, WSL fields on a local target, `all` on a mutation, duplicate capability/package IDs, route-to-self, secret-like route content, and a target-root mismatch. Prove target identity changes the digest and legacy receipts remain readable.
+- **Files:** `src/cli/arguments.ts`, `src/domain/desired-state.ts`, `src/planning/actions.ts`, `src/planning/preview.ts`, `src/ports/state.ts`, `harness/catalog/packages.json`, `harness/profiles/personal.json`, `harness/contracts/apply-plan.schema.json`, `harness/contracts/managed-state-receipt.schema.json`, `tests/unit/cli-arguments.test.ts`, `tests/unit/preview.test.ts`, `tests/contracts/package-catalog.test.ts`, `tests/contracts/receipt.test.ts`.
+- **Approach:** Add closed `EnvironmentInstance`, `CapabilitySet`, and `ToolRoute` types; include their resolved exact values in the plan digest and new receipts; retain legacy parsing when the explicit-target fields are absent. Establish the reviewed package identities before target planning, including the official `ntn` Notion package, the exact community Linear package, and the reviewed GitHub CLI source.
+- **Test scenarios:** Reject unknown targets, WSL fields on a local target, `all` on a mutation, duplicate capability/package IDs, route-to-self, secret-like route content, and a target-root mismatch. Prove target identity changes the digest, legacy receipts remain readable, and every target plan consumes the reviewed package identity and platform contract.
 - **Verification:** `npm run test:unit`; `npm run test:contracts`.
 - **Dependencies:** None.
 
@@ -357,9 +358,9 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 
 - **Goal:** Produce and apply independent exact plans for Windows and WSL, including ownership-safe clean reinstall and read-only aggregate diagnosis.
 - **Requirements:** R1-R9, R11-R18, R22, R27.
-- **Files:** `src/environment/orchestrator.ts`, `src/environment/filesystem.ts`, `src/planning/apply.ts`, `src/state/receipt.ts`, `src/state/ownership.ts`, `src/status/model.ts`, `src/status/doctor.ts`, `src/composition.ts`, `tests/integration/omh-cli.test.ts`, `tests/integration/apply-recovery.test.ts`, `tests/integration/state-lock.test.ts`, `tests/integration/status-doctor.test.ts`, `tests/integration/environment-instances.test.ts`.
-- **Approach:** Resolve target-specific default roots and exact capability/package IDs, avoid action construction when required preflights fail, and implement `--clean` as stage, verify, journaled registration switch, active-artifact removal with repair stores retained, receipt publish, and optional store garbage collection. Any pre-publication failure compensates back to the last-known-good receipt. Keep locks and journals per root and compose `status --target all` from immutable target envelopes without starting a stopped distro.
-- **Test scenarios:** Prove blocked preview never throws or mutates, stale target digest causes zero mutation, clean removes only valid managed ownership after replacements verify, switch/removal/receipt-publication failure restores the prior registration and generation, tail store-cleanup failure does not corrupt readiness, external/user-owned content survives, each lock is independent, one target failure leaves the other receipt unchanged, and combined readiness is strict.
+- **Files:** `src/environment/orchestrator.ts`, `src/environment/filesystem.ts`, `src/planning/apply.ts`, `src/state/journal.ts`, `src/state/receipt.ts`, `src/state/ownership.ts`, `src/status/model.ts`, `src/status/doctor.ts`, `src/composition.ts`, `tests/integration/omh-cli.test.ts`, `tests/integration/apply-recovery.test.ts`, `tests/integration/state-lock.test.ts`, `tests/integration/status-doctor.test.ts`, `tests/integration/environment-instances.test.ts`.
+- **Approach:** Resolve target-specific default roots and exact capability/package IDs, avoid action construction when required preflights fail, and implement `--clean` as stage, verify, crash-safe journaled registration switch, active-artifact removal with repair stores retained, receipt publish, and optional store garbage collection. Before each destructive step, durably record the backup path, original digest, and native registration pre-image; startup or the next apply restores unfinished work before accepting another digest. Any pre-publication failure compensates back to the last-known-good receipt. Keep locks and journals per root and compose `status --target all` from immutable target envelopes without starting a stopped distro.
+- **Test scenarios:** Prove blocked preview never throws or mutates, stale target digest causes zero mutation, clean removes only valid managed ownership after replacements verify, switch/removal/receipt-publication failure restores the prior registration and generation, process death after switch/removal and before receipt publication is recovered on the next invocation, tail store-cleanup failure does not corrupt readiness, external/user-owned content survives, each lock is independent, one target failure leaves the other receipt unchanged, and combined readiness is strict.
 - **Verification:** `npm run test:integration`; `git diff --check`.
 - **Dependencies:** U1, U2.
 
@@ -368,8 +369,8 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 - **Goal:** Turn a missing official marketplace into a reviewed managed acquisition while preserving collisions and immutable provenance.
 - **Requirements:** R6-R10, R23, R27.
 - **Files:** `harness/catalog/upstreams/anthropic-official-capabilities.json`, `src/install/official-marketplace.ts`, `src/install/official-marketplace-acquisition.ts`, `src/install/node-acquisition.ts`, `src/environment/orchestrator.ts`, `src/environment/native-registration.ts`, `tests/integration/capability-resolution.test.ts`, `tests/integration/official-marketplace-acquisition.test.ts`, `tests/runtime/claude-code.test.ts`.
-- **Approach:** Stage the exact reviewed repository commit under the instance store, reject symlinks and bounds violations, verify the repository tree plus marketplace and selected plugin identities, atomically publish a generation, and register that local exact marketplace only when its native ID is absent.
-- **Test scenarios:** Cover missing cache, exact existing cache, download/fetch failure, wrong commit/tree/manifest/plugin tree, crash before publish, retry, same ID/different source collision, and idempotent exact registration.
+- **Approach:** Resolve a target-native absolute trusted Git executable before planning acquisition, reject Windows or `/mnt/c` leakage in WSL, and bind its pre-image to the exact action. Stage the exact reviewed repository commit under the instance store, reject symlinks and bounds violations, verify the repository tree plus marketplace and selected plugin identities, atomically publish a generation, and register that local exact marketplace only when its native ID is absent.
+- **Test scenarios:** Cover missing or changed Git, cross-target Git leakage, missing cache, exact existing cache, download/fetch failure, wrong commit/tree/manifest/plugin tree, crash before publish, retry, same ID/different source collision, and idempotent exact registration.
 - **Verification:** `npm run test:integration`; `npm run test:runtime:claude`.
 - **Dependencies:** U3.
 
@@ -378,8 +379,8 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 - **Goal:** Register the selected workflow and LSP inventory through each runtime's native surfaces without invoking model behavior.
 - **Requirements:** R14-R17, R23-R25, R27.
 - **Files:** `src/install/capabilities.ts`, `src/environment/native-registration.ts`, `src/runtime/claude-code.ts`, `src/runtime/opencode.ts`, `.opencode/plugins/oh-my-harness.js`, `plugins/oh-my-harness/skills/`, `plugins/oh-my-harness/opencode/skills/`, `tests/unit/native-registration.test.ts`, `tests/runtime/claude-code.test.ts`, `tests/runtime/opencode.test.ts`, `tests/integration/capability-resolution.test.ts`.
-- **Approach:** Filter capabilities before readiness, install OpenCode workflows into native global skill directories with exact frontmatter and collision protection, retain lifecycle/plugin tools, register Claude official and managed plugins, and make readiness compare only receipt-selected capabilities. Add a bounded loopback OpenCode server probe that inspects tool schemas and LSP state without creating a session.
-- **Test scenarios:** Prove Windows has ten workflows and zero LSP desired IDs, WSL has ten workflows plus seven LSPs, OpenCode's native `skill` tool schema lists the exact skill inventory without `omh_*` workflow tools, user-denied skills/LSP remain preserved and degraded, Claude inventory includes hooks/MCP/skills/plugins, the probe always terminates, and no check sends a model prompt.
+- **Approach:** Filter capabilities before readiness, install OpenCode workflows into native global skill directories with exact frontmatter and collision protection, retain lifecycle/plugin tools, register Claude official and managed plugins, and make readiness compare only receipt-selected capabilities. Add a bounded authenticated loopback OpenCode server probe that inspects tool schemas and LSP state without creating a session.
+- **Test scenarios:** Prove Windows has ten workflows and zero LSP desired IDs, WSL has ten workflows plus seven LSPs, OpenCode's native `skill` tool schema lists the exact skill inventory without `omh_*` workflow tools, user-denied skills/LSP remain preserved and degraded, Claude inventory includes hooks/MCP/skills/plugins, the probe requires its per-run credential, rejects session creation, always terminates, and sends no model prompt.
 - **Verification:** `npm run test:runtime:claude`; `npm run test:runtime:opencode`; `npm run test:integration`.
 - **Dependencies:** U3, U4.
 
@@ -397,8 +398,8 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 
 - **Goal:** Make package acquisition, help, README matrices, and npm contents match the dual-target product contract.
 - **Requirements:** R11-R18, R23-R27.
-- **Files:** `harness/catalog/packages.json`, `harness/profiles/personal.json`, `src/catalog/documentation.ts`, `src/cli/render.ts`, `README.md`, `CONCEPTS.md`, `tests/contracts/package-catalog.test.ts`, `tests/contracts/documentation.test.ts`, `tests/release/package-contents.test.ts`.
-- **Approach:** Correct Notion to the official `ntn` npm identity and Node 22+ platform contract, keep Linear explicitly community-sourced and exact, use the reviewed GitHub CLI source, render target/route/capability distinctions, and package all target/bridge/native-skill assets.
+- **Files:** `src/catalog/documentation.ts`, `src/cli/render.ts`, `README.md`, `CONCEPTS.md`, `tests/contracts/documentation.test.ts`, `tests/release/package-contents.test.ts`.
+- **Approach:** Render the target/route/capability and package-provenance distinctions established by U1, and package all target/bridge/native-skill assets.
 - **Test scenarios:** Verify generated tables, Windows Notion-native unsupported status, WSL route readiness, exact package versions, secret-free auth guidance, arbitrary CWD execution, and npm archive contents.
 - **Verification:** `npm run catalog:verify`; `npm run package:verify`; `npm pack --json`.
 - **Dependencies:** U1-U6.
@@ -408,8 +409,8 @@ The bridge is execution-only. It cannot run OMH setup, arbitrary programs, login
 - **Goal:** Prove both target lifecycles and registration discovery on the real Windows/Ubuntu machine without touching Codex or authentication state.
 - **Requirements:** R1-R27; AE1-AE8.
 - **Files:** `tests/integration/dual-environment-acceptance.test.ts`, `scripts/validate-dual-environment.ps1`, `README.md`.
-- **Approach:** Add a deterministic fake-transport integration test and a preview-first live validator. The live path snapshots Codex and user-owned configuration, verifies and resolves external Node/LSP prerequisites, previews/applies WSL first, previews/applies Windows second, checks aggregate status, repeats for idempotence, and compares preserved state.
-- **Test scenarios:** Run both clean previews, exact applies, target-native status/doctor, skill/plugin discovery, WSL package version probes, bridge status, stale-preview rejection, stopped-WSL degradation, idempotent reapply, and Codex/user-auth preservation.
+- **Approach:** Add a deterministic fake-transport integration test and a preview-first live validator. The live path snapshots Codex and user-owned configuration, verifies the operator-owned Node/LSP prerequisites, stops before either target mutation with exact installation guidance when any prerequisite is missing, previews/applies WSL first, previews/applies Windows second, checks aggregate status, repeats for idempotence, and compares preserved state. The validator never installs, upgrades, owns, or removes Node or an LSP executable.
+- **Test scenarios:** Run both clean previews, exact applies, target-native status/doctor, skill/plugin discovery, WSL package version probes, bridge status, stale-preview rejection, stopped-WSL degradation, idempotent reapply, and Codex/user-auth preservation. Prove missing Node or any named LSP reports the trusted-path requirement and operator-owned installation guidance before mutation.
 - **Verification:** Run the canonical gate plus `powershell -File scripts/validate-dual-environment.ps1 -Distro Ubuntu`; record blocked external prerequisites separately from implementation failures.
 - **Dependencies:** U1-U7.
 
@@ -446,7 +447,7 @@ The live validator may apply only after printing and consuming each exact digest
 - All R1-R27 requirements and AE1-AE8 examples are traceable to passing automated or live evidence.
 - Windows and WSL produce independent secret-free receipts whose ownership paths belong only to their target.
 - Both target previews are read-only, both applies reject stale digests, and unchanged reapply is idempotent.
-- Windows Claude/OpenCode discover ten workflow skills and three WSL-backed tool services without any selected LSP.
+- Windows Claude/OpenCode discover ten workflow skills and the three GitHub, Linear, and Notion WSL-backed tool backends through each runtime's native tool surface without any selected LSP.
 - WSL Claude/OpenCode discover ten workflow skills and seven LSP registrations, with readiness honest about every external executable.
 - Claude marketplace absence is an acquisition action or structured blocker, never an unhandled preview exception.
 - Bridged writes require exact user intent plus `confirmedWrite=true` on both sides; credential and login surfaces remain denied.

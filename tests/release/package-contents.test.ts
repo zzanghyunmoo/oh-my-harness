@@ -74,6 +74,7 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
     "bin/omh.mjs",
     "omh",
     "omh.cmd",
+    "scripts/validate-dual-environment.ps1",
     "harness/contracts/feature-contract.schema.json",
     "harness/catalog/agents.json",
     "harness/catalog/packages.json",

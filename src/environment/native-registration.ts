@@ -42,6 +42,7 @@ export type NativeCommandRunner = (
 
 export interface ManagedNativeRegistration {
   readonly activeRoot: string;
+  readonly previousActiveRoot?: string;
   readonly receiptPath: string;
 }
 
@@ -66,6 +67,11 @@ export type ClaudeRegistrationState =
   | "missing"
   | "ready"
   | "collision";
+
+export interface ClaudeManagedRuntimeRegistrationState {
+  readonly marketplace: ClaudeRegistrationState;
+  readonly plugin: ClaudeRegistrationState;
+}
 
 const MAX_OPEN_CODE_CONFIG_BYTES = 1024 * 1024;
 
@@ -417,6 +423,7 @@ export function registerClaudeRuntime(
   registration: ManagedNativeRegistration,
   run: NativeCommandRunner,
 ): void {
+  const selector = "oh-my-harness@oh-my-harness";
   const marketplaceMatches = parseJsonArray(
     run(executable, ["plugin", "marketplace", "list", "--json"]),
     "Claude marketplace list",
@@ -425,24 +432,9 @@ export function registerClaudeRuntime(
     throw new Error("Claude marketplace oh-my-harness is registered more than once");
   }
   const marketplace = marketplaceMatches[0];
-  if (marketplace !== undefined) {
-    const source = claudeMarketplacePath(marketplace);
-    if (
-      source === null
-      || resolve(source) !== resolve(registration.activeRoot)
-    ) {
-      throw new Error("Claude marketplace oh-my-harness points to another source");
-    }
-  } else {
-    run(executable, [
-      "plugin",
-      "marketplace",
-      "add",
-      registration.activeRoot,
-    ]);
-  }
-
-  const selector = "oh-my-harness@oh-my-harness";
+  const marketplaceSource = marketplace === undefined
+    ? null
+    : claudeMarketplacePath(marketplace);
   const selectorMatches = parseJsonArray(
     run(executable, ["plugin", "list", "--json"]),
     "Claude plugin list",
@@ -454,13 +446,112 @@ export function registerClaudeRuntime(
     throw new Error(`${selector} collides with a non-user Claude plugin registration`);
   }
   const plugin = selectorMatches.find((entry) => entry.scope === "user");
+
+  const pluginMatchesRoot = (root: string): boolean => {
+    if (
+      plugin?.version !== "0.2.0"
+      || plugin.enabled !== true
+      || typeof plugin.installPath !== "string"
+      || !isAbsolute(plugin.installPath)
+    ) {
+      return false;
+    }
+    try {
+      return hashManagedDirectory(plugin.installPath, {
+        ignoreTopLevel: [".in_use"],
+      }) === hashManagedDirectory(join(root, "plugins", "oh-my-harness"));
+    } catch {
+      return false;
+    }
+  };
+
+  const previousRoot = registration.previousActiveRoot;
+  if (
+    marketplaceSource !== null
+    && resolve(marketplaceSource) !== resolve(registration.activeRoot)
+  ) {
+    if (
+      previousRoot === undefined
+      || resolve(marketplaceSource) !== resolve(previousRoot)
+      || (plugin !== undefined && !pluginMatchesRoot(previousRoot))
+    ) {
+      throw new Error("Claude marketplace oh-my-harness points to another source");
+    }
+    if (plugin !== undefined) {
+      run(executable, [
+        "plugin",
+        "uninstall",
+        selector,
+        "--scope",
+        "user",
+      ]);
+    }
+    run(executable, [
+      "plugin",
+      "marketplace",
+      "remove",
+      "oh-my-harness",
+    ]);
+  } else if (marketplaceSource === null && plugin !== undefined) {
+    throw new Error(`${selector} exists without its managed marketplace`);
+  } else if (
+    marketplaceSource !== null
+    && plugin !== undefined
+    && !pluginMatchesRoot(registration.activeRoot)
+  ) {
+    throw new Error(`${selector} collides with an existing user-owned Claude plugin`);
+  }
+
+  const refreshedMarketplace = parseJsonArray(
+    run(executable, ["plugin", "marketplace", "list", "--json"]),
+    "Claude marketplace list",
+  ).filter((entry) => entry.name === "oh-my-harness");
+  if (refreshedMarketplace.length > 1) {
+    throw new Error("Claude marketplace oh-my-harness is registered more than once");
+  }
+  const refreshedSource = refreshedMarketplace[0] === undefined
+    ? null
+    : claudeMarketplacePath(refreshedMarketplace[0]!);
+  if (marketplace !== undefined) {
+    if (
+      refreshedSource !== null
+      && resolve(refreshedSource) !== resolve(registration.activeRoot)
+    ) {
+      throw new Error("Claude marketplace oh-my-harness points to another source");
+    }
+  }
+  if (refreshedSource === null) {
+    run(executable, [
+      "plugin",
+      "marketplace",
+      "add",
+      registration.activeRoot,
+    ]);
+  }
+
+  const currentSelectorMatches = parseJsonArray(
+    run(executable, ["plugin", "list", "--json"]),
+    "Claude plugin list",
+  ).filter((entry) => entry.id === selector);
+  if (currentSelectorMatches.length > 1) {
+    throw new Error(`${selector} has duplicate Claude plugin registrations`);
+  }
+  if (currentSelectorMatches.some((entry) => entry.scope !== "user")) {
+    throw new Error(`${selector} collides with a non-user Claude plugin registration`);
+  }
+  const currentPlugin = currentSelectorMatches.find(
+    (entry) => entry.scope === "user",
+  );
   const sourcePluginDigest = hashManagedDirectory(
     join(registration.activeRoot, "plugins", "oh-my-harness"),
   );
   let installedPluginExact = false;
-  if (typeof plugin?.installPath === "string" && isAbsolute(plugin.installPath)) {
+  if (
+    typeof currentPlugin?.installPath === "string"
+    && isAbsolute(currentPlugin.installPath)
+  ) {
     try {
-      installedPluginExact = hashManagedDirectory(plugin.installPath, {
+      installedPluginExact = hashManagedDirectory(currentPlugin.installPath, {
         ignoreTopLevel: [".in_use"],
       }) === sourcePluginDigest;
     } catch {
@@ -468,13 +559,13 @@ export function registerClaudeRuntime(
     }
   }
   const pluginCurrent =
-    plugin?.version === "0.2.0"
-    && plugin.enabled === true
+    currentPlugin?.version === "0.2.0"
+    && currentPlugin.enabled === true
     && installedPluginExact;
-  if (plugin !== undefined && !pluginCurrent) {
+  if (currentPlugin !== undefined && !pluginCurrent) {
     throw new Error(`${selector} collides with an existing user-owned Claude plugin`);
   }
-  if (plugin === undefined) {
+  if (currentPlugin === undefined) {
     run(executable, [
       "plugin",
       "install",
@@ -493,33 +584,173 @@ export function registerClaudeRuntime(
   }
 }
 
-function parseCodexMarketplaces(output: string): ReadonlyMap<string, string> {
-  const entries = new Map<string, string>();
-  for (const line of output.split(/\r?\n/u).slice(1)) {
-    const match = /^(\S+)\s{2,}(.+?)\s*$/u.exec(line);
-    if (match?.[1] && match[2]) {
-      if (entries.has(match[1])) {
-        throw new Error(`duplicate Codex marketplace registration: ${match[1]}`);
+export function inspectClaudeManagedRuntimeRegistration(
+  executable: string,
+  registration: ManagedNativeRegistration,
+  run: NativeCommandRunner,
+): ClaudeManagedRuntimeRegistrationState {
+  try {
+    const marketplaceMatches = parseJsonArray(
+      run(executable, ["plugin", "marketplace", "list", "--json"]),
+      "Claude marketplace list",
+    ).filter((entry) => entry.name === "oh-my-harness");
+    const marketplace = marketplaceMatches.length === 0
+      ? "missing"
+      : marketplaceMatches.length === 1
+          && claudeMarketplacePath(marketplaceMatches[0]!) !== null
+          && resolve(claudeMarketplacePath(marketplaceMatches[0]!)!)
+            === resolve(registration.activeRoot)
+        ? "ready"
+        : "collision";
+    const pluginMatches = parseJsonArray(
+      run(executable, ["plugin", "list", "--json"]),
+      "Claude plugin list",
+    ).filter((entry) => entry.id === "oh-my-harness@oh-my-harness");
+    let plugin: ClaudeRegistrationState;
+    if (pluginMatches.length === 0) {
+      plugin = "missing";
+    } else if (
+      pluginMatches.length !== 1
+      || pluginMatches[0]?.scope !== "user"
+      || pluginMatches[0]?.version !== "0.2.0"
+      || pluginMatches[0]?.enabled !== true
+      || typeof pluginMatches[0]?.installPath !== "string"
+      || !isAbsolute(pluginMatches[0].installPath)
+    ) {
+      plugin = "collision";
+    } else {
+      try {
+        plugin = hashManagedDirectory(pluginMatches[0].installPath, {
+          ignoreTopLevel: [".in_use"],
+        }) === hashManagedDirectory(
+          join(registration.activeRoot, "plugins", "oh-my-harness"),
+        )
+          ? "ready"
+          : "collision";
+      } catch {
+        plugin = "collision";
       }
-      entries.set(match[1], match[2]);
     }
+    return { marketplace, plugin };
+  } catch {
+    return { marketplace: "collision", plugin: "collision" };
+  }
+}
+
+function parseCodexMarketplaces(output: string): ReadonlyMap<string, string> {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    throw new Error("Codex marketplace list did not return JSON");
+  }
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+    || !Array.isArray((value as Record<string, unknown>).marketplaces)
+  ) {
+    throw new Error("Codex marketplace list does not match the native contract");
+  }
+  const entries = new Map<string, string>();
+  for (const item of (value as { marketplaces: unknown[] }).marketplaces) {
+    if (
+      typeof item !== "object"
+      || item === null
+      || Array.isArray(item)
+      || typeof (item as Record<string, unknown>).name !== "string"
+      || typeof (item as Record<string, unknown>).root !== "string"
+      || !isAbsolute(String((item as Record<string, unknown>).root))
+    ) {
+      throw new Error("Codex marketplace entry does not match the native contract");
+    }
+    const { name, root } = item as { name: string; root: string };
+    if (entries.has(name)) {
+      throw new Error(`duplicate Codex marketplace registration: ${name}`);
+    }
+    entries.set(name, root);
   }
   return entries;
 }
 
-function codexPluginStatus(
+function codexPluginState(
   output: string,
-  selector: string,
-): { readonly installed: boolean; readonly enabled: boolean } {
-  const columns = output
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim().split(/\s{2,}/u))
-    .find(([name]) => name === selector);
-  const status = columns?.[1] ?? "";
-  return {
-    enabled: /(?:^|,\s*)enabled(?:,|$)/u.test(status),
-    installed: /^installed(?:,|$)/u.test(status),
-  };
+  registration: ManagedNativeRegistration,
+): ClaudeRegistrationState {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    throw new Error("Codex plugin list did not return JSON");
+  }
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+    || !Array.isArray((value as Record<string, unknown>).installed)
+  ) {
+    throw new Error("Codex plugin list does not match the native contract");
+  }
+  const matches = (value as { installed: unknown[] }).installed.filter(
+    (item) =>
+      typeof item === "object"
+      && item !== null
+      && !Array.isArray(item)
+      && (item as Record<string, unknown>).pluginId
+        === "oh-my-harness@oh-my-harness",
+  );
+  if (matches.length === 0) return "missing";
+  if (matches.length !== 1) return "collision";
+  const plugin = matches[0] as Record<string, unknown>;
+  const source = plugin.source;
+  if (
+    plugin.installed !== true
+    || plugin.enabled !== true
+    || plugin.marketplaceName !== "oh-my-harness"
+    || typeof source !== "object"
+    || source === null
+    || Array.isArray(source)
+    || (source as Record<string, unknown>).source !== "local"
+    || typeof (source as Record<string, unknown>).path !== "string"
+    || !isAbsolute(String((source as Record<string, unknown>).path))
+  ) {
+    return "collision";
+  }
+  try {
+    return hashManagedDirectory(String((source as Record<string, unknown>).path))
+        === hashManagedDirectory(
+          join(registration.activeRoot, "plugins", "oh-my-harness"),
+        )
+      ? "ready"
+      : "collision";
+  } catch {
+    return "collision";
+  }
+}
+
+export function inspectCodexManagedRuntimeRegistration(
+  executable: string,
+  registration: ManagedNativeRegistration,
+  run: NativeCommandRunner,
+): ClaudeManagedRuntimeRegistrationState {
+  try {
+    const marketplaces = parseCodexMarketplaces(
+      run(executable, ["plugin", "marketplace", "list", "--json"]),
+    );
+    const marketplaceRoot = marketplaces.get("oh-my-harness");
+    const marketplace = marketplaceRoot === undefined
+      ? "missing"
+      : resolve(marketplaceRoot) === resolve(registration.activeRoot)
+        ? "ready"
+        : "collision";
+    const plugin = codexPluginState(
+      run(executable, ["plugin", "list", "--json"]),
+      registration,
+    );
+    return { marketplace, plugin };
+  } catch {
+    return { marketplace: "collision", plugin: "collision" };
+  }
 }
 
 export function registerCodexRuntime(
@@ -527,17 +758,55 @@ export function registerCodexRuntime(
   registration: ManagedNativeRegistration,
   run: NativeCommandRunner,
 ): void {
-  const marketplaces = parseCodexMarketplaces(
-    run(executable, ["plugin", "marketplace", "list"]),
+  let state = inspectCodexManagedRuntimeRegistration(
+    executable,
+    registration,
+    run,
   );
-  const marketplace = marketplaces.get("oh-my-harness");
-  if (
-    marketplace !== undefined
-    && resolve(marketplace) !== resolve(registration.activeRoot)
-  ) {
-    throw new Error("Codex marketplace oh-my-harness points to another root");
+  if (state.marketplace === "collision") {
+    const previous = registration.previousActiveRoot;
+    const previousState = previous === undefined
+      ? null
+      : inspectCodexManagedRuntimeRegistration(
+          executable,
+          {
+            activeRoot: previous,
+            receiptPath: registration.receiptPath,
+          },
+          run,
+        );
+    if (
+      previousState?.marketplace !== "ready"
+      || previousState.plugin !== "ready"
+    ) {
+      throw new Error("Codex marketplace oh-my-harness points to another root");
+    }
+    run(executable, [
+      "plugin",
+      "remove",
+      "oh-my-harness@oh-my-harness",
+      "--json",
+    ]);
+    run(executable, [
+      "plugin",
+      "marketplace",
+      "remove",
+      "oh-my-harness",
+      "--json",
+    ]);
+    state = { marketplace: "missing", plugin: "missing" };
   }
-  if (marketplace === undefined) {
+  if (state.plugin === "collision") {
+    throw new Error(
+      "oh-my-harness@oh-my-harness collides with an existing Codex plugin registration",
+    );
+  }
+  if (state.marketplace === "missing" && state.plugin === "ready") {
+    throw new Error(
+      "oh-my-harness@oh-my-harness exists without its managed Codex marketplace",
+    );
+  }
+  if (state.marketplace === "missing") {
     run(executable, [
       "plugin",
       "marketplace",
@@ -546,32 +815,22 @@ export function registerCodexRuntime(
       "--json",
     ]);
   }
-  const selector = "oh-my-harness@oh-my-harness";
-  const pluginStatus = codexPluginStatus(
-    run(executable, ["plugin", "list"]),
-    selector,
-  );
-  if (pluginStatus.installed && !pluginStatus.enabled) {
-    throw new Error(
-      `${selector} collides with an existing disabled Codex plugin registration`,
-    );
+  if (state.plugin === "missing") {
+    run(executable, [
+      "plugin",
+      "add",
+      "oh-my-harness@oh-my-harness",
+      "--json",
+    ]);
   }
-  if (!pluginStatus.enabled) {
-    run(executable, ["plugin", "add", selector, "--json"]);
-  }
-  const verifiedMarketplace = parseCodexMarketplaces(
-    run(executable, ["plugin", "marketplace", "list"]),
+  const verified = inspectCodexManagedRuntimeRegistration(
+    executable,
+    registration,
+    run,
   );
-  const verifiedStatus = codexPluginStatus(
-    run(executable, ["plugin", "list"]),
-    selector,
-  );
-  const verifiedMarketplaceRoot = verifiedMarketplace.get("oh-my-harness");
   if (
-    verifiedMarketplaceRoot === undefined
-    || resolve(verifiedMarketplaceRoot) !== resolve(registration.activeRoot)
-    || !verifiedStatus.installed
-    || !verifiedStatus.enabled
+    verified.marketplace !== "ready"
+    || verified.plugin !== "ready"
   ) {
     throw new Error("Codex native registration could not be verified");
   }
@@ -642,22 +901,12 @@ export function codexRegistrationReady(
   registration: ManagedNativeRegistration,
   run: NativeCommandRunner,
 ): boolean {
-  try {
-    const marketplaces = parseCodexMarketplaces(
-      run(executable, ["plugin", "marketplace", "list"]),
-    );
-    const marketplaceRoot = marketplaces.get("oh-my-harness");
-    const status = codexPluginStatus(
-      run(executable, ["plugin", "list"]),
-      "oh-my-harness@oh-my-harness",
-    );
-    return marketplaceRoot !== undefined
-      && resolve(marketplaceRoot) === resolve(registration.activeRoot)
-      && status.installed
-      && status.enabled;
-  } catch {
-    return false;
-  }
+  const state = inspectCodexManagedRuntimeRegistration(
+    executable,
+    registration,
+    run,
+  );
+  return state.marketplace === "ready" && state.plugin === "ready";
 }
 
 export function registerOpenCodeRuntime(
@@ -689,10 +938,35 @@ export function registerOpenCodeRuntime(
     throw new Error("OpenCode plugin configuration contains a non-string entry");
   }
   const stringPlugins = plugins as string[];
-  if (stringPlugins.includes(pluginUrl) || stringPlugins.includes(sourcePath)) {
+  const previousSourcePath = registration.previousActiveRoot === undefined
+    ? null
+    : resolve(
+        registration.previousActiveRoot,
+        ".opencode",
+        "plugins",
+        "oh-my-harness.js",
+      );
+  const previousPluginUrl = previousSourcePath === null
+    ? null
+    : pathToFileURL(previousSourcePath).href;
+  const withoutPrevious = stringPlugins.filter(
+    (entry) =>
+      entry !== previousSourcePath
+      && entry !== previousPluginUrl,
+  );
+  if (
+    withoutPrevious.includes(pluginUrl)
+    || withoutPrevious.includes(sourcePath)
+  ) {
+    if (withoutPrevious.length !== stringPlugins.length) {
+      const edits = modify(current, ["plugin"], withoutPrevious, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      });
+      atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
+    }
     return;
   }
-  const edits = modify(current, ["plugin"], [...stringPlugins, pluginUrl], {
+  const edits = modify(current, ["plugin"], [...withoutPrevious, pluginUrl], {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   });
   atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);

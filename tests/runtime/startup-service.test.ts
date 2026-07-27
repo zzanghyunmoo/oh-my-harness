@@ -24,6 +24,7 @@ import { createFileOpenCodeRuntimeDependencies } from "../../dist/runtime/openco
 import {
   runReceiptDrivenStartupService,
 } from "../../dist/runtime/startup-service.js";
+import { resolveTrustedCommand } from "../../dist/tools/invoke.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -100,7 +101,13 @@ function writeReceipt(path: string, value: unknown): void {
 }
 
 function executable(path: string): void {
-  writeFileSync(path, "#!/bin/sh\nexit 99\n", { mode: 0o700 });
+  writeFileSync(
+    path,
+    process.platform === "win32"
+      ? "#!/usr/bin/env node\nprocess.exit(99);\n"
+      : "#!/bin/sh\nexit 99\n",
+    { mode: 0o700 },
+  );
   chmodSync(path, 0o700);
 }
 
@@ -162,6 +169,11 @@ test("U13 startup service derives local-only context and publishes OpenCode snap
             repairs += 1;
             return { verified: true };
           },
+          resolveTrustedCommand: (commands, options) =>
+            resolveTrustedCommand(commands, {
+              ...options,
+              platform: process.platform,
+            }),
           state: new MemoryState(),
         },
       );

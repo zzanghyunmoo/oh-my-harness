@@ -2,6 +2,7 @@ import {
   spawn,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -19,6 +20,14 @@ const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const STOP_GRACE_MS = 2_000;
+const STOP_FORCE_MS = 2_000;
+const READ_ONLY_DISCOVERY_PATHS = new Set([
+  "/config",
+  "/config/providers",
+  "/experimental/tool/ids",
+  "/global/health",
+  "/lsp",
+]);
 
 export interface OpenCodeDiscoverySkill {
   readonly description: string;
@@ -358,13 +367,28 @@ function requestJson(
   port: number,
   path: string,
   timeoutMs: number,
+  authorization: string,
 ): Promise<unknown> {
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw new Error("OpenCode discovery path must be server-relative");
   }
+  const parsed = new URL(path, `http://${LOOPBACK_HOST}`);
+  const provider = parsed.searchParams.get("provider");
+  const model = parsed.searchParams.get("model");
+  const isToolSchema = parsed.pathname === "/experimental/tool"
+    && parsed.searchParams.size === 2
+    && typeof provider === "string"
+    && provider.length > 0
+    && typeof model === "string"
+    && model.length > 0
+    && parsed.hash.length === 0;
+  if (!READ_ONLY_DISCOVERY_PATHS.has(path) && !isToolSchema) {
+    throw new Error("OpenCode discovery permits only read-only native endpoints");
+  }
   return new Promise((resolveValue, reject) => {
     const operation = request(
       {
+        headers: { authorization },
         hostname: LOOPBACK_HOST,
         method: "GET",
         path,
@@ -445,7 +469,13 @@ async function stopChild(
   ]);
   if (!stopped) {
     child.kill("SIGKILL");
-    await closed;
+    const forced = await Promise.race([
+      closed.then(() => true),
+      delay(STOP_FORCE_MS).then(() => false),
+    ]);
+    if (!forced) {
+      throw new Error("OpenCode headless server did not stop after forced termination");
+    }
   }
 }
 
@@ -472,6 +502,11 @@ export class NodeOpenCodeDiscoveryDriver implements OpenCodeDiscoveryDriver {
       DEFAULT_REQUEST_TIMEOUT_MS,
       "OpenCode discovery request timeout",
     );
+    const username = `omh-${randomBytes(12).toString("hex")}`;
+    const password = randomBytes(32).toString("base64url");
+    const authorization = `Basic ${
+      Buffer.from(`${username}:${password}`, "utf8").toString("base64")
+    }`;
     const port = await allocateLoopbackPort();
     const child = spawn(
       resolve(input.executablePath),
@@ -484,7 +519,11 @@ export class NodeOpenCodeDiscoveryDriver implements OpenCodeDiscoveryDriver {
       ],
       {
         cwd: resolve(input.cwd),
-        env: input.environment ?? process.env,
+        env: {
+          ...(input.environment ?? process.env),
+          OPENCODE_SERVER_PASSWORD: password,
+          OPENCODE_SERVER_USERNAME: username,
+        },
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -522,7 +561,7 @@ export class NodeOpenCodeDiscoveryDriver implements OpenCodeDiscoveryDriver {
             }`,
           );
         }
-        return requestJson(port, path, requestTimeoutMs);
+        return requestJson(port, path, requestTimeoutMs, authorization);
       },
       async stop() {
         if (stopped) return;

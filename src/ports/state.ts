@@ -11,8 +11,15 @@ export interface ApplyJournal {
   readonly planDigest: string;
   readonly catalogRevision: string;
   readonly completedActionIds: readonly string[];
+  readonly pendingRecoveries?: readonly ApplyRecoveryRecord[];
   readonly status: "applying" | "partial-unready" | "ready";
   readonly failure?: string;
+}
+
+export interface ApplyRecoveryRecord {
+  readonly actionId: string;
+  readonly kind: string;
+  readonly payload: Readonly<Record<string, unknown>>;
 }
 
 export interface ManagedStateReceipt {
@@ -74,6 +81,7 @@ export interface ManagedStateReceipt {
 export interface StatePort {
   withApplyLock<T>(operation: () => Promise<T>): Promise<T>;
   readJournal(): Promise<ApplyJournal | null>;
+  readReceipt?(): Promise<ManagedStateReceipt | null>;
   writeJournal(journal: ApplyJournal): Promise<void>;
   publishReceipt(receipt: ManagedStateReceipt): Promise<void>;
 }

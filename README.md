@@ -60,6 +60,16 @@ Windows PowerShell에서는 `.\omh.cmd`를 사용합니다.
 .\omh.cmd doctor --target all --json
 ```
 
+Before release, run the live Windows/Ubuntu validator after the canonical gate.
+It checks operator-owned Node, Git, and all seven LSP executables before any OMH
+preview or apply. It then verifies ordered WSL/Windows preview and apply,
+stale-digest rejection, aggregate status and doctor, idempotent reapply,
+stopped-WSL degradation, and preservation of Codex plus CLI-owned auth state.
+
+```powershell
+powershell -File scripts/validate-dual-environment.ps1 -Distro Ubuntu
+```
+
 Preview는 managed root, journal, receipt, marketplace, runtime config,
 package-manager를 변경하지 않습니다. 적용 시에도 같은 Catalog Revision,
 profile, agent 선택, platform, observed pre-image로 plan을 다시 만들고 하나라도

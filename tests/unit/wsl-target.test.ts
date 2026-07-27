@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  WSL_TRANSPORT_SOURCES,
   WslTargetPort,
+  decodeWslOutput,
   parseWslDistributionList,
   sanitizeWindowsEnvironment,
+  wslTargetExecutionTimeout,
 } from "../../dist/environment/wsl-target.js";
 
 const NODE_PROBE = JSON.stringify({
@@ -13,6 +16,32 @@ const NODE_PROBE = JSON.stringify({
   home: "/home/test",
   platform: "linux",
   version: "22.19.0",
+});
+
+test("WSL transport includes every direct runtime acquisition dependency", () => {
+  for (const path of [
+    "scripts/harness/acquisition.mjs",
+    "node_modules/tar-stream",
+    "node_modules/yauzl",
+    "node_modules/b4a",
+    "node_modules/bare-events",
+    "node_modules/fast-fifo",
+    "node_modules/streamx",
+    "node_modules/events-universal",
+    "node_modules/text-decoder",
+    "node_modules/pend",
+  ]) {
+    assert.equal(WSL_TRANSPORT_SOURCES.includes(path), true, path);
+  }
+  assert.equal(
+    WSL_TRANSPORT_SOURCES.includes(".opencode/package.json"),
+    true,
+  );
+  assert.equal(WSL_TRANSPORT_SOURCES.includes(".opencode/plugins"), true);
+  assert.equal(
+    WSL_TRANSPORT_SOURCES.some((path) => path === ".opencode"),
+    false,
+  );
 });
 
 test("WSL distribution parsing requires the exact Ubuntu WSL2 instance", () => {
@@ -33,6 +62,18 @@ test("WSL distribution parsing requires the exact Ubuntu WSL2 instance", () => {
   );
 });
 
+test("WSL output decoding accepts redirected UTF-16LE list output", () => {
+  const list = "  NAME      STATE           VERSION\r\n* Ubuntu    Running         2\r\n";
+  assert.equal(
+    decodeWslOutput(Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from(list, "utf16le"),
+    ])),
+    list,
+  );
+  assert.equal(decodeWslOutput(Buffer.from("linux utf8\n")), "linux utf8\n");
+});
+
 test("WSL launches receive an allowlisted Windows environment with WSLENV cleared", () => {
   const environment = sanitizeWindowsEnvironment({
     SystemRoot: "C:\\Windows",
@@ -49,6 +90,21 @@ test("WSL launches receive an allowlisted Windows environment with WSLENV cleare
   assert.equal(environment.GITHUB_TOKEN, undefined);
 });
 
+test("WSL exact apply receives a distinct bounded acquisition timeout", () => {
+  assert.equal(
+    wslTargetExecutionTimeout(["setup", "--json"], 30_000, 900_000),
+    30_000,
+  );
+  assert.equal(
+    wslTargetExecutionTimeout(
+      ["setup", "--apply", "--digest", "a".repeat(64)],
+      30_000,
+      900_000,
+    ),
+    900_000,
+  );
+});
+
 test("WSL target stages a dependency-bounded bootstrap and preserves the inner result", async () => {
   const calls: Array<{
     args: readonly string[];
@@ -57,6 +113,7 @@ test("WSL target stages a dependency-bounded bootstrap and preserves the inner r
   }> = [];
   const responses = [
     { exitCode: 0, stdout: "Ubuntu Running 2", stderr: "" },
+    { exitCode: 0, stdout: "/home/test", stderr: "" },
     { exitCode: 0, stdout: NODE_PROBE, stderr: "" },
     { exitCode: 0, stdout: "/mnt/c/repo", stderr: "" },
     { exitCode: 0, stdout: "/tmp/omh-transport.ABC123", stderr: "" },
@@ -105,10 +162,27 @@ test("WSL target stages a dependency-bounded bootstrap and preserves the inner r
 
   assert.equal(result.state, "preview");
   assert.equal(result.exitCode, 2);
-  assert.equal(calls.length, 7);
-  assert.deepEqual(calls[4].stdin, Buffer.from("reviewed bundle"));
-  assert.match(calls[5].args.join(" "), /\/tmp\/omh-transport\.ABC123\/dist\/cli\/wsl-bootstrap\.js/);
-  assert.doesNotMatch(calls[5].args.join(" "), /\/mnt\/c\/repo\/node_modules/);
+  assert.equal(calls.length, 8);
+  assert.deepEqual(calls[5].stdin, Buffer.from("reviewed bundle"));
+  assert.deepEqual(calls[1].args.slice(0, 6), [
+    "-d",
+    "Ubuntu",
+    "--cd",
+    "~",
+    "-e",
+    "/bin/pwd",
+  ]);
+  assert.deepEqual(calls[2].args.slice(0, 7), [
+    "-d",
+    "Ubuntu",
+    "-e",
+    "/usr/bin/env",
+    "-i",
+    "PATH=/home/test/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "node",
+  ]);
+  assert.match(calls[6].args.join(" "), /\/tmp\/omh-transport\.ABC123\/dist\/cli\/wsl-bootstrap\.js/);
+  assert.doesNotMatch(calls[6].args.join(" "), /\/mnt\/c\/repo\/node_modules/);
   assert.ok(calls.every(({ environment }) => environment.WSLENV === ""));
   assert.ok(calls.every(({ environment }) => environment.GITHUB_TOKEN === undefined));
 });
@@ -148,7 +222,9 @@ test("WSL target rejects stopped read-only inspection and untrusted Node before 
         calls += 1;
         return calls === 2
           ? { exitCode: 0, stdout: "Ubuntu Running 2", stderr: "" }
-          : {
+          : calls === 3
+            ? { exitCode: 0, stdout: "/home/test", stderr: "" }
+            : {
               exitCode: 0,
               stdout: JSON.stringify({
                 ...JSON.parse(NODE_PROBE),
@@ -173,6 +249,7 @@ test("WSL target rejects an old Node and path translation failure before staging
   for (const responses of [
     [
       { exitCode: 0, stdout: "Ubuntu Running 2", stderr: "" },
+      { exitCode: 0, stdout: "/home/test", stderr: "" },
       {
         exitCode: 0,
         stdout: JSON.stringify({
@@ -184,6 +261,7 @@ test("WSL target rejects an old Node and path translation failure before staging
     ],
     [
       { exitCode: 0, stdout: "Ubuntu Running 2", stderr: "" },
+      { exitCode: 0, stdout: "/home/test", stderr: "" },
       { exitCode: 0, stdout: NODE_PROBE, stderr: "" },
       { exitCode: 1, stdout: "", stderr: "translation failed" },
     ],
@@ -232,6 +310,7 @@ test("WSL target rejects malformed, oversized, and wrong-target envelopes", asyn
           index += 1;
           return [
             { exitCode: 0, stdout: "Ubuntu Running 2", stderr: "" },
+            { exitCode: 0, stdout: "/home/test", stderr: "" },
             { exitCode: 0, stdout: NODE_PROBE, stderr: "" },
             { exitCode: 0, stdout: "/mnt/c/repo", stderr: "" },
             { exitCode: 0, stdout: "/tmp/omh-transport.ABC123", stderr: "" },

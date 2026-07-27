@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import {
   assessLspReadiness,
+  isReservedOfficialMarketplaceName,
   loadCapabilityProvenance,
   resolveCapabilities,
   verifyManagedCapability,
@@ -28,6 +29,17 @@ import {
 } from "../../dist/install/official-marketplace.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+test("runtime marketplace aliases avoid reserved Claude and Anthropic branding", () => {
+  assert.equal(
+    isReservedOfficialMarketplaceName("oh-my-harness-anthropic-official"),
+    true,
+  );
+  assert.equal(
+    isReservedOfficialMarketplaceName("oh-my-harness-reviewed-upstream"),
+    false,
+  );
+});
 
 function observedCandidate(
   candidate: ReturnType<typeof loadCapabilityProvenance>["official"]["candidates"][number],

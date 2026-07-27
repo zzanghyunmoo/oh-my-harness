@@ -14,9 +14,9 @@
       "sha256": "006877b3e41b177aaada7620d09c3ea773873cc515d1339153d2ac48054962f4"
     },
     "runtimeMarketplace": {
-      "name": "oh-my-harness-anthropic-official",
-      "manifestSha256": "5fb26fa5404ff8164193a9be7eeba561ec36f715a522ba685fa46f6cac872ee4",
-      "contentSha256": "f1c6101ca4a8d74aa82c281e2eed6605e6ce26ab6132462c78d9e72dc5050a33"
+      "name": "oh-my-harness-reviewed-upstream",
+      "manifestSha256": "05483eeb3b684c2284d70595f94bfb24f73b3f9017b322a9d48eacb638e46b57",
+      "contentSha256": "5170d70afc0780512d28210f7e039b1c9b71bd0c4894c018f754369a550bbccf"
     }
   },
   "candidates": [
