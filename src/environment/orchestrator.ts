@@ -8,6 +8,8 @@ import {
   rmSync,
 } from "node:fs";
 import {
+  basename,
+  dirname,
   isAbsolute,
   join,
   resolve,
@@ -807,6 +809,27 @@ function ownedContentMatches(
   }
 }
 
+function ownedTargetStaysWithinStateRoot(
+  stateRoot: string,
+  target: string,
+): boolean {
+  try {
+    if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
+      return false;
+    }
+    const parent = assertSafeManagedRootPath(
+      dirname(target),
+      "managed ownership parent",
+    );
+    return isPathStrictlyWithin(
+      stateRoot,
+      join(parent, basename(target)),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function cleanPreflights(model: EnvironmentModel): PlanPreflight[] {
   if (!model.clean) return [];
   if (model.receiptFailure !== null) {
@@ -840,7 +863,10 @@ function cleanPreflights(model: EnvironmentModel): PlanPreflight[] {
   return model.currentReceipt.ownership
     .filter(({ scope }) => scope === "managed")
     .map((ownership) => {
-      const safe = isPathStrictlyWithin(model.stateRoot, ownership.target);
+      const safe = ownedTargetStaysWithinStateRoot(
+        model.stateRoot,
+        ownership.target,
+      );
       const exact = safe && ownedContentMatches(ownership);
       return {
         detail: !safe
