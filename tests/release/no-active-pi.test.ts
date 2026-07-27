@@ -89,7 +89,7 @@ test("U14 maintained contracts and compatibility scripts expose three runtimes w
     ...collectFiles(join(REPOSITORY_ROOT, "scripts")),
     ...collectFiles(join(REPOSITORY_ROOT, "src")),
     join(REPOSITORY_ROOT, "package.json"),
-    join(REPOSITORY_ROOT, "package-lock.json"),
+    join(REPOSITORY_ROOT, "npm-shrinkwrap.json"),
   ].filter((path) => {
     const repositoryRelative = relative(REPOSITORY_ROOT, path)
       .split(/[\\/]/u)
@@ -117,7 +117,7 @@ test("U14 package metadata and packed artifact contain no Pi dependency or exten
     false,
   );
 
-  const lock = readJson("package-lock.json");
+  const lock = readJson("npm-shrinkwrap.json");
   assert.equal(JSON.stringify(lock).includes("@earendil-works/pi-"), false);
 
   const invocation = npmInvocation([

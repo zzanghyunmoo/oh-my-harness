@@ -97,6 +97,7 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
     "plugins/oh-my-harness/codex/skills/code-review/SKILL.md",
     "plugins/oh-my-harness/codex/skills/skill-creator/SKILL.md",
     "plugins/oh-my-harness/codex/skills/ralph-loop/SKILL.md",
+    "npm-shrinkwrap.json",
     "dist/install/plugin-runtime-files.js",
     ...PLUGIN_RUNTIME_PATHS,
   ]) {

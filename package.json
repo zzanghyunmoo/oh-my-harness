@@ -30,6 +30,7 @@
     "harness/inventory/",
     "harness/locks/",
     "harness/profiles/",
+    "npm-shrinkwrap.json",
     "omh",
     "omh.cmd",
     "plugins/",
