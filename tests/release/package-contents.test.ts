@@ -191,6 +191,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
+      "--omit=dev",
       "--offline",
     ]);
     const installed = spawnSync(
