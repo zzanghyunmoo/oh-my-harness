@@ -906,8 +906,18 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
-function previousManagedPayloadRoot(model: EnvironmentModel): string | null {
+function previousManagedPayloadRoot(
+  model: EnvironmentModel,
+  runtimeId: AgentId,
+): string | null {
   if (!model.clean || model.currentReceipt === null) return null;
+  const runtimeOwnership = model.currentReceipt.ownership.find(
+    ({ id, kind, scope }) =>
+      id === `runtime:${runtimeId}:native`
+      && kind === "registration"
+      && scope === "managed",
+  );
+  if (runtimeOwnership === undefined) return null;
   const ownership = model.currentReceipt.ownership.find(
     ({ id, kind, scope }) =>
       id === "plugin:runtime-package"
@@ -1287,7 +1297,7 @@ function planActions(
       options.os,
       target,
     );
-    const previousActiveRoot = previousManagedPayloadRoot(model);
+    const previousActiveRoot = previousManagedPayloadRoot(model, runtimeId);
     actions.push({
       id: `runtime:${runtimeId}:native`,
       kind: "register",
@@ -2242,7 +2252,7 @@ function rollbackNativeRegistration(
       throw new Error("Codex runtime recovery identity changed");
     }
     if (native.kind === "codex-runtime-previous") {
-      const expectedPrevious = previousManagedPayloadRoot(model);
+      const expectedPrevious = previousManagedPayloadRoot(model, "codex");
       if (
         expectedPrevious === null
         || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
@@ -2360,7 +2370,7 @@ function rollbackNativeRegistration(
     throw new Error("Claude runtime recovery identity changed");
   }
   if (native.kind === "claude-runtime-previous") {
-    const expectedPrevious = previousManagedPayloadRoot(model);
+    const expectedPrevious = previousManagedPayloadRoot(model, "claude-code");
     if (
       expectedPrevious === null
       || resolve(expectedPrevious) !== resolve(native.previousActiveRoot)
