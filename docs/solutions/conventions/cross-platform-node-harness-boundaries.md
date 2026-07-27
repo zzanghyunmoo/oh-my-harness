@@ -9,12 +9,15 @@ severity: high
 applies_when:
   - "A Node.js harness must run on both Windows and POSIX hosts"
   - "Tests exercise filesystem, executable, signal, symlink, or shell behavior"
+  - "Managed state or package digests must remain stable across filesystems"
+  - "A packed npm artifact must be verified from a clean installation"
   - "A local verification result is used as merge evidence"
 tags:
   - cross-platform
   - windows
   - nodejs
   - filesystem
+  - packaging
   - test-portability
   - fail-closed
 ---
@@ -41,6 +44,34 @@ import { fileURLToPath } from "node:url";
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 ```
 
+### Compare canonical filesystem identities
+
+An absolute path is not necessarily a unique filesystem identity. macOS exposes
+the temporary directory through `/var`, while `realpath` commonly reports the
+same ancestor under `/private/var`. If managed state stores one spelling and a
+later safety check compares it lexically with the other, an owned target can be
+misclassified as outside the state root.
+
+Canonicalize the deepest existing ancestor, append only the missing path
+segments, and use that canonical root consistently in previews, receipts, and
+containment checks. For a receipt-owned target that may not exist, canonicalize
+its parent and then append the basename. Continue to reject target symlinks,
+ancestor escapes, and filesystem roots. The shared implementation lives in
+`src/environment/filesystem.ts`; clean preflight applies the parent-plus-basename
+rule in `src/environment/orchestrator.ts`.
+
+### Preserve bytes before computing content identity
+
+Git checkout policy is part of a content-addressed artifact contract. Automatic
+CRLF conversion changes managed plugin bytes on Windows and therefore changes
+their digest even when the source commit is identical. Declare repository text
+identity explicitly: `.gitattributes` keeps normal text at LF and allows CRLF
+only for Windows-native `.bat` and `.cmd` launchers.
+
+Tests that intentionally parse human-readable text may normalize line endings at
+the assertion boundary. Tests and production code that compute a digest must
+consume the checked-out bytes unchanged.
+
 ### Keep package scripts shell-neutral
 
 Avoid package scripts whose correctness depends on a POSIX shell. Use Node for filesystem cleanup and a checked-in TypeScript project for file discovery instead of relying on shell glob expansion. The connector gate follows this boundary in `package.json:22`, while `tsconfig.workspace-connectors-tests.json` declares the compilation inputs. The supported Node floor is also machine-readable in `package.json:11` rather than existing only in prose.
@@ -52,6 +83,20 @@ Avoid package scripts whose correctness depends on a POSIX shell. Use Node for f
   }
 }
 ```
+
+### Verify an npm artifact as the installation root
+
+An npm shrinkwrap shipped inside a tarball governs that package when it is the
+installation root. Installing the tarball as a dependency of an unrelated empty
+prefix does not prove the shipped shrinkwrap can reproduce the package's
+dependency graph, and an offline test may fail even though the artifact contains
+the correct lock.
+
+The release smoke test in `tests/release/package-contents.test.ts` safely extracts
+the repository's own `npm pack` result, runs `npm install --offline` from that
+package root, and then invokes the compiled CLI from an unrelated working
+directory. `npm-shrinkwrap.json` is committed and included in the published file
+set so clean CI verifies the same dependency identity consumers receive.
 
 ### Make trusted executable discovery platform-aware
 
@@ -80,6 +125,9 @@ Explicit operating-system boundaries preserve both goals. Windows users get a fu
 ## When to Apply
 
 - A verifier derives paths from `import.meta.url`.
+- A managed root can pass through an operating-system path alias.
+- A content digest includes files that Git may rewrite on checkout.
+- A package smoke test must prove the published shrinkwrap from a clean root.
 - An npm script performs cleanup, expands source globs, or invokes shell fixtures.
 - Trusted executable selection assumes POSIX locations or permission bits.
 - A security test depends on symlink, signal, executable-mode, or shell behavior.
