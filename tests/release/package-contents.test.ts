@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
+import { once } from "node:events";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
+import tar from "tar-stream";
 
 import { PLUGIN_RUNTIME_PATHS } from "../../dist/install/plugin-runtime-files.js";
 
@@ -27,6 +32,47 @@ function npmInvocation(args: readonly string[]): {
       command: process.platform === "win32" ? "npm.cmd" : "npm",
       args,
     };
+}
+
+async function extractPackedArtifact(
+  archive: string,
+  destination: string,
+): Promise<void> {
+  const unpack = tar.extract();
+  unpack.on("entry", (header, stream, next) => {
+    const segments = header.name.replaceAll("\\", "/").split("/");
+    assert.equal(segments.shift(), "package");
+    assert.equal(
+      segments.some((segment) =>
+        segment === "" || segment === "." || segment === ".."
+      ),
+      false,
+      `unsafe packed path: ${header.name}`,
+    );
+    if (segments.length === 0) {
+      stream.resume();
+      stream.once("end", next);
+      return;
+    }
+    const target = join(destination, ...segments);
+    if (header.type === "directory") {
+      mkdirSync(target, { recursive: true });
+      stream.resume();
+      stream.once("end", next);
+      return;
+    }
+    assert.equal(header.type, "file", `unsupported packed entry: ${header.name}`);
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    stream.once("end", () => {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, Buffer.concat(chunks));
+      chmodSync(target, header.mode ?? 0o644);
+      next();
+    });
+  });
+  unpack.end(gunzipSync(readFileSync(archive)));
+  await once(unpack, "finish");
 }
 
 test("cross-platform CI checks the committed patch against its event base", () => {
@@ -110,7 +156,7 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
   }
 });
 
-test("packed artifact installs and runs help plus a read-only preview from arbitrary CWD", () => {
+test("packed artifact installs and runs help plus a read-only preview from arbitrary CWD", async () => {
   const root = mkdtempSync(join(tmpdir(), "omh-package-smoke-"));
   const packageRoot = join(root, "installed");
   const arbitraryCwd = join(root, "workspace");
@@ -138,20 +184,19 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
     const report = JSON.parse(packed.stdout) as Array<{ filename: string }>;
     const archive = join(root, String(report[0]?.filename));
 
+    await extractPackedArtifact(archive, packageRoot);
     const installInvocation = npmInvocation([
       "install",
-      "--prefix",
-      packageRoot,
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
       "--offline",
-      archive,
     ]);
     const installed = spawnSync(
       installInvocation.command,
       installInvocation.args,
       {
+        cwd: packageRoot,
         encoding: "utf8",
         env: { ...process.env, npm_config_update_notifier: "false" },
         windowsHide: true,
@@ -161,8 +206,6 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
 
     const entrypoint = join(
       packageRoot,
-      "node_modules",
-      "oh-my-harness",
       "dist",
       "cli",
       "main.js",
