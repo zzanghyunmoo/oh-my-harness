@@ -214,6 +214,38 @@ function validateReferences(source: CatalogSourceDocuments): void {
 
   for (const agent of source.agents.agents) {
     assertApprovedSource(sources, agent.sourceId, `agent ${agent.id}`);
+    if (
+      new Set(agent.defaultAddons.map(({ id }) => id)).size
+        !== agent.defaultAddons.length
+    ) {
+      throw new Error(`${agent.id}: duplicate default add-on id`);
+    }
+    for (const addon of agent.defaultAddons) {
+      assertApprovedSource(
+        sources,
+        addon.sourceId,
+        `agent ${agent.id} default add-on ${addon.id}`,
+      );
+      const kind = addon.registration.kind;
+      if (
+        (agent.id === "opencode" && kind !== "opencode-package")
+        || (agent.id === "codex" && kind !== "codex-marketplace")
+        || agent.id === "claude-code"
+      ) {
+        throw new Error(
+          `${agent.id}: default add-on registration is incompatible with the runtime`,
+        );
+      }
+      if (
+        kind === "opencode-package"
+        && addon.registration.spec
+          !== `${addon.registration.packageName}@${addon.version}`
+      ) {
+        throw new Error(
+          `${agent.id}: default add-on package spec must match its exact version`,
+        );
+      }
+    }
   }
   for (const packageEntry of source.packages.packages) {
     const exactVersionRequired =

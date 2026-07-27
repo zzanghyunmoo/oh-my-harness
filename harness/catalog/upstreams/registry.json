@@ -94,6 +94,24 @@
       "reviewStatus": "approved"
     },
     {
+      "id": "addon-oh-my-openagent",
+      "kind": "official",
+      "provider": "npm",
+      "identity": "oh-my-openagent@4.19.2#sha512-pHAbd6/6xsrPPxNDSufZ+sVXl7kfeEjB73g1gy8s5ZfiSjr+pssaK6fI4P8E4jcc2xC/MseqOWnLbrSqnwTI+w==",
+      "locator": "https://www.npmjs.com/package/oh-my-openagent/v/4.19.2",
+      "provenancePolicy": "exact-package-version",
+      "reviewStatus": "approved"
+    },
+    {
+      "id": "addon-lazycodex-omo",
+      "kind": "official",
+      "provider": "github",
+      "identity": "code-yeongyu/lazycodex@8ec16c5129df7b9778959e8367657d0e79c2c3bb#plugins/omo:65e9f043890912bb319f714a9e6cf04783a4c011",
+      "locator": "https://github.com/code-yeongyu/lazycodex/tree/8ec16c5129df7b9778959e8367657d0e79c2c3bb",
+      "provenancePolicy": "exact-commit-tree-content",
+      "reviewStatus": "approved"
+    },
+    {
       "id": "oh-my-harness-managed",
       "kind": "repository-managed",
       "provider": "github",

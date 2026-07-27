@@ -16,6 +16,46 @@ export type PlatformId =
 
 export type OperatingSystem = "darwin" | "linux" | "win32";
 
+interface DefaultRuntimeAddonBase {
+  id: "omo";
+  displayName: string;
+  required: true;
+  sourceId: string;
+  version: string;
+}
+
+export interface OpenCodePackageAddon extends DefaultRuntimeAddonBase {
+  registration: {
+    kind: "opencode-package";
+    integrity: string;
+    packageName: "oh-my-openagent";
+    spec: string;
+    tarballUrl: string;
+  };
+}
+
+export interface CodexMarketplaceAddon extends DefaultRuntimeAddonBase {
+  registration: {
+    kind: "codex-marketplace";
+    manifestBlob: string;
+    manifestSha256: string;
+    manifestPath: ".agents/plugins/marketplace.json";
+    marketplaceName: "sisyphuslabs";
+    pluginPath: "plugins/omo";
+    pluginTree: string;
+    pluginContentSha256: string;
+    repository: string;
+    revision: string;
+    rootTree: string;
+    selector: "omo@sisyphuslabs";
+    snapshotContentSha256: string;
+  };
+}
+
+export type DefaultRuntimeAddon =
+  | OpenCodePackageAddon
+  | CodexMarketplaceAddon;
+
 export interface AgentCatalogEntry {
   id: AgentId;
   displayName: string;
@@ -24,6 +64,7 @@ export interface AgentCatalogEntry {
   versionPolicy: "exact-reviewed-version";
   sourceId: string;
   supportedPlatforms: PlatformId[];
+  defaultAddons: DefaultRuntimeAddon[];
 }
 
 export interface AgentCatalog {

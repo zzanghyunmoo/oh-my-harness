@@ -3,6 +3,7 @@ import type {
   EnvironmentInstance,
   ToolRoute,
 } from "../domain/environment-instance.js";
+import type { RuntimeAddonPin } from "../domain/desired-state.js";
 
 export type ActionKind = "acquire" | "register" | "write" | "remove";
 
@@ -44,6 +45,7 @@ export interface ApplyPlanInput {
     readonly selectedCapabilities?: readonly string[];
     readonly selectedPackages?: readonly string[];
     readonly toolRoutes?: readonly ToolRoute[];
+    readonly runtimeAddons?: readonly RuntimeAddonPin[];
   };
   readonly platform: {
     readonly arch: string;

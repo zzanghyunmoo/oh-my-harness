@@ -91,7 +91,7 @@ test("clean preview carries the prior payload root only for previously managed r
         arch: "x64",
         env: {
           APPDATA: root,
-          PATH: "",
+          PATH: process.env.PATH ?? "",
           XDG_CONFIG_HOME: join(root, "config"),
         },
         os: "win32",
@@ -99,7 +99,7 @@ test("clean preview carries the prior payload root only for previously managed r
       },
     );
 
-    assert.ok(preview.plan);
+    assert.ok(preview.plan, preview.blockers.join(", "));
     const openCodeAction = preview.plan.actions.find(
       ({ id }) => id === "runtime:opencode:native",
     );

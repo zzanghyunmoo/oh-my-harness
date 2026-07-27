@@ -108,6 +108,9 @@
         },
         "selectedAgents": {
           "$ref": "#/$defs/selectedAgents"
+        },
+        "runtimeAddons": {
+          "$ref": "#/$defs/runtimeAddonPins"
         }
       }
     },
@@ -147,6 +150,39 @@
           "items": {
             "$ref": "#/$defs/toolRoute"
           }
+        },
+        "runtimeAddons": {
+          "$ref": "#/$defs/runtimeAddonPins"
+        }
+      }
+    },
+    "runtimeAddonPins": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/runtimeAddonPin"
+      }
+    },
+    "runtimeAddonPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "id", "kind", "version", "fingerprint"],
+      "properties": {
+        "agentId": {
+          "$ref": "#/$defs/agentId"
+        },
+        "id": {
+          "const": "omo"
+        },
+        "kind": {
+          "enum": ["opencode-package", "codex-marketplace"]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
         }
       }
     },

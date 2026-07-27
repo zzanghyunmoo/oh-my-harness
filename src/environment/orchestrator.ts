@@ -21,7 +21,10 @@ import {
 } from "../catalog/load.js";
 import type {
   CatalogBundle,
+  CodexMarketplaceAddon,
+  DefaultRuntimeAddon,
   EnvironmentProfile,
+  OpenCodePackageAddon,
   OperatingSystem,
   PackageInstaller,
   PlatformId,
@@ -36,6 +39,7 @@ import {
   type PackageId,
 } from "../domain/catalog.js";
 import { resolveDesiredState } from "../domain/desired-state.js";
+import type { RuntimeAddonPin } from "../domain/desired-state.js";
 import {
   type CapabilitySet,
   type EnvironmentInstance,
@@ -76,6 +80,16 @@ import {
   type OfficialMarketplaceSnapshot,
 } from "../install/official-marketplace-acquisition.js";
 import {
+  codexAddonSnapshot,
+  createRuntimeAddonGitOperations,
+  inspectCodexAddonSnapshot,
+  materializeCodexAddonSnapshot,
+  verifyCodexAddonGitMarketplace,
+  verifyOpenCodeAddonPackageMetadata,
+  type CodexAddonSnapshot,
+  type RuntimeAddonGitOperations,
+} from "../install/runtime-addon-acquisition.js";
+import {
   planPackageInstallations,
   type PackageInstallPlanEntry,
 } from "../install/packages.js";
@@ -100,6 +114,10 @@ import type {
 } from "../runtime/adapter.js";
 import { FileStateStore } from "../state/receipt.js";
 import {
+  resolveTrustedInvocation,
+  type TrustedInvocation,
+} from "../tools/invoke.js";
+import {
   atomicWriteFile,
   assertSafeManagedRootPath,
   findTrustedExecutable,
@@ -114,23 +132,30 @@ import {
 import {
   claudeOfficialMarketplaceReady,
   claudeRegistrationReady,
+  codexMarketplaceAddonReady,
   codexRegistrationReady,
+  inspectCodexMarketplaceAddon,
   inspectClaudeOfficialMarketplaceRegistration,
   inspectClaudeOfficialPluginRegistration,
   inspectClaudeManagedRuntimeRegistration,
   inspectCodexManagedRuntimeRegistration,
   inspectOpenCodeSkillRegistration,
+  inspectOpenCodePackageAddon,
   openCodeSkillsReady,
   openCodeConfigPath,
+  openCodePackageAddonResolved,
   openCodeRegistrationReady,
   planOpenCodeSkillRegistrations,
   registerClaudeOfficialMarketplace,
   registerClaudeOfficialPlugin,
   registerClaudeRuntime,
   registerCodexRuntime,
+  registerCodexMarketplaceAddon,
+  registerOpenCodePackageAddon,
   registerOpenCodeSkills,
   registerOpenCodeRuntime,
   type OpenCodeSkillRegistration,
+  type CodexMarketplaceAddonRegistration,
 } from "./native-registration.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
@@ -165,6 +190,15 @@ export interface CapabilityEnvironmentStatus {
   readonly detail?: string;
 }
 
+export interface RuntimeAddonEnvironmentStatus {
+  readonly agentId: "codex" | "opencode";
+  readonly detail: string;
+  readonly fingerprint: string;
+  readonly id: "omo";
+  readonly state: "conflict" | "installable" | "ready" | "unverifiable";
+  readonly version: string;
+}
+
 export interface EnvironmentPreview {
   readonly schemaVersion: "2.0.0";
   readonly kind: "environment-preview";
@@ -176,6 +210,7 @@ export interface EnvironmentPreview {
   readonly agents: readonly AgentEnvironmentStatus[];
   readonly packages: readonly PackageInstallPlanEntry[];
   readonly capabilities: readonly CapabilityEnvironmentStatus[];
+  readonly addons: readonly RuntimeAddonEnvironmentStatus[];
   readonly preflights: readonly PlanPreflight[];
   readonly optionalGaps: readonly string[];
   readonly blockers: readonly string[];
@@ -199,6 +234,7 @@ export interface EnvironmentStatus {
   readonly agents: readonly AgentEnvironmentStatus[];
   readonly packages: readonly PackageInstallPlanEntry[];
   readonly capabilities: readonly CapabilityEnvironmentStatus[];
+  readonly addons: readonly RuntimeAddonEnvironmentStatus[];
   readonly optionalGaps: readonly string[];
   readonly blockers: readonly string[];
   readonly claudeMilestoneReady: boolean;
@@ -266,6 +302,7 @@ interface EnvironmentModel {
   readonly officialMarketplaceGitPath: string | null;
   readonly officialMarketplaceExternalSource: string | null;
   readonly openCodeSkills: readonly OpenCodeSkillRegistration[];
+  readonly runtimeAddons: readonly RuntimeAddonModel[];
   readonly desired: ReturnType<typeof resolveDesiredState>;
   readonly clean: boolean;
   readonly currentReceipt: ManagedStateReceipt | null;
@@ -273,6 +310,36 @@ interface EnvironmentModel {
   readonly toolRouteRequested: boolean;
   readonly toolRouteFailure: string | null;
 }
+
+interface RuntimeAddonModelBase {
+  readonly fingerprint: string;
+  readonly status: RuntimeAddonEnvironmentStatus;
+}
+
+interface OpenCodeRuntimeAddonModel extends RuntimeAddonModelBase {
+  readonly addon: OpenCodePackageAddon;
+  readonly agentId: "opencode";
+  readonly kind: "opencode-package";
+  readonly metadataInvocation: TrustedInvocation | null;
+  readonly nativeState: "collision" | "missing" | "ready";
+}
+
+interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
+  readonly addon: CodexMarketplaceAddon;
+  readonly agentId: "codex";
+  readonly gitOperations: RuntimeAddonGitOperations | null;
+  readonly gitPath: string | null;
+  readonly kind: "codex-marketplace";
+  readonly nativeState: {
+    readonly marketplace: "collision" | "missing" | "ready";
+    readonly plugin: "collision" | "missing" | "ready";
+  };
+  readonly snapshot: CodexAddonSnapshot;
+}
+
+type RuntimeAddonModel =
+  | CodexRuntimeAddonModel
+  | OpenCodeRuntimeAddonModel;
 
 interface Marker {
   readonly schemaVersion: "2.0.0";
@@ -401,23 +468,38 @@ function packageModel(
   os: OperatingSystem,
   env: NodeJS.ProcessEnv,
   cwd: string,
-  inspectVersion: (path: string, id: PackageId) => string | null,
+  inspectVersion?: (path: string, id: PackageId) => string | null,
 ): readonly PackageInstallPlanEntry[] {
+  const resolvePackageInvocation = (commands: readonly string[]) => {
+    for (const command of commands) {
+      const invocation = resolveTrustedInvocation([command], {
+        env,
+        platform: os,
+        workspace: cwd,
+      });
+      if (invocation) return invocation;
+    }
+    return undefined;
+  };
   return planPackageInstallations({
     packages: catalog.packages.packages,
     profile,
     os,
     findExecutable(commands) {
-      for (const command of commands) {
-        const path = findTrustedExecutable(command, { cwd, env });
-        if (path) return path;
-      }
-      return null;
+      return resolvePackageInvocation(commands)?.executablePath ?? null;
     },
     hasInstaller(command) {
-      return findTrustedExecutable(command, { cwd, env }) !== null;
+      return resolvePackageInvocation([command]) !== undefined;
     },
-    inspectVersion,
+    inspectVersion(path, id) {
+      if (inspectVersion) return inspectVersion(path, id);
+      const entry = catalog.packages.packages.find((candidate) =>
+        candidate.id === id);
+      if (!entry) return null;
+      const invocation = resolvePackageInvocation(entry.executables);
+      if (!invocation || invocation.executablePath !== path) return null;
+      return inspectInvocationVersion(invocation, env, cwd);
+    },
   }).filter(({ id }) => selected.includes(id));
 }
 
@@ -453,20 +535,24 @@ function routePackageModel(
   });
 }
 
-function inspectExecutableVersion(
-  executablePath: string,
+function inspectInvocationVersion(
+  invocation: TrustedInvocation,
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): string | null {
-  const result = spawnSync(executablePath, ["--version"], {
-    cwd,
-    encoding: "utf8",
-    env,
-    maxBuffer: 64 * 1024,
-    shell: false,
-    timeout: 5_000,
-    windowsHide: true,
-  });
+  const result = spawnSync(
+    invocation.command,
+    [...invocation.argsPrefix, "--version"],
+    {
+      cwd,
+      encoding: "utf8",
+      env,
+      maxBuffer: 64 * 1024,
+      shell: false,
+      timeout: 5_000,
+      windowsHide: true,
+    },
+  );
   if (result.error || result.status !== 0) return null;
   const match = `${result.stdout}\n${result.stderr}`.match(
     /(?:^|[^0-9])([0-9]+\.[0-9]+\.[0-9]+)(?:[^0-9]|$)/u,
@@ -547,11 +633,242 @@ function capabilityModel(
   );
 }
 
+function runtimeAddonFingerprint(addon: DefaultRuntimeAddon): string {
+  return sha256Bytes(stableJson(addon));
+}
+
+function resolveNpmMetadataInvocation(
+  options: ReturnType<typeof normalizedOptions>,
+): TrustedInvocation | null {
+  const ambient = resolveTrustedInvocation(["npm"], {
+    env: options.env,
+    platform: options.os,
+    workspace: options.cwd,
+  });
+  if (ambient !== undefined) return ambient;
+  const npmCli = join(
+    dirname(process.execPath),
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  try {
+    const stat = lstatSync(npmCli);
+    if (
+      !stat.isSymbolicLink()
+      && stat.isFile()
+      && isPathStrictlyWithin(dirname(process.execPath), npmCli)
+    ) {
+      return {
+        argsPrefix: [npmCli],
+        command: process.execPath,
+        executablePath: process.execPath,
+      };
+    }
+  } catch {
+    // The target must provide a trusted npm executable when Node does not bundle it.
+  }
+  return null;
+}
+
+function isOpenCodePackageAddon(
+  addon: DefaultRuntimeAddon,
+): addon is OpenCodePackageAddon {
+  return addon.registration.kind === "opencode-package";
+}
+
+function isCodexMarketplaceAddon(
+  addon: DefaultRuntimeAddon,
+): addon is CodexMarketplaceAddon {
+  return addon.registration.kind === "codex-marketplace";
+}
+
+function runtimeAddonPin(model: RuntimeAddonModel): RuntimeAddonPin {
+  return {
+    agentId: model.agentId,
+    fingerprint: model.fingerprint,
+    id: model.addon.id,
+    kind: model.kind,
+    version: model.addon.version,
+  };
+}
+
+function codexAddonNativeRegistration(
+  model: CodexRuntimeAddonModel,
+): CodexMarketplaceAddonRegistration {
+  return {
+    manifestPath: model.addon.registration.manifestPath,
+    manifestSha256: model.addon.registration.manifestSha256,
+    marketplaceName: model.addon.registration.marketplaceName,
+    marketplaceRoot: model.snapshot.root,
+    pluginContentSha256: model.addon.registration.pluginContentSha256,
+    pluginPath: model.addon.registration.pluginPath,
+    repository: model.addon.registration.repository,
+    selector: model.addon.registration.selector,
+    version: model.addon.version,
+  };
+}
+
+function buildRuntimeAddonModels(
+  catalog: CatalogBundle,
+  selectedAgents: readonly AgentId[],
+  agents: readonly AgentEnvironmentStatus[],
+  stateRoot: string,
+  options: ReturnType<typeof normalizedOptions>,
+): readonly RuntimeAddonModel[] {
+  const agentCatalog = new Map(
+    catalog.agents.agents.map((agent) => [agent.id, agent]),
+  );
+  return selectedAgents.flatMap((agentId): readonly RuntimeAddonModel[] => {
+    const entry = agentCatalog.get(agentId);
+    if (entry === undefined) {
+      throw new Error(`missing selected agent catalog entry: ${agentId}`);
+    }
+    return entry.defaultAddons.map((addon): RuntimeAddonModel => {
+      const fingerprint = runtimeAddonFingerprint(addon);
+      if (isOpenCodePackageAddon(addon)) {
+        const metadataInvocation = resolveNpmMetadataInvocation(options);
+        const nativeState = inspectOpenCodePackageAddon(
+          {
+            packageName: addon.registration.packageName,
+            spec: addon.registration.spec,
+          },
+          options.env,
+          options.os,
+        );
+        const state = nativeState === "collision"
+          ? "conflict" as const
+          : metadataInvocation === null
+            ? "unverifiable" as const
+            : nativeState === "ready"
+              ? "ready" as const
+              : "installable" as const;
+        return {
+          addon,
+          agentId: "opencode",
+          fingerprint,
+          kind: "opencode-package",
+          metadataInvocation,
+          nativeState,
+          status: {
+            agentId: "opencode",
+            detail: nativeState === "collision"
+              ? "OpenCode contains a legacy, duplicate, or differently pinned OMO package"
+              : metadataInvocation === null
+                ? "trusted npm is unavailable for exact OMO metadata verification"
+                : nativeState === "ready"
+                  ? `${addon.registration.spec} is registered exactly`
+                  : `${addon.registration.spec} can be registered additively`,
+            fingerprint,
+            id: addon.id,
+            state,
+            version: addon.version,
+          },
+        };
+      }
+      if (!isCodexMarketplaceAddon(addon)) {
+        throw new Error("unsupported default add-on registration");
+      }
+      const snapshot = codexAddonSnapshot(addon, stateRoot);
+      const gitPath = findTrustedExecutable("git", {
+        cwd: options.cwd,
+        env: options.env,
+        platform: options.os,
+      });
+      const gitOperations = gitPath === null
+        ? null
+        : createRuntimeAddonGitOperations(
+            gitPath,
+            (command, args, environment) =>
+              runCommand(command, args, { ...options, env: environment }),
+            options.env,
+          );
+      const selectedAgent = agents.find(({ id }) => id === "codex");
+      const executable = selectedAgent?.state === "ready"
+        ? selectedAgent.executablePath
+        : null;
+      const registration = {
+        manifestPath: addon.registration.manifestPath,
+        manifestSha256: addon.registration.manifestSha256,
+        marketplaceName: addon.registration.marketplaceName,
+        marketplaceRoot: snapshot.root,
+        pluginContentSha256: addon.registration.pluginContentSha256,
+        pluginPath: addon.registration.pluginPath,
+        repository: addon.registration.repository,
+        selector: addon.registration.selector,
+        version: addon.version,
+      };
+      const nativeState = executable === null
+        ? { marketplace: "missing" as const, plugin: "missing" as const }
+        : inspectCodexMarketplaceAddon(
+            executable,
+            registration,
+            (root) =>
+              gitOperations !== null
+              && verifyCodexAddonGitMarketplace(
+                root,
+                addon,
+                gitOperations,
+              ),
+            (command, args) => runCommand(command, args, options),
+          );
+      const partial =
+        (nativeState.marketplace === "ready")
+        !== (nativeState.plugin === "ready");
+      const conflict =
+        nativeState.marketplace === "collision"
+        || nativeState.plugin === "collision"
+        || partial;
+      const sourceAvailable =
+        inspectCodexAddonSnapshot(addon, stateRoot)
+        || gitOperations !== null;
+      const ready =
+        nativeState.marketplace === "ready"
+        && nativeState.plugin === "ready";
+      const state = conflict
+        ? "conflict" as const
+        : ready
+          ? "ready" as const
+          : sourceAvailable
+            ? "installable" as const
+            : "unverifiable" as const;
+      return {
+        addon,
+        agentId: "codex",
+        fingerprint,
+        gitOperations,
+        gitPath,
+        kind: "codex-marketplace",
+        nativeState,
+        snapshot,
+        status: {
+          agentId: "codex",
+          detail: conflict
+            ? "Codex contains a partial, duplicate, or differently pinned OMO registration"
+            : ready
+              ? `${addon.registration.selector} ${addon.version} is registered exactly`
+              : sourceAvailable
+                ? `${addon.registration.selector} ${addon.version} can be acquired and registered`
+                : "trusted Git or an exact managed OMO snapshot is required",
+          fingerprint,
+          id: addon.id,
+          state,
+          version: addon.version,
+        },
+      };
+    });
+  });
+}
+
 function buildModel(
   selection: EnvironmentSelection,
   options: Required<
     Pick<EnvironmentOrchestratorOptions, "env" | "repositoryRoot" | "cwd" | "os" | "arch">
-  > & Pick<EnvironmentOrchestratorOptions, "inspectPackageVersion">,
+  > & Pick<
+    EnvironmentOrchestratorOptions,
+    "inspectPackageVersion" | "runCommand"
+  >,
 ): EnvironmentModel {
   const catalog = loadCatalogBundle(options.repositoryRoot);
   const profile = profileFrom(catalog, selection.profileId);
@@ -639,6 +956,17 @@ function buildModel(
       options.cwd,
     );
   });
+  const runtimeAddons = buildRuntimeAddonModels(
+    catalog,
+    desired.selectedAgents,
+    agents,
+    stateRoot,
+    options,
+  );
+  const desiredWithAddons = {
+    ...desired,
+    runtimeAddons: runtimeAddons.map(runtimeAddonPin),
+  };
   const nativePackages = packageModel(
     catalog,
     profile,
@@ -646,9 +974,7 @@ function buildModel(
     os,
     options.env,
     options.cwd,
-    (path, id) =>
-      options.inspectPackageVersion?.(path, id)
-      ?? inspectExecutableVersion(path, options.env, options.cwd),
+    options.inspectPackageVersion,
   );
   const packages = routePackageModel(nativePackages, toolRoutes);
   const officialMarketplaceLock =
@@ -775,7 +1101,8 @@ function buildModel(
     officialMarketplaceLock,
     officialMarketplaceSnapshot,
     openCodeSkills,
-    desired,
+    runtimeAddons,
+    desired: desiredWithAddons,
     clean: selection.clean ?? false,
     currentReceipt,
     receiptFailure,
@@ -941,11 +1268,37 @@ function capabilityMarkerPath(
   return join(stateRoot, "markers", "capabilities", runtimeId, `${id}.json`);
 }
 
+function runtimeAddonMarkerPath(
+  stateRoot: string,
+  runtimeId: "codex" | "opencode",
+  id: "omo" | "omo-source",
+): string {
+  return join(stateRoot, "markers", "addons", runtimeId, `${id}.json`);
+}
+
+function receiptOwnershipMatches(
+  receipt: ManagedStateReceipt,
+  id: string,
+  kind: ManagedStateReceipt["ownership"][number]["kind"],
+  target: string,
+  digest: string,
+): boolean {
+  const matches = receipt.ownership.filter(
+    (entry) => entry.id === id && entry.kind === kind,
+  );
+  return matches.length === 1
+    && matches[0]?.target === target
+    && matches[0]?.digest === digest;
+}
+
 function actionPreimage(action: PlanAction): ObservedPreimage {
+  const preimageTarget = action.payload?.preimageTarget;
   const observedTarget = action.payload?.observedTarget;
-  const target = typeof observedTarget === "string"
-    ? observedTarget
-    : action.target;
+  const target = typeof preimageTarget === "string"
+    ? preimageTarget
+    : typeof observedTarget === "string"
+      ? observedTarget
+      : action.target;
   return action.payload?.ownershipKind === "directory"
       || action.payload?.observedTargetKind === "directory"
     ? observeManagedPath(target)
@@ -1025,6 +1378,15 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           : "ready" as const,
       };
     }),
+    ...model.runtimeAddons.map(({ status }): PlanPreflight => ({
+      detail: status.detail,
+      id: `addon:${status.agentId}:${status.id}`,
+      required: true,
+      status:
+        status.state === "conflict" || status.state === "unverifiable"
+          ? "unverifiable"
+          : "ready",
+    })),
     ...cleanPreflights(model),
     ...(model.toolRouteRequested
       ? [{
@@ -1059,7 +1421,61 @@ function planActions(
     "cli",
     "main.js",
   );
-  const actions: PlanAction[] = [
+  const actions: PlanAction[] = [];
+  for (const addon of model.runtimeAddons) {
+    if (addon.kind === "opencode-package") {
+      if (addon.metadataInvocation === null) {
+        throw new Error("trusted npm is unavailable for OpenCode OMO");
+      }
+      const target = runtimeAddonMarkerPath(
+        model.stateRoot,
+        "opencode",
+        "omo-source",
+      );
+      const content = markerFor(
+        "addon:opencode:omo:source",
+        model.catalog.revision,
+        target,
+        addon.fingerprint,
+      );
+      actions.push({
+        id: "addon:opencode:omo:source",
+        kind: "acquire",
+        payload: {
+          argsPrefix: addon.metadataInvocation.argsPrefix,
+          command: addon.metadataInvocation.command,
+          content,
+          contentDigest: sha256Bytes(content),
+          fingerprint: addon.fingerprint,
+          operation: "verify-opencode-addon-metadata",
+          ownershipKind: "file",
+          ownershipScope: "managed",
+          packageName: addon.addon.registration.packageName,
+          version: addon.addon.version,
+        },
+        preimage: observeRegularFile(target),
+        required: true,
+        target,
+      });
+      continue;
+    }
+    actions.push({
+      id: "addon:codex:omo:source",
+      kind: "acquire",
+      payload: {
+        contentDigest: addon.snapshot.digest,
+        fingerprint: addon.fingerprint,
+        ...(addon.gitPath === null ? {} : { gitPath: addon.gitPath }),
+        operation: "acquire-codex-addon-snapshot",
+        ownershipKind: "directory",
+        ownershipScope: "managed",
+      },
+      preimage: observeManagedPath(addon.snapshot.root),
+      required: true,
+      target: addon.snapshot.root,
+    });
+  }
+  actions.push(
     {
       id: "omh-node",
       kind: "write",
@@ -1094,7 +1510,7 @@ function planActions(
       required: true,
       target: model.managedPayload.activeRoot,
     },
-  ];
+  );
   const adapterById = new Map(model.adapters.map((entry) => [entry.id, entry]));
   for (const agent of model.agents) {
     const adapter = adapterById.get(agent.id);
@@ -1318,6 +1734,59 @@ function planActions(
       target,
     });
   }
+  for (const addon of model.runtimeAddons) {
+    const target = runtimeAddonMarkerPath(
+      model.stateRoot,
+      addon.agentId,
+      "omo",
+    );
+    const actionId = `addon:${addon.agentId}:omo`;
+    const content = markerFor(
+      actionId,
+      model.catalog.revision,
+      target,
+      addon.fingerprint,
+    );
+    if (addon.kind === "opencode-package") {
+      actions.push({
+        id: actionId,
+        kind: "register",
+        payload: {
+          content,
+          contentDigest: sha256Bytes(content),
+          fingerprint: addon.fingerprint,
+          observedTarget: openCodeConfigPath(options.env, options.os),
+          operation: "register-opencode-addon",
+          ownershipKind: "registration",
+          ownershipScope: "managed",
+          packageName: addon.addon.registration.packageName,
+          preimageTarget: target,
+          spec: addon.addon.registration.spec,
+        },
+        preimage: observeRegularFile(target),
+        required: true,
+        target,
+      });
+      continue;
+    }
+    actions.push({
+      id: actionId,
+      kind: "register",
+      payload: {
+        content,
+        contentDigest: sha256Bytes(content),
+        fingerprint: addon.fingerprint,
+        marketplaceRoot: addon.snapshot.root,
+        operation: "register-codex-addon",
+        ownershipKind: "registration",
+        ownershipScope: "managed",
+        selector: addon.addon.registration.selector,
+      },
+      preimage: observeRegularFile(target),
+      required: true,
+      target,
+    });
+  }
   if (model.clean && model.currentReceipt !== null) {
     const replacementTargets = new Set(actions.map(({ target }) => resolve(target)));
     for (const ownership of model.currentReceipt.ownership) {
@@ -1356,6 +1825,7 @@ function observedState(
   env: NodeJS.ProcessEnv,
 ): Readonly<Record<string, unknown>> {
   return {
+    addons: model.runtimeAddons.map(({ status }) => status),
     agents: model.agents,
     packages: model.packages,
     native: Object.fromEntries(
@@ -1445,6 +1915,7 @@ function buildEnvironmentPreview(
         catalogRevision: model.catalog.revision,
         desiredState: {
           profileId: model.profile.id,
+          runtimeAddons: model.runtimeAddons.map(runtimeAddonPin),
           selectedAgents: model.selectedAgents,
           ...(model.desired.instance === undefined
             ? {}
@@ -1467,6 +1938,7 @@ function buildEnvironmentPreview(
   return {
     model,
     preview: {
+      addons: model.runtimeAddons.map(({ status }) => status),
       agents: model.agents,
       blockers,
       capabilities: model.capabilities,
@@ -1497,6 +1969,17 @@ function payloadString(action: PlanAction, key: string): string {
     throw new Error(`${action.id} is missing payload.${key}`);
   }
   return value;
+}
+
+function payloadStringArray(action: PlanAction, key: string): readonly string[] {
+  const value = action.payload?.[key];
+  if (
+    !Array.isArray(value)
+    || value.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error(`${action.id} is missing payload.${key}`);
+  }
+  return value as readonly string[];
 }
 
 function runCommand(
@@ -1546,25 +2029,32 @@ function installPackage(
     throw new Error(`${rawId} managed artifact passed an unsupported preflight`);
   }
   if (!installer.command) throw new Error(`${rawId} installer command is missing`);
-  const manager = findTrustedExecutable(installer.command, {
-    cwd: options.cwd,
+  const manager = resolveTrustedInvocation([installer.command], {
     env: options.env,
+    platform: model.os,
+    workspace: options.cwd,
   });
   if (!manager) throw new Error(`${rawId} package manager is no longer available`);
-  runCommand(manager, installer.args, options);
-  const executable = entry.executables
-    .map((command) => findTrustedExecutable(command, {
-      cwd: options.cwd,
+  runCommand(
+    manager.command,
+    [...manager.argsPrefix, ...installer.args],
+    options,
+  );
+  const invocation = entry.executables
+    .map((command) => resolveTrustedInvocation([command], {
       env: options.env,
+      platform: model.os,
+      workspace: options.cwd,
     }))
-    .find((path): path is string => path !== null);
-  if (!executable) {
+    .find((candidate): candidate is TrustedInvocation =>
+      candidate !== undefined);
+  if (!invocation) {
     throw new Error(`${rawId} installer completed without a trusted executable`);
   }
   if (entry.version !== undefined) {
     const observed =
-      options.inspectPackageVersion?.(executable, rawId)
-      ?? inspectExecutableVersion(executable, options.env, options.cwd);
+      options.inspectPackageVersion?.(invocation.executablePath, rawId)
+      ?? inspectInvocationVersion(invocation, options.env, options.cwd);
     if (observed !== entry.version) {
       throw new Error(
         `${rawId} installer produced ${
@@ -1649,6 +2139,87 @@ async function executeAction(
       verified:
         hashManagedDirectory(action.target)
         === payloadString(action, "contentDigest"),
+    };
+  }
+  if (operation === "verify-opencode-addon-metadata") {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is OpenCodeRuntimeAddonModel =>
+        candidate.kind === "opencode-package",
+    );
+    if (
+      addon === undefined
+      || addon.metadataInvocation === null
+      || addon.fingerprint !== payloadString(action, "fingerprint")
+      || addon.addon.registration.packageName
+        !== payloadString(action, "packageName")
+      || addon.addon.version !== payloadString(action, "version")
+      || addon.metadataInvocation.command !== payloadString(action, "command")
+      || stableJson(addon.metadataInvocation.argsPrefix)
+        !== stableJson(payloadStringArray(action, "argsPrefix"))
+    ) {
+      throw new Error("OpenCode OMO metadata preflight changed after preview");
+    }
+    const output = runCommand(
+      addon.metadataInvocation.command,
+      [
+        ...addon.metadataInvocation.argsPrefix,
+        "view",
+        `${addon.addon.registration.packageName}@${addon.addon.version}`,
+        "version",
+        "dist",
+        "--json",
+      ],
+      options,
+    );
+    verifyOpenCodeAddonPackageMetadata(addon.addon, output);
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified:
+        sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
+  if (operation === "acquire-codex-addon-snapshot") {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is CodexRuntimeAddonModel =>
+        candidate.kind === "codex-marketplace",
+    );
+    if (
+      addon === undefined
+      || addon.fingerprint !== payloadString(action, "fingerprint")
+      || action.target !== addon.snapshot.root
+      || addon.snapshot.digest !== payloadString(action, "contentDigest")
+    ) {
+      throw new Error("Codex OMO snapshot identity changed after preview");
+    }
+    if (!inspectCodexAddonSnapshot(addon.addon, model.stateRoot)) {
+      const plannedGit = payloadString(action, "gitPath");
+      const currentGit = findTrustedExecutable("git", {
+        cwd: options.cwd,
+        env: options.env,
+        platform: options.os,
+      });
+      if (
+        currentGit === null
+        || resolve(currentGit) !== resolve(plannedGit)
+      ) {
+        throw new Error("trusted Git changed after Codex OMO preview");
+      }
+      materializeCodexAddonSnapshot(
+        addon.addon,
+        model.stateRoot,
+        createRuntimeAddonGitOperations(
+          currentGit,
+          (command, args, environment) =>
+            runCommand(command, args, { ...options, env: environment }),
+          options.env,
+        ),
+      );
+    }
+    return {
+      verified:
+        inspectCodexAddonSnapshot(addon.addon, model.stateRoot)
+        && hashManagedDirectory(action.target)
+          === payloadString(action, "contentDigest"),
     };
   }
   if (operation === "acquire-claude-official-marketplace") {
@@ -1842,6 +2413,109 @@ async function executeAction(
         && sha256File(action.target) === payloadString(action, "contentDigest"),
     };
   }
+  if (operation === "register-opencode-addon") {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is OpenCodeRuntimeAddonModel =>
+        candidate.kind === "opencode-package",
+    );
+    if (
+      addon === undefined
+      || addon.fingerprint !== payloadString(action, "fingerprint")
+      || addon.addon.registration.packageName
+        !== payloadString(action, "packageName")
+      || addon.addon.registration.spec !== payloadString(action, "spec")
+    ) {
+      throw new Error("OpenCode OMO registration changed after preview");
+    }
+    const sourceTarget = runtimeAddonMarkerPath(
+      model.stateRoot,
+      "opencode",
+      "omo-source",
+    );
+    const sourceContent = markerFor(
+      "addon:opencode:omo:source",
+      model.catalog.revision,
+      sourceTarget,
+      addon.fingerprint,
+    );
+    if (
+      !existsSync(sourceTarget)
+      || sha256File(sourceTarget) !== sha256Bytes(sourceContent)
+    ) {
+      throw new Error("OpenCode OMO metadata preflight marker is unavailable");
+    }
+    const registration = {
+      packageName: addon.addon.registration.packageName,
+      spec: addon.addon.registration.spec,
+    };
+    registerOpenCodePackageAddon(
+      registration,
+      options.env,
+      options.os,
+    );
+    if (
+      !openCodePackageAddonResolved(
+        runtimeExecutable("opencode", model, options),
+        registration,
+        options.env,
+        options.os,
+        (command, args) => runCommand(command, args, options),
+      )
+    ) {
+      throw new Error("OpenCode did not resolve the exact OMO package");
+    }
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified:
+        sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
+  if (operation === "register-codex-addon") {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is CodexRuntimeAddonModel =>
+        candidate.kind === "codex-marketplace",
+    );
+    if (
+      addon === undefined
+      || addon.fingerprint !== payloadString(action, "fingerprint")
+      || addon.snapshot.root !== payloadString(action, "marketplaceRoot")
+      || addon.addon.registration.selector !== payloadString(action, "selector")
+      || !inspectCodexAddonSnapshot(addon.addon, model.stateRoot)
+    ) {
+      throw new Error("Codex OMO registration changed after preview");
+    }
+    const currentGit = findTrustedExecutable("git", {
+      cwd: options.cwd,
+      env: options.env,
+      platform: options.os,
+    });
+    const gitOperations = currentGit === null
+      ? null
+      : createRuntimeAddonGitOperations(
+          currentGit,
+          (command, args, environment) =>
+            runCommand(command, args, { ...options, env: environment }),
+          options.env,
+        );
+    const executable = runtimeExecutable("codex", model, options);
+    registerCodexMarketplaceAddon(
+      executable,
+      codexAddonNativeRegistration(addon),
+      (root) =>
+        gitOperations !== null
+        && verifyCodexAddonGitMarketplace(
+          root,
+          addon.addon,
+          gitOperations,
+        ),
+      (command, args) => runCommand(command, args, options),
+    );
+    atomicWriteFile(action.target, payloadString(action, "content"));
+    return {
+      verified:
+        sha256File(action.target) === payloadString(action, "contentDigest"),
+    };
+  }
   if (operation === "register-runtime") {
     const rawId = payloadString(action, "runtimeId");
     if (!isAgentId(rawId)) throw new Error(`unsupported runtime action: ${rawId}`);
@@ -1927,6 +2601,18 @@ type EnvironmentNativeRecovery =
       readonly kind: "codex-runtime-previous";
       readonly previousActiveRoot: string;
       readonly receiptPath: string;
+    }
+  | {
+      readonly executablePath: string;
+      readonly kind: "codex-addon-both-absent";
+      readonly marketplaceName: string;
+      readonly selector: string;
+    }
+  | {
+      readonly executablePath: string;
+      readonly kind: "codex-addon-plugin-absent";
+      readonly marketplaceName: string;
+      readonly selector: string;
     };
 
 interface EnvironmentRecoveryPayload {
@@ -1998,6 +2684,18 @@ function validatedNativeRecovery(
       "previousActiveRoot",
       "receiptPath",
     ],
+    "codex-addon-both-absent": [
+      "executablePath",
+      "kind",
+      "marketplaceName",
+      "selector",
+    ],
+    "codex-addon-plugin-absent": [
+      "executablePath",
+      "kind",
+      "marketplaceName",
+      "selector",
+    ],
   };
   const expectedKeys = keySets[String(kind)];
   if (
@@ -2053,15 +2751,19 @@ function recoveryPayload(
     || typeof value.operation !== "string"
     || ![
       "acquire-agent",
+      "acquire-codex-addon-snapshot",
       "acquire-claude-official-marketplace",
       "install-package",
       "materialize-claude-official-adapter",
       "materialize-runtime-package",
       "register-claude-official",
       "register-claude-official-marketplace",
+      "register-codex-addon",
+      "register-opencode-addon",
       "register-opencode-skill",
       "register-runtime",
       "remove-owned",
+      "verify-opencode-addon-metadata",
     ].includes(value.operation)
     || !Array.isArray(value.snapshots)
     || value.snapshots.length < 1
@@ -2076,7 +2778,10 @@ function recoveryPayload(
         ? "register-claude-official-marketplace"
         : native.kind === "claude-plugin-absent"
           ? "register-claude-official"
-          : "register-runtime";
+          : native.kind === "codex-addon-both-absent"
+              || native.kind === "codex-addon-plugin-absent"
+            ? "register-codex-addon"
+            : "register-runtime";
     if (value.operation !== expectedOperation) {
       throw new Error(`native recovery operation changed: ${recovery.actionId}`);
     }
@@ -2235,6 +2940,77 @@ function rollbackNativeRegistration(
   options: ReturnType<typeof normalizedOptions>,
 ): void {
   if (native === null) return;
+  if (
+    native.kind === "codex-addon-both-absent"
+    || native.kind === "codex-addon-plugin-absent"
+  ) {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is CodexRuntimeAddonModel =>
+        candidate.kind === "codex-marketplace",
+    );
+    if (
+      addon === undefined
+      || native.marketplaceName !== addon.addon.registration.marketplaceName
+      || native.selector !== addon.addon.registration.selector
+    ) {
+      throw new Error("Codex OMO recovery identity changed");
+    }
+    const executable = runtimeExecutable("codex", model, options);
+    if (resolve(executable) !== resolve(native.executablePath)) {
+      throw new Error("Codex OMO recovery executable changed");
+    }
+    const gitPath = findTrustedExecutable("git", {
+      cwd: options.cwd,
+      env: options.env,
+      platform: options.os,
+    });
+    const gitOperations = gitPath === null
+      ? null
+      : createRuntimeAddonGitOperations(
+          gitPath,
+          (command, args, environment) =>
+            runCommand(command, args, { ...options, env: environment }),
+          options.env,
+        );
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const state = inspectCodexMarketplaceAddon(
+      executable,
+      codexAddonNativeRegistration(addon),
+      (root) =>
+        gitOperations !== null
+        && verifyCodexAddonGitMarketplace(
+          root,
+          addon.addon,
+          gitOperations,
+        ),
+      nativeRun,
+    );
+    if (state.marketplace === "collision" || state.plugin === "collision") {
+      throw new Error("Codex OMO recovery encountered a collision");
+    }
+    if (state.plugin === "ready") {
+      nativeRun(executable, [
+        "plugin",
+        "remove",
+        native.selector,
+        "--json",
+      ]);
+    }
+    if (
+      native.kind === "codex-addon-both-absent"
+      && state.marketplace === "ready"
+    ) {
+      nativeRun(executable, [
+        "plugin",
+        "marketplace",
+        "remove",
+        native.marketplaceName,
+        "--json",
+      ]);
+    }
+    return;
+  }
   if (
     native.kind === "codex-runtime-absent"
     || native.kind === "codex-runtime-previous"
@@ -2511,7 +3287,66 @@ function prepareActionRollback(
   const operation = payloadString(action, "operation");
   if (["verify-file", "verify-agent"].includes(operation)) return undefined;
   let native: EnvironmentNativeRecovery | null = null;
-  if (operation === "register-claude-official-marketplace") {
+  if (operation === "register-codex-addon") {
+    const addon = model.runtimeAddons.find(
+      (candidate): candidate is CodexRuntimeAddonModel =>
+        candidate.kind === "codex-marketplace",
+    );
+    if (addon === undefined) {
+      throw new Error("Codex OMO recovery model is unavailable");
+    }
+    const executable = runtimeExecutable("codex", model, options);
+    const gitPath = findTrustedExecutable("git", {
+      cwd: options.cwd,
+      env: options.env,
+      platform: options.os,
+    });
+    const gitOperations = gitPath === null
+      ? null
+      : createRuntimeAddonGitOperations(
+          gitPath,
+          (command, args, environment) =>
+            runCommand(command, args, { ...options, env: environment }),
+          options.env,
+        );
+    const state = inspectCodexMarketplaceAddon(
+      executable,
+      codexAddonNativeRegistration(addon),
+      (root) =>
+        gitOperations !== null
+        && verifyCodexAddonGitMarketplace(
+          root,
+          addon.addon,
+          gitOperations,
+        ),
+      (command, args) => runCommand(command, args, options),
+    );
+    if (state.marketplace === "collision" || state.plugin === "collision") {
+      throw new Error(
+        `${addon.addon.registration.selector} collides with an existing Codex registration`,
+      );
+    }
+    if (state.marketplace === "missing" && state.plugin === "ready") {
+      throw new Error(
+        `${addon.addon.registration.selector} exists without its exact marketplace`,
+      );
+    }
+    if (state.marketplace === "missing") {
+      native = {
+        executablePath: executable,
+        kind: "codex-addon-both-absent",
+        marketplaceName: addon.addon.registration.marketplaceName,
+        selector: addon.addon.registration.selector,
+      };
+    } else if (state.plugin === "missing") {
+      native = {
+        executablePath: executable,
+        kind: "codex-addon-plugin-absent",
+        marketplaceName: addon.addon.registration.marketplaceName,
+        selector: addon.addon.registration.selector,
+      };
+    }
+  } else if (operation === "register-claude-official-marketplace") {
     const adapter = model.officialMarketplaceAdapter;
     if (adapter === null) {
       throw new Error("Claude official marketplace adapter is unavailable");
@@ -2795,6 +3630,8 @@ function completedActionReady(action: PlanAction): boolean {
     || action.payload?.operation === "register-claude-official-marketplace"
     || action.payload?.operation === "register-claude-official"
     || action.payload?.operation === "register-opencode-skill"
+    || action.payload?.operation === "register-opencode-addon"
+    || action.payload?.operation === "register-codex-addon"
   ) {
     return false;
   }
@@ -2920,6 +3757,7 @@ export function inspectEnvironment(
   }
   if (receipt === null) {
     return {
+      addons: [],
       agents: [],
       blockers: [receiptFailure ?? "environment:unconfigured"],
       capabilities: [],
@@ -2993,6 +3831,98 @@ export function inspectEnvironment(
       payloadReady = false;
     }
   }
+  const runtimeAddonPinsReady =
+    stableJson(receipt.desiredState.runtimeAddons ?? [])
+      === stableJson(model.desired.runtimeAddons ?? []);
+  const addons = model.runtimeAddons.map((addon): RuntimeAddonEnvironmentStatus => {
+    const actionId = `addon:${addon.agentId}:omo`;
+    const target = runtimeAddonMarkerPath(
+      stateRoot,
+      addon.agentId,
+      "omo",
+    );
+    const content = markerFor(
+      actionId,
+      catalog.revision,
+      target,
+      addon.fingerprint,
+    );
+    const markerReady =
+      receiptOwnershipMatches(
+        receipt,
+        actionId,
+        "registration",
+        target,
+        sha256Bytes(content),
+      )
+      && existsSync(target)
+      && sha256File(target) === sha256Bytes(content);
+    let sourceReady = false;
+    let nativeReady = false;
+    try {
+      if (addon.kind === "opencode-package") {
+        const sourceActionId = "addon:opencode:omo:source";
+        const sourceTarget = runtimeAddonMarkerPath(
+          stateRoot,
+          "opencode",
+          "omo-source",
+        );
+        const sourceContent = markerFor(
+          sourceActionId,
+          catalog.revision,
+          sourceTarget,
+          addon.fingerprint,
+        );
+        sourceReady =
+          receiptOwnershipMatches(
+            receipt,
+            sourceActionId,
+            "file",
+            sourceTarget,
+            sha256Bytes(sourceContent),
+          )
+          && existsSync(sourceTarget)
+          && sha256File(sourceTarget) === sha256Bytes(sourceContent);
+        nativeReady = openCodePackageAddonResolved(
+          runtimeExecutable("opencode", model, normalized),
+          {
+            packageName: addon.addon.registration.packageName,
+            spec: addon.addon.registration.spec,
+          },
+          normalized.env,
+          normalized.os,
+          (command, args) => runCommand(command, args, normalized),
+        );
+      } else {
+        sourceReady =
+          receiptOwnershipMatches(
+            receipt,
+            "addon:codex:omo:source",
+            "directory",
+            addon.snapshot.root,
+            addon.snapshot.digest,
+          )
+          && inspectCodexAddonSnapshot(addon.addon, stateRoot);
+        nativeReady = addon.status.state === "ready";
+      }
+    } catch {
+      sourceReady = false;
+      nativeReady = false;
+    }
+    const ready =
+      runtimeAddonPinsReady && sourceReady && markerReady && nativeReady;
+    return ready
+      ? addon.status
+      : {
+          ...addon.status,
+          detail:
+            "receipt-backed exact runtime add-on registration is missing or drifted",
+          state: "unverifiable",
+        };
+  });
+  const runtimeAddonGaps = addons
+    .filter(({ state }) => state !== "ready")
+    .map(({ agentId, id }) => `addon:${agentId}:${id}`);
   const officialByCapability = model.officialMarketplace.state === "ready"
     ? new Map(
         model.officialMarketplace.plugins.map((entry) => [
@@ -3113,6 +4043,7 @@ export function inspectEnvironment(
       ...(selectedReady ? [] : ["runtime-readiness"]),
       ...(nativeReady ? [] : ["native-registration"]),
       ...(payloadReady ? [] : ["plugin:runtime-package"]),
+      ...runtimeAddonGaps,
       ...(revisionReady ? [] : ["catalog-revision"]),
       ...requiredPackageGaps,
       ...capabilityRegistrationGaps,
@@ -3127,6 +4058,7 @@ export function inspectEnvironment(
       ? "ready-with-optional-gaps"
       : "ready";
   return {
+    addons,
     agents: preview.agents,
     blockers,
     capabilities,
@@ -3161,6 +4093,7 @@ export function inspectEnvironment(
     )
       && nativeReady
       && payloadReady
+      && addons.every(({ state }) => state === "ready")
       && capabilities.every(({ state }) => state === "ready"),
     instanceId: receipt.desiredState.instance?.id ?? null,
     planDigest: receipt.planDigest,
@@ -3176,6 +4109,10 @@ function nativeDoctorIssues(
   for (const runtimeId of model.selectedAgents) {
     try {
       if (runtimeId === "opencode") {
+        const addon = model.runtimeAddons.find(
+          (candidate): candidate is OpenCodeRuntimeAddonModel =>
+            candidate.kind === "opencode-package",
+        );
         if (
           !openCodeRegistrationReady(
             model.managedPayload.activeRoot,
@@ -3183,6 +4120,17 @@ function nativeDoctorIssues(
             options.os,
           )
           || !openCodeSkillsReady(model.openCodeSkills)
+          || addon === undefined
+          || !openCodePackageAddonResolved(
+            runtimeExecutable("opencode", model, options),
+            {
+              packageName: addon.addon.registration.packageName,
+              spec: addon.addon.registration.spec,
+            },
+            options.env,
+            options.os,
+            (command, args) => runCommand(command, args, options),
+          )
         ) {
           issues.push("native:opencode:registration-drift");
         }
@@ -3234,6 +4182,27 @@ function nativeDoctorIssues(
       }
       if (!codexRegistrationReady(executable, registration, nativeRun)) {
         issues.push("native:codex:registration-drift");
+      }
+      const addon = model.runtimeAddons.find(
+        (candidate): candidate is CodexRuntimeAddonModel =>
+          candidate.kind === "codex-marketplace",
+      );
+      if (
+        addon === undefined
+        || !codexMarketplaceAddonReady(
+          executable,
+          codexAddonNativeRegistration(addon),
+          (root) =>
+            addon.gitOperations !== null
+            && verifyCodexAddonGitMarketplace(
+              root,
+              addon.addon,
+              addon.gitOperations,
+            ),
+          nativeRun,
+        )
+      ) {
+        issues.push("native:codex:addon-drift");
       }
     } catch {
       issues.push(`native:${runtimeId}:unverifiable`);

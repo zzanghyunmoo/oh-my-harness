@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,16 +14,45 @@ import { pathToFileURL } from "node:url";
 
 import {
   claudeOfficialMarketplaceReady,
+  codexMarketplaceAddonReady,
+  inspectOpenCodePackageAddon,
+  openCodeConfigPath,
+  openCodePackageAddonResolved,
   openCodeSkillsReady,
   planOpenCodeSkillRegistrations,
   registerClaudeOfficialMarketplace,
   registerClaudeOfficialPlugin,
   registerClaudeRuntime,
   registerCodexRuntime,
+  registerCodexMarketplaceAddon,
+  registerOpenCodePackageAddon,
   registerOpenCodeSkills,
   registerOpenCodeRuntime,
 } from "../../dist/environment/native-registration.js";
+import { sha256File } from "../../dist/environment/filesystem.js";
 import { hashManagedDirectory } from "../../dist/install/managed-payload.js";
+
+test("OpenCode config follows its explicit config directory on Windows", () => {
+  const configRoot = join(tmpdir(), "omh-opencode-explicit-config");
+  assert.equal(
+    openCodeConfigPath(
+      {
+        APPDATA: join(tmpdir(), "ignored-appdata"),
+        OPENCODE_CONFIG_DIR: configRoot,
+      },
+      "win32",
+    ),
+    join(configRoot, "opencode.json"),
+  );
+});
+
+test("OpenCode defaults to its cross-platform user config directory on Windows", () => {
+  const userRoot = join(tmpdir(), "omh-opencode-user-root");
+  assert.equal(
+    openCodeConfigPath({ USERPROFILE: userRoot }, "win32"),
+    join(userRoot, ".config", "opencode", "opencode.json"),
+  );
+});
 
 test("native registration rejects Claude and Codex collisions without removal", () => {
   const root = mkdtempSync(join(tmpdir(), "omh-native-collision-"));
@@ -442,6 +472,260 @@ test("OpenCode workflows install through native global skills without replacing 
         "utf8",
       ),
       "drift\n",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode OMO registration is exact, additive, and natively resolved", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-omo-"));
+  try {
+    const configRoot = join(root, "config");
+    const configPath = join(configRoot, "opencode.json");
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ plugin: ["user-plugin"] }, null, 2)}\n`,
+    );
+    const env = { OPENCODE_CONFIG_DIR: configRoot };
+    const registration = {
+      packageName: "oh-my-openagent" as const,
+      spec: "oh-my-openagent@4.19.2",
+    };
+
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "win32"),
+      "missing",
+    );
+    registerOpenCodePackageAddon(registration, env, "win32");
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "win32"),
+      "ready",
+    );
+    assert.deepEqual(
+      (JSON.parse(readFileSync(configPath, "utf8")) as { plugin: string[] })
+        .plugin,
+      ["user-plugin", "oh-my-openagent@4.19.2"],
+    );
+    assert.equal(
+      openCodePackageAddonResolved(
+        "opencode",
+        registration,
+        env,
+        "win32",
+        () =>
+          JSON.stringify({
+            plugin: ["user-plugin", "oh-my-openagent@4.19.2"],
+          }),
+      ),
+      true,
+    );
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ plugin: ["oh-my-opencode@3.0.0"] }, null, 2)}\n`,
+    );
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "win32"),
+      "collision",
+    );
+    assert.throws(
+      () => registerOpenCodePackageAddon(registration, env, "win32"),
+      /collides/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode OMO registration rejects malformed or ambiguous config", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-omo-malformed-"));
+  try {
+    const configRoot = join(root, "config");
+    const configPath = join(configRoot, "opencode.json");
+    mkdirSync(configRoot, { recursive: true });
+    const env = { OPENCODE_CONFIG_DIR: configRoot };
+    const registration = {
+      packageName: "oh-my-openagent" as const,
+      spec: "oh-my-openagent@4.19.2",
+    };
+    const cases = [
+      '{"plugin":["user-plugin"],',
+      '{"plugin":["user-plugin"],"plugin":[]}',
+    ];
+
+    for (const current of cases) {
+      writeFileSync(configPath, current);
+      assert.equal(
+        inspectOpenCodePackageAddon(registration, env, "win32"),
+        "collision",
+      );
+      assert.throws(
+        () => registerOpenCodePackageAddon(registration, env, "win32"),
+        /collides/u,
+      );
+      assert.equal(readFileSync(configPath, "utf8"), current);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode OMO resolution accepts a complete plugin list before truncated debug details", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-omo-truncated-"));
+  try {
+    const configRoot = join(root, "config");
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(
+      join(configRoot, "opencode.json"),
+      `${JSON.stringify({ plugin: ["oh-my-openagent@4.19.2"] }, null, 2)}\n`,
+    );
+    const registration = {
+      packageName: "oh-my-openagent" as const,
+      spec: "oh-my-openagent@4.19.2",
+    };
+    const truncatedDebugConfig = JSON.stringify({
+      plugin: [registration.spec],
+      agent: {
+        prompt: "x".repeat(70_000),
+      },
+    }).slice(0, 65_536);
+
+    assert.equal(
+      openCodePackageAddonResolved(
+        "opencode",
+        registration,
+        { OPENCODE_CONFIG_DIR: configRoot },
+        "linux",
+        () => truncatedDebugConfig,
+      ),
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex OMO registration verifies exact marketplace content before add", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-codex-omo-"));
+  try {
+    const marketplaceRoot = join(root, "marketplace");
+    const manifestPath = join(
+      marketplaceRoot,
+      ".agents",
+      "plugins",
+      "marketplace.json",
+    );
+    const pluginRoot = join(marketplaceRoot, "plugins", "omo");
+    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(join(marketplaceRoot, ".agents", "plugins"), {
+      recursive: true,
+    });
+    writeFileSync(manifestPath, "{\"name\":\"sisyphuslabs\"}\n");
+    writeFileSync(join(pluginRoot, "SKILL.md"), "reviewed OMO\n");
+    const registration = {
+      manifestPath: ".agents/plugins/marketplace.json" as const,
+      manifestSha256: sha256File(manifestPath),
+      marketplaceName: "sisyphuslabs" as const,
+      marketplaceRoot,
+      pluginContentSha256: hashManagedDirectory(pluginRoot),
+      pluginPath: "plugins/omo" as const,
+      repository: "https://github.com/code-yeongyu/lazycodex.git",
+      selector: "omo@sisyphuslabs" as const,
+      version: "4.19.2",
+    };
+    let marketplaceInstalled = false;
+    let pluginInstalled = false;
+    let pluginSourcePath = pluginRoot;
+    const calls: string[] = [];
+    const run = (_command: string, args: readonly string[]) => {
+      const invocation = args.join(" ");
+      calls.push(invocation);
+      if (invocation === "plugin marketplace list --json") {
+        return JSON.stringify({
+          marketplaces: marketplaceInstalled
+            ? [{
+                name: "sisyphuslabs",
+                root: marketplaceRoot,
+                marketplaceSource: {
+                  source: marketplaceRoot,
+                  sourceType: "local",
+                },
+              }]
+            : [],
+        });
+      }
+      if (invocation === "plugin list --json") {
+        return JSON.stringify({
+          installed: pluginInstalled
+            ? [{
+                enabled: true,
+                installed: true,
+                marketplaceName: "sisyphuslabs",
+                pluginId: "omo@sisyphuslabs",
+                source: { path: pluginSourcePath, source: "local" },
+                version: "4.19.2",
+              }]
+            : [],
+        });
+      }
+      if (
+        invocation === `plugin marketplace add ${marketplaceRoot} --json`
+      ) {
+        marketplaceInstalled = true;
+        return "{}";
+      }
+      if (invocation === "plugin add omo@sisyphuslabs --json") {
+        pluginInstalled = true;
+        return "{}";
+      }
+      throw new Error(`unexpected Codex OMO command: ${invocation}`);
+    };
+
+    registerCodexMarketplaceAddon(
+      "codex",
+      registration,
+      () => false,
+      run,
+    );
+    assert.equal(
+      codexMarketplaceAddonReady(
+        "codex",
+        registration,
+        () => false,
+        run,
+      ),
+      true,
+    );
+    assert.equal(
+      calls.includes(`plugin marketplace add ${marketplaceRoot} --json`),
+      true,
+    );
+
+    const copiedPluginRoot = join(root, "same-content-plugin");
+    cpSync(pluginRoot, copiedPluginRoot, { recursive: true });
+    pluginSourcePath = copiedPluginRoot;
+    assert.equal(
+      codexMarketplaceAddonReady(
+        "codex",
+        registration,
+        () => false,
+        run,
+      ),
+      false,
+    );
+    pluginSourcePath = pluginRoot;
+
+    writeFileSync(join(pluginRoot, "SKILL.md"), "drifted\n");
+    assert.equal(
+      codexMarketplaceAddonReady(
+        "codex",
+        registration,
+        () => false,
+        run,
+      ),
+      false,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

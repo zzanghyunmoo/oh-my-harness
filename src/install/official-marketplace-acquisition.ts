@@ -115,7 +115,6 @@ export function createOfficialMarketplaceGitOperations(
       run(gitExecutable, [
         ...EXACT_CHECKOUT_CONFIG,
         "clone",
-        "--filter=blob:none",
         "--no-checkout",
         repository,
         destination,

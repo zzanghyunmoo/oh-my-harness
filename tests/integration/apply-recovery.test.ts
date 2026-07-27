@@ -23,7 +23,14 @@ function plan() {
     catalogRevision: SHA256,
     desiredState: {
       profileId: "personal",
-      selectedAgents: ["claude-code"],
+      selectedAgents: ["opencode"],
+      runtimeAddons: [{
+        agentId: "opencode",
+        fingerprint: "f".repeat(64),
+        id: "omo",
+        kind: "opencode-package",
+        version: "4.19.2",
+      }],
     },
     platform: { arch: "arm64", os: "darwin" },
     observedState: { receiptDigest: null },
@@ -165,7 +172,14 @@ test("U3 partial failure journals verified work, publishes no receipt, and retry
   assert.equal(retried.status, "ready");
   assert.deepEqual(retried.completedActionIds, ["one", "two"]);
   assert.equal(state.receipt?.catalogRevision, SHA256);
-  assert.deepEqual(state.receipt?.desiredState.selectedAgents, ["claude-code"]);
+  assert.deepEqual(state.receipt?.desiredState.selectedAgents, ["opencode"]);
+  assert.deepEqual(state.receipt?.desiredState.runtimeAddons, [{
+    agentId: "opencode",
+    fingerprint: "f".repeat(64),
+    id: "omo",
+    kind: "opencode-package",
+    version: "4.19.2",
+  }]);
   assert.doesNotThrow(() =>
     validateContractDocument(
       "managed-state-receipt",

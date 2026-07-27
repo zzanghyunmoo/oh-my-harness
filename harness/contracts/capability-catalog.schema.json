@@ -76,7 +76,8 @@
         "version",
         "versionPolicy",
         "sourceId",
-        "supportedPlatforms"
+        "supportedPlatforms",
+        "defaultAddons"
       ],
       "properties": {
         "id": {
@@ -106,6 +107,187 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/platformId"
+          }
+        },
+        "defaultAddons": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/defaultRuntimeAddon"
+          }
+        }
+      }
+    },
+    "defaultRuntimeAddon": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/openCodePackageAddon"
+        },
+        {
+          "$ref": "#/$defs/codexMarketplaceAddon"
+        }
+      ]
+    },
+    "openCodePackageAddon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "required",
+        "sourceId",
+        "version",
+        "registration"
+      ],
+      "properties": {
+        "id": {
+          "const": "omo"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "const": true
+        },
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "registration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "packageName",
+            "spec",
+            "tarballUrl",
+            "integrity"
+          ],
+          "properties": {
+            "kind": {
+              "const": "opencode-package"
+            },
+            "packageName": {
+              "const": "oh-my-openagent"
+            },
+            "spec": {
+              "pattern": "^oh-my-openagent@[0-9]+\\.[0-9]+\\.[0-9]+$",
+              "type": "string"
+            },
+            "tarballUrl": {
+              "format": "uri",
+              "pattern": "^https://registry\\.npmjs\\.org/",
+              "type": "string"
+            },
+            "integrity": {
+              "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "codexMarketplaceAddon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "required",
+        "sourceId",
+        "version",
+        "registration"
+      ],
+      "properties": {
+        "id": {
+          "const": "omo"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "const": true
+        },
+        "sourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "registration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "repository",
+            "revision",
+            "rootTree",
+            "manifestPath",
+            "manifestBlob",
+            "manifestSha256",
+            "pluginPath",
+            "pluginTree",
+            "pluginContentSha256",
+            "marketplaceName",
+            "selector",
+            "snapshotContentSha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "codex-marketplace"
+            },
+            "repository": {
+              "format": "uri",
+              "pattern": "^https://github\\.com/",
+              "type": "string"
+            },
+            "revision": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "rootTree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "manifestPath": {
+              "const": ".agents/plugins/marketplace.json"
+            },
+            "manifestBlob": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "manifestSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "pluginPath": {
+              "const": "plugins/omo"
+            },
+            "pluginTree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "pluginContentSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "marketplaceName": {
+              "const": "sisyphuslabs"
+            },
+            "selector": {
+              "const": "omo@sisyphuslabs"
+            },
+            "snapshotContentSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
           }
         }
       }

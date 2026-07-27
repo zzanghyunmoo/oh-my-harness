@@ -23,6 +23,7 @@ $script:ExpectedPreviewExit = 2
 $script:ExpectedReadyExit = 0
 $script:ExpectedStaleExit = 4
 $script:ExpectedUnreadyExit = 6
+$script:ExpectedOmoVersion = "4.19.2"
 $script:LspCommands = [ordered]@{
   "jdtls" = "Install Eclipse JDT Language Server and expose jdtls on the trusted WSL PATH."
   "kotlin-lsp" = "Install the reviewed Kotlin language server and expose kotlin-lsp on the trusted WSL PATH."
@@ -214,31 +215,26 @@ PATH="$2"
   )
 }
 
-function Get-PreservationSnapshot {
-  param(
-    [Parameter(Mandatory = $true)][string]$WslHome,
-    [Parameter(Mandatory = $true)][string]$WslPath
-  )
+function Get-WindowsCodexFingerprint {
   $codexRoot = Join-Path $HOME ".codex"
-  return @{
-    Codex = Get-PathFingerprint -Paths @(
-      (Join-Path $codexRoot "config.toml"),
-      (Join-Path $codexRoot "plugins"),
-      (Join-Path $codexRoot "skills")
-    )
-    WslAuth = Get-WslAuthFingerprint -WslHome $WslHome -Path $WslPath
-  }
+  return Get-PathFingerprint -Paths @(
+    (Join-Path $codexRoot "config.toml"),
+    (Join-Path $codexRoot "plugins"),
+    (Join-Path $codexRoot "skills")
+  )
 }
 
 function Assert-Preservation {
   param(
-    [Parameter(Mandatory = $true)][hashtable]$Before,
-    [Parameter(Mandatory = $true)][hashtable]$After
+    [Parameter(Mandatory = $true)][string]$CodexBefore,
+    [Parameter(Mandatory = $true)][string]$CodexAfter,
+    [Parameter(Mandatory = $true)][string]$WslAuthBefore,
+    [Parameter(Mandatory = $true)][string]$WslAuthAfter
   )
-  if ($Before.Codex -ne $After.Codex) {
-    throw "Codex configuration/plugin/skill state changed during dual-environment acceptance."
+  if ($CodexBefore -ne $CodexAfter) {
+    throw "Managed Codex configuration/plugin/skill state changed after its initial exact apply."
   }
-  if ($Before.WslAuth -ne $After.WslAuth) {
+  if ($WslAuthBefore -ne $WslAuthAfter) {
     throw "WSL CLI-owned authentication state changed during dual-environment acceptance."
   }
 }
@@ -311,6 +307,33 @@ function Assert-Ready {
   }
 }
 
+function Assert-DefaultAddons {
+  param(
+    [Parameter(Mandatory = $true)]$Result,
+    [Parameter(Mandatory = $true)][string]$Label
+  )
+  $addons = @($Result.Json.status.addons)
+  $expected = @(
+    @{ AgentId = "opencode"; Id = "omo" },
+    @{ AgentId = "codex"; Id = "omo" }
+  )
+  if ($addons.Count -ne $expected.Count) {
+    throw "$Label did not report exactly the two reviewed default add-ons."
+  }
+  foreach ($entry in $expected) {
+    $matches = @($addons | Where-Object {
+      $_.agentId -eq $entry.AgentId -and $_.id -eq $entry.Id
+    })
+    if (
+      $matches.Count -ne 1 -or
+      $matches[0].version -ne $script:ExpectedOmoVersion -or
+      $matches[0].state -ne "ready"
+    ) {
+      throw "$Label did not report $($entry.AgentId)/$($entry.Id)@$($script:ExpectedOmoVersion) ready."
+    }
+  }
+}
+
 if (-not (Test-Path -LiteralPath $script:Cli -PathType Leaf)) {
   throw "Compiled CLI is missing. Run npm run build before this validator."
 }
@@ -329,27 +352,45 @@ $distroTerminated = $false
 
 try {
   $preflight = Assert-WslPrerequisites
-  $before = Get-PreservationSnapshot -WslHome $preflight.Home -WslPath $preflight.Path
+  $wslAuthBefore = Get-WslAuthFingerprint -WslHome $preflight.Home -Path $preflight.Path
 
   # --target wsl-ubuntu
   $wslBase = @(
     "setup", "--target", "wsl-ubuntu",
     "--profile", "personal",
+    "--agents", "claude-code,opencode,codex",
+    "--tools", "github,linear,notion",
+    "--capability-set", "workflow-only",
+    "--clean"
+  )
+  $wslProfilePreviewBase = @(
+    "setup", "--target", "wsl-ubuntu",
+    "--profile", "personal",
     "--agents", "claude-code,opencode",
     "--tools", "github,linear,notion",
-    "--capability-set", "profile",
-    "--clean"
+    "--capability-set", "profile"
   )
   # --target windows-native and --tool-route wsl-ubuntu
   $windowsBase = @(
     "setup", "--target", "windows-native",
     "--profile", "personal",
-    "--agents", "claude-code,opencode",
+    "--agents", "claude-code,opencode,codex",
     "--tools", "github,linear,notion",
     "--capability-set", "workflow-only",
     "--tool-route", "wsl-ubuntu",
     "--clean"
   )
+
+  Write-Step "Verify the full WSL Claude/OpenCode profile without mutation"
+  $wslProfilePreview = Invoke-OmhJson `
+    -Arguments $wslProfilePreviewBase `
+    -ExpectedExitCodes @($script:ExpectedPreviewExit)
+  if (
+    $wslProfilePreview.Json.preview.digest -notmatch "^[0-9a-f]{64}$" -or
+    @($wslProfilePreview.Json.preview.blockers).Count -ne 0
+  ) {
+    throw "WSL full-profile preview did not pass its LSP and workflow preflights."
+  }
 
   Write-Step "Preview and apply Ubuntu WSL"
   $wslPreview = Invoke-OmhJson -Arguments $wslBase -ExpectedExitCodes @($script:ExpectedPreviewExit)
@@ -371,6 +412,8 @@ try {
   ) -ExpectedExitCodes @($script:ExpectedReadyExit)
   Assert-Ready -Result $wslStatus -Label "WSL status"
   Assert-Ready -Result $wslDoctor -Label "WSL doctor"
+  Assert-DefaultAddons -Result $wslStatus -Label "WSL status"
+  Assert-DefaultAddons -Result $wslDoctor -Label "WSL doctor"
 
   Write-Step "Preview and apply Windows with the exact WSL route receipt"
   $windowsPreview = Invoke-OmhJson -Arguments $windowsBase -ExpectedExitCodes @($script:ExpectedPreviewExit)
@@ -387,6 +430,19 @@ try {
     $windowsBase + @("--apply", "--digest", $windowsPreview.Json.preview.digest)
   ) -ExpectedExitCodes @($script:ExpectedReadyExit)
   Assert-Ready -Result $windowsApply -Label "Windows apply"
+
+  Write-Step "Verify Windows target-native status and doctor"
+  $windowsStatus = Invoke-OmhJson -Arguments @(
+    "status", "--target", "windows-native"
+  ) -ExpectedExitCodes @($script:ExpectedReadyExit)
+  $windowsDoctor = Invoke-OmhJson -Arguments @(
+    "doctor", "--target", "windows-native"
+  ) -ExpectedExitCodes @($script:ExpectedReadyExit)
+  Assert-Ready -Result $windowsStatus -Label "Windows status"
+  Assert-Ready -Result $windowsDoctor -Label "Windows doctor"
+  Assert-DefaultAddons -Result $windowsStatus -Label "Windows status"
+  Assert-DefaultAddons -Result $windowsDoctor -Label "Windows doctor"
+  $codexAfterInitialApply = Get-WindowsCodexFingerprint
 
   # --target all
   Write-Step "Verify aggregate status/doctor and idempotent reapply"
@@ -431,8 +487,13 @@ try {
   ) -ExpectedExitCodes @($script:ExpectedReadyExit)
   Assert-Ready -Result $finalStatus -Label "Final aggregate status"
 
-  $after = Get-PreservationSnapshot -WslHome $preflight.Home -WslPath $preflight.Path
-  Assert-Preservation -Before $before -After $after
+  $codexAfterAcceptance = Get-WindowsCodexFingerprint
+  $wslAuthAfter = Get-WslAuthFingerprint -WslHome $preflight.Home -Path $preflight.Path
+  Assert-Preservation `
+    -CodexBefore $codexAfterInitialApply `
+    -CodexAfter $codexAfterAcceptance `
+    -WslAuthBefore $wslAuthBefore `
+    -WslAuthAfter $wslAuthAfter
 } finally {
   if ($initiallyRunning -and $distroTerminated) {
     & $script:Wsl -d $Distro --exec /bin/true | Out-Null

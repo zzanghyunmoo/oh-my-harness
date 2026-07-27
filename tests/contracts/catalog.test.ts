@@ -28,6 +28,7 @@ function itemAt<T>(items: T[], index: number): T {
 
 test("U2 catalog contains the exact agents, packages, and requested capabilities", () => {
   const catalog = loadCatalogBundle(REPO_ROOT);
+  const agents = new Map(catalog.agents.agents.map((agent) => [agent.id, agent]));
 
   assert.deepEqual(catalog.agents.agents.map(({ id }) => id).sort(), [...SUPPORTED_AGENT_IDS].sort());
   assert.deepEqual(catalog.packages.packages.map(({ id }) => id).sort(), [...PACKAGE_IDS].sort());
@@ -35,6 +36,15 @@ test("U2 catalog contains the exact agents, packages, and requested capabilities
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "lsp").length, 7);
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "workflow").length, 10);
   assert.equal(JSON.stringify(catalog).includes('"pi"'), false);
+  assert.deepEqual(agents.get("claude-code")?.defaultAddons, []);
+  assert.equal(
+    agents.get("opencode")?.defaultAddons[0]?.registration.kind,
+    "opencode-package",
+  );
+  assert.equal(
+    agents.get("codex")?.defaultAddons[0]?.registration.kind,
+    "codex-marketplace",
+  );
 });
 
 test("Catalog Revision is deterministic and changes for semantic or provenance changes", () => {
@@ -57,6 +67,13 @@ test("Catalog Revision is deterministic and changes for semantic or provenance c
   const provenanceChange = structuredClone(reordered);
   itemAt(provenanceChange.upstreams.sources, 0).identity += "-changed";
   assert.notEqual(computeCatalogRevision(provenanceChange), catalog.revision);
+
+  const addonChange = structuredClone(reordered);
+  itemAt(
+    itemAt(addonChange.agents.agents, 1).defaultAddons,
+    0,
+  ).version = "4.19.3";
+  assert.notEqual(computeCatalogRevision(addonChange), catalog.revision);
 });
 
 test("catalog validation fails closed on unknown fields, duplicates, Pi, secrets, and provenance gaps", () => {
@@ -83,6 +100,38 @@ test("catalog validation fails closed on unknown fields, duplicates, Pi, secrets
   const unresolvedSource = mutableSource();
   itemAt(unresolvedSource.upstreams.sources, 0).reviewStatus = "unresolved";
   assert.throws(() => validateCatalogSource(unresolvedSource, REPO_ROOT), /unresolved provenance/i);
+
+  const unknownAddonField = mutableSource();
+  Object.assign(
+    itemAt(itemAt(unknownAddonField.agents.agents, 1).defaultAddons, 0),
+    { latest: true },
+  );
+  assert.throws(
+    () => validateCatalogSource(unknownAddonField, REPO_ROOT),
+    /additional field|schema branch/i,
+  );
+
+  const incompatibleAddon = mutableSource();
+  itemAt(incompatibleAddon.agents.agents, 1).defaultAddons =
+    structuredClone(itemAt(incompatibleAddon.agents.agents, 2).defaultAddons);
+  assert.throws(
+    () => validateCatalogSource(incompatibleAddon, REPO_ROOT),
+    /incompatible with the runtime/i,
+  );
+
+  const mutableAddonSpec = mutableSource();
+  const openCodeAddon = itemAt(
+    itemAt(mutableAddonSpec.agents.agents, 1).defaultAddons,
+    0,
+  );
+  if (openCodeAddon.registration.kind !== "opencode-package") {
+    assert.fail("expected the OpenCode package add-on");
+  }
+  openCodeAddon.registration.spec = "oh-my-openagent@latest";
+  assert.throws(
+    () => validateCatalogSource(mutableAddonSpec, REPO_ROOT),
+    /schema branch|schema pattern|package spec/i,
+  );
 });
 
 test("Claude-ready with OpenCode and Codex pending is a valid staged catalog state", () => {
