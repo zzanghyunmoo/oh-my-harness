@@ -200,7 +200,6 @@ function validateReferences(source: CatalogSourceDocuments): void {
   );
 
   const agentIds = new Set<string>(source.agents.agents.map(({ id }) => id));
-  if (agentIds.has("pi")) throw new Error("Pi runtime is forbidden in v2");
   const packageIds = new Set<string>(
     source.packages.packages.map(({ id }) => id),
   );

@@ -6,7 +6,6 @@ dist/
 auth.json
 sessions/
 .mcp-auth/
-.pi/
 .env
 .env.*
 
@@ -16,4 +15,3 @@ Thumbs.db
 .idea/
 
 .context
-.pi-subagents/

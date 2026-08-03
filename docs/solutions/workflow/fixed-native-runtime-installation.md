@@ -7,7 +7,7 @@ problem_type: workflow_pattern
 component: tooling
 severity: high
 applies_when:
-  - "Installing one harness into Claude Code, Codex, OpenCode, and Pi"
+  - "Installing one harness into Claude Code, OpenCode, and Codex"
   - "Exact runtime and upstream versions must remain reproducible"
   - "Native package managers accept different source shapes"
 tags:
@@ -16,7 +16,6 @@ tags:
   - codex-plugin
   - claude-plugin
   - opencode-plugin
-  - pi-package
   - supply-chain
 ---
 
@@ -26,56 +25,69 @@ tags:
 
 ## Context
 
-Claude Code, Codex, OpenCode, and Pi do not share one package-registration protocol. A mutable Git source or `latest` npm spec also cannot prove that two machines loaded the same bytes. The harness therefore needs one verified acquisition boundary and four native registration adapters.
+Claude Code, OpenCode, and Codex do not share one package-registration protocol.
+A mutable Git source or `latest` package spec also cannot prove that two machines
+loaded the same bytes. The harness therefore needs one verified acquisition
+boundary and three native registration adapters.
 
 ## Guidance
 
-Keep preview and mutation separate. `omh agents install` resolves the reviewed platform tuple without creating the install root; only `--apply` downloads and registers anything. `npm run harness:install` remains a compatibility wrapper.
+Keep preview and mutation separate. `omh agents install` resolves the reviewed
+platform tuple without creating the install root; only `--apply` downloads and
+registers anything. `npm run harness:install` remains a compatibility wrapper.
 
-Verify both layers of every runtime release: the archive SHA-256 before extraction and the selected executable SHA-256 after safe extraction. Reject path traversal, extra executable ambiguity, digest drift, and version drift. Store the verified executable under `<root>/runtimes/<runtime>/<version>/<platform>`. Expose it through a managed `bin` symlink on POSIX and an NTFS hardlink retaining the `.exe` suffix on Windows rather than overwriting another tool manager's command.
+Verify both layers of every runtime release: the archive SHA-256 before extraction
+and the selected executable SHA-256 after safe extraction. Reject path traversal,
+extra executable ambiguity, digest drift, and version drift. Store the verified
+executable under `<root>/runtimes/<runtime>/<version>/<platform>`. Expose it
+through a managed `bin` symlink on POSIX and an NTFS hardlink retaining the `.exe`
+suffix on Windows rather than overwriting another tool manager's command.
 
-Treat Windows script shims as an execution boundary. Native `.exe` files run directly. npm-style extensionless files are accepted only when their bounded first line is a Node shebang. Generated `.cmd` shims are accepted only when their fixed structure resolves to a trusted relative Node entrypoint with the same shebang proof. In both cases, run the JavaScript through the current trusted Node executable. Do not pass arbitrary `.cmd` or `.bat` tools through `cmd.exe`; doing so would reintroduce shell parsing into role-scoped CLI calls.
+Treat Windows script shims as an execution boundary. Native `.exe` files run
+directly. npm-style extensionless files are accepted only when their bounded first
+line is a Node shebang. Generated `.cmd` shims are accepted only when their fixed
+structure resolves to a trusted relative Node entrypoint with the same shebang
+proof. Run JavaScript through the current trusted Node executable; do not pass
+arbitrary command scripts through a shell.
 
-Build the project package with `npm pack --ignore-scripts`, safely extract it, install production dependencies with lifecycle scripts disabled, and bind the resulting snapshot to the source archive digest and a full payload digest. Acquire Compound Engineering from its reviewed repository, check out the exact commit, re-derive the existing trust receipt, omit Git metadata and upstream symlinks, and then snapshot the verified tree.
+Build the project package with lifecycle scripts disabled, safely extract it,
+install its exact production dependency closure, and bind the resulting snapshot
+to the source archive digest and a full payload digest. Register snapshots through
+native surfaces:
 
-Register snapshots through native surfaces:
-
-- Codex: local marketplace plus `.codex-plugin/plugin.json`
 - Claude Code: local marketplace plus `.claude-plugin/plugin.json`
-- OpenCode: local package whose `main` exports a plugin hook that appends a skill path
-- Pi: local package using `package.json#pi`, with exact npm specs for required companions
+- OpenCode: exact local package spec and native plugin configuration
+- Codex: local marketplace plus `.codex-plugin/plugin.json`
 
-Migration must be narrow. Remove only known mutable predecessor sources, leave unrelated packages untouched, and verify the exact local paths or npm specs after registration. When OpenCode's CLI has no removal subcommand, atomically remove only the exact conflicting plugin spec from a strict JSON config and preserve a mode-restricted recovery copy. A proven predecessor's residual `ce-*` and `lfg` skill directories are renamed into a hidden recovery directory so they cannot override the pinned plugin. Receipts record both package identities and runtime registration results.
+An exact existing registration is reusable. A different version, source, tree,
+managed content, or duplicate registration is a user-owned collision and fails
+before mutation. Receipts record the exact package identity and runtime registration
+result; they never grant ownership over unrelated native configuration.
 
 ## Verification
 
-Run the deterministic unit suite, then perform a full apply into a temporary install root. Use isolated native configuration roots to ensure OpenCode discovers exactly the OMP facade and the 29 pinned Compound Engineering skills. Use `pi list` to verify both local payload paths and exact companion package specs. Validate the Codex plugin and marketplace manifests before touching the user's native configuration.
+Run deterministic unit and contract suites, then perform a full apply into a
+temporary install root with isolated native configuration roots. Verify each
+managed executable, native registration, repeat no-op, and collision preservation.
+Validate the Claude Code and Codex marketplace manifests and the OpenCode package
+spec before touching the user's native configuration.
 
 ```bash
 npm run test:harness
 omh agents install --root /absolute/temp/root --apply --skip-registration
-/absolute/temp/root/bin/codex --version
 /absolute/temp/root/bin/claude --version
 /absolute/temp/root/bin/opencode --version
-/absolute/temp/root/bin/pi --version
+/absolute/temp/root/bin/codex --version
 ```
 
-On Windows, use the `.exe` managed commands and the checkout launcher:
-
-```powershell
-.\omh.cmd agents install --apply
-& "$HOME\.oh-my-harness\bin\codex.exe" --version
-& "$HOME\.oh-my-harness\bin\claude-code.exe" --version
-& "$HOME\.oh-my-harness\bin\opencode.exe" --version
-& "$HOME\.oh-my-harness\bin\pi.exe" --version
-```
-
-Pi `0.80.7`'s reviewed standalone binary reports `0.0.0`; for that exact tuple only, the executable digest is the authoritative version evidence. This exception must not generalize to another version or digest.
+On Windows, use the managed native commands and the checkout launcher.
 
 ## Related
 
 - `docs/solutions/architecture-patterns/immutable-upstream-trust-receipts.md`
 - `docs/solutions/conventions/cross-platform-node-harness-boundaries.md`
-- `harness/adapters/claude-code.json`, `harness/adapters/codex.json`, `harness/adapters/opencode.json`, `harness/adapters/pi.json`
+- `harness/adapters/claude-code.json`
+- `harness/adapters/opencode.json`
+- `harness/adapters/codex.json`
 
 <!-- markdownlint-enable MD013 MD025 -->

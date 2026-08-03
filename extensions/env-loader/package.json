@@ -1,6 +1,0 @@
-{
-  "name": "env-loader",
-  "version": "0.1.0",
-  "private": true,
-  "description": "CWD .env loader for oh-my-harness extensions"
-}

@@ -74,15 +74,10 @@ consume the checked-out bytes unchanged.
 
 ### Keep package scripts shell-neutral
 
-Avoid package scripts whose correctness depends on a POSIX shell. Use Node for filesystem cleanup and a checked-in TypeScript project for file discovery instead of relying on shell glob expansion. The connector gate follows this boundary in `package.json:22`, while `tsconfig.workspace-connectors-tests.json` declares the compilation inputs. The supported Node floor is also machine-readable in `package.json:11` rather than existing only in prose.
-
-```json
-{
-  "scripts": {
-    "test:workspace-connectors": "node -e \"require('node:fs').rmSync('.tmp/workspace-connectors-test',{recursive:true,force:true})\" && tsc -p tsconfig.workspace-connectors-tests.json"
-  }
-}
-```
+Avoid package scripts whose correctness depends on a POSIX shell. Use Node for
+filesystem cleanup and TypeScript project files for source discovery instead of
+relying on shell glob expansion. Keep the supported Node floor machine-readable
+in `package.json#engines` rather than only in prose.
 
 ### Verify an npm artifact as the installation root
 
@@ -108,9 +103,12 @@ Windows executable discovery must distinguish PE executables from shell shims. P
 
 ### Separate invariant coverage from fixture capability
 
-A Windows host may deny symlink creation without Developer Mode or elevation. Catch only the Windows `EPERM` capability failure, report a diagnostic skip, and keep every other error fatal. The final-target and ancestor-symlink tests implement that narrow boundary at `tests/harness/inventory.test.mjs:487` and `tests/harness/inventory.test.mjs:512`. Connector setup state follows the same rule at `extensions/workspace-connectors/setup-state.test.ts:82`.
-
-POSIX shell and signal fixtures are similarly skipped only on Windows in `extensions/workspace-connectors/cli-bridge.test.ts:49` and `extensions/workspace-connectors/cli-bridge.test.ts:78`. A Linux lane must execute those skipped assertions before merge; a Windows-only pass is incomplete evidence.
+A Windows host may deny symlink creation without Developer Mode or elevation.
+Catch only the Windows `EPERM` capability failure, report a diagnostic skip, and
+keep every other error fatal. The final-target and ancestor-symlink tests implement
+that narrow boundary in `tests/harness/inventory.test.mjs`. A capable POSIX lane
+must execute the skipped assertions before merge; a Windows-only pass is incomplete
+evidence.
 
 ### Bound external operations in common code
 

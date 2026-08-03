@@ -32,7 +32,7 @@ test("legacy omh parser coverage follows the Claude-first v2 selection contract"
     ["claude-code", "codex", "opencode"],
   );
   assert.throws(
-    () => parseOmhArguments(["setup", "--agents", "pi"]),
+    () => parseOmhArguments(["setup", "--agents", "unknown-agent"]),
     /must contain ids/,
   );
 });

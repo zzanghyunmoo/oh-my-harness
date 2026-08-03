@@ -34,7 +34,7 @@ test("personal and company profiles resolve the exact required and optional pack
   assert.deepEqual(company.packages.optional, ["linear", "notion", "github"]);
 });
 
-test("a selected-agent override is non-empty, unique, Pi-free, and preserved in desired state", () => {
+test("a selected-agent override is non-empty, unique, supported, and preserved in desired state", () => {
   const catalog = loadCatalogBundle(REPO_ROOT);
   const personal = catalog.profiles.find(({ id }) => id === "personal");
   assert.ok(personal);
@@ -42,7 +42,7 @@ test("a selected-agent override is non-empty, unique, Pi-free, and preserved in 
   assert.deepEqual(resolveDesiredState(personal, ["codex", "claude-code"]).selectedAgents, ["codex", "claude-code"]);
   assert.throws(() => resolveDesiredState(personal, []), /non-empty/i);
   assert.throws(() => resolveDesiredState(personal, ["codex", "codex"]), /duplicate/i);
-  assert.throws(() => resolveDesiredState(personal, ["pi" as never]), /unsupported agent/i);
+  assert.throws(() => resolveDesiredState(personal, ["unknown-agent" as never]), /unsupported agent/i);
 });
 
 test("profile validation rejects unknown references and contradictory package requirements", () => {

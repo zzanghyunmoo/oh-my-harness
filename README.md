@@ -5,8 +5,8 @@ Oh My Harness v2는 Claude Code, OpenCode, Codex 환경을 하나의 프로필�
 Node.js ESM + strict TypeScript이며, 모든 변경은 preview와 exact digest
 승인을 거칩니다.
 
-Pi, 전체 Compound Engineering 배포, connector/proxy/provider 확장은 v1
-역사와 migration 진단에만 남아 있고 v2 제품 surface에는 포함되지 않습니다.
+지원 런타임은 Claude Code, OpenCode, Codex의 정확한 세 집합이며 unknown agent ID는
+preview 전에 거부됩니다.
 
 ## 요구사항
 
@@ -266,10 +266,7 @@ docs/plans/                  current and historical implementation plans
 docs/solutions/              durable implementation learnings
 ```
 
-Canonical 방향은
-[`docs/plans/2026-07-24-001-feat-claude-first-harness-v2-plan.md`](docs/plans/2026-07-24-001-feat-claude-first-harness-v2-plan.md)와
-[`CONCEPTS.md`](CONCEPTS.md)에 있습니다. v1 자료는 역사적 문서이며 현재
-명령 계약을 정의하지 않습니다.
+Canonical 제품 용어와 ownership 경계는 [`CONCEPTS.md`](CONCEPTS.md)에 있습니다.
 
 ## 개발과 릴리스 검증
 

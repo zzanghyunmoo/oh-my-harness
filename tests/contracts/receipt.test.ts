@@ -185,12 +185,12 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
   );
 });
 
-test("managed receipt rejects Pi, duplicate agents, unknown fields, and secret-like content", () => {
-  const pi = receiptFixture();
-  pi.desiredState.selectedAgents = ["pi"];
+test("managed receipt rejects unknown or duplicate agents, unknown fields, and secret-like content", () => {
+  const unknownAgent = receiptFixture();
+  unknownAgent.desiredState.selectedAgents = ["unknown-agent"];
   assert.throws(
-    () => validateContractDocument("managed-state-receipt", pi, REPO_ROOT),
-    /schema enum|schema branch|Pi runtime/i,
+    () => validateContractDocument("managed-state-receipt", unknownAgent, REPO_ROOT),
+    /schema enum|schema branch/i,
   );
 
   const duplicate = receiptFixture();

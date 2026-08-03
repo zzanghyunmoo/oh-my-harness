@@ -279,7 +279,7 @@ test("installer rejects combining all with an explicit runtime", async () => {
     /cannot be combined/i,
   );
   await assert.rejects(
-    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-unsupported-root"), os: "darwin", architecture: "arm64", runtimeIds: ["pi"] }),
+    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-unsupported-root"), os: "darwin", architecture: "arm64", runtimeIds: ["unknown-runtime"] }),
     /runtime selection must contain only/i,
   );
 });
@@ -971,7 +971,7 @@ test("one plugin package shares skills and CLI tools across three maintained run
   const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
   const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
-  assert.equal(Object.hasOwn(packageJson, "pi"), false);
+  assert.deepEqual(Object.keys(packageJson.bin).sort(), ["oh-my-harness", "omh"]);
   assert.equal(packageJson.files.some((path) => path.startsWith("extensions")), false);
   assert.equal(marketplace.name, "oh-my-harness");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/oh-my-harness");
