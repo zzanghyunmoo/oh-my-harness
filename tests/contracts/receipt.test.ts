@@ -196,8 +196,15 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
     sequence: 1,
     catalogRevision: SHA256,
     compatibility: {
-      minimumCliVersion: "0.2.0",
-      maximumCliVersion: "0.2.0",
+      minimumCliVersion: "0.3.0",
+      maximumCliVersion: "0.3.0",
+    },
+    distribution: {
+      archiveFilename: "oh-my-harness-v0.3.0.tgz",
+      packageName: "oh-my-harness",
+      sidecarFilename: "oh-my-harness-v0.3.0.release.json",
+      tag: "v0.3.0",
+      version: "0.3.0",
     },
     artifacts: [
       {

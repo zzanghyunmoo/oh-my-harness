@@ -58,6 +58,8 @@
     "test:runtime:opencode": "npm run build --silent && node --test tests/runtime/opencode.test.ts",
     "test:runtime:codex": "npm run build --silent && node --test tests/runtime/codex.test.ts",
     "package:verify": "npm run build --silent && node --test \"tests/release/*.test.ts\"",
+    "release:build": "npm run build --silent && node scripts/release.mjs build",
+    "release:verify": "npm run build --silent && node scripts/release.mjs verify",
     "test:harness": "npm run build --silent && node --test \"tests/harness/*.test.mjs\"",
     "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
     "harness:install": "node scripts/harness/install.mjs",
@@ -67,7 +69,6 @@
     "harness:upstream:verify": "node scripts/harness/upstream.mjs verify"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "jsonc-parser": "3.3.1",
     "tar-stream": "3.2.0",
@@ -75,7 +76,16 @@
     "yauzl": "3.4.0",
     "zod": "4.1.8"
   },
+  "bundleDependencies": [
+    "@modelcontextprotocol/sdk",
+    "jsonc-parser",
+    "tar-stream",
+    "typebox",
+    "yauzl",
+    "zod"
+  ],
   "devDependencies": {
+    "@opencode-ai/plugin": "1.18.0",
     "@types/node": "25.8.0",
     "typescript": "6.0.3"
   }

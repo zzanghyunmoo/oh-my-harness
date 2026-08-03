@@ -19,6 +19,10 @@ import { gunzipSync } from "node:zlib";
 import tar from "tar-stream";
 
 import { PLUGIN_RUNTIME_PATHS } from "../../dist/install/plugin-runtime-files.js";
+import {
+  buildReleaseArtifact,
+  verifyReleaseArtifact,
+} from "../../dist/catalog/release.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -88,26 +92,55 @@ test("cross-platform CI checks the committed patch against its event base", () =
   );
 });
 
-test("packed artifact contains compiled entrypoints and runtime assets only", () => {
-  const invocation = npmInvocation(["pack", "--dry-run", "--json"]);
-  const packed = spawnSync(
-    invocation.command,
-    invocation.args,
-    {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      env: { ...process.env, npm_config_update_notifier: "false" },
-      windowsHide: true,
-    },
+test("release workflow pins actions, isolates write permission, and refuses overwrite", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/release.yml", import.meta.url),
+    "utf8",
   );
+  assert.match(workflow, /^permissions: \{\}$/mu);
+  assert.match(workflow, /build:[\s\S]*?permissions:\n\s+contents: read/u);
+  assert.match(workflow, /build:[\s\S]*?permissions:[\s\S]*?pull-requests: read/u);
+  assert.match(workflow, /publish:[\s\S]*?permissions:\n\s+contents: write/u);
+  assert.equal((workflow.match(/contents: write/gu) ?? []).length, 1);
+  assert.equal((workflow.match(/uses: [^\s]+@[0-9a-f]{40}/gu) ?? []).length, 4);
+  assert.doesNotMatch(workflow, /uses: [^\s]+@v\d/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /merge-base --is-ancestor/u);
+  assert.match(workflow, /commits\/\$\{GITHUB_SHA\}\/pulls/u);
+  assert.match(workflow, /git diff --exit-code "\$\{GITHUB_SHA\}" -- \./u);
+  assert.match(workflow, /already exists; refusing to overwrite/u);
+  assert.match(workflow, /gh release create/u);
+});
 
-  assert.equal(packed.status, 0, packed.stderr);
-  const report = JSON.parse(packed.stdout) as Array<{
-    files: Array<{ path: string }>;
-  }>;
-  const paths = new Set(report[0]?.files.map(({ path }) => path));
+test("packed artifact contains compiled entrypoints, runtime assets, and production closure only", () => {
+  const cache = mkdtempSync(join(tmpdir(), "omh-pack-cache-"));
+  const invocation = npmInvocation(["pack", "--dry-run", "--json"]);
+  try {
+    const packed = spawnSync(
+      invocation.command,
+      invocation.args,
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_config_cache: cache,
+          npm_config_offline: "true",
+          npm_config_registry: "http://127.0.0.1:9",
+          npm_config_update_notifier: "false",
+        },
+        maxBuffer: 256 * 1024 * 1024,
+        windowsHide: true,
+      },
+    );
 
-  for (const required of [
+    assert.equal(packed.status, 0, packed.stderr);
+    const report = JSON.parse(packed.stdout) as Array<{
+      files: Array<{ path: string }>;
+    }>;
+    const paths = new Set(report[0]?.files.map(({ path }) => path));
+
+    for (const required of [
     "dist/cli/main.js",
     "dist/cli/arguments.js",
     "dist/cli/render.js",
@@ -147,13 +180,19 @@ test("packed artifact contains compiled entrypoints and runtime assets only", ()
     "npm-shrinkwrap.json",
     "dist/install/plugin-runtime-files.js",
     ...PLUGIN_RUNTIME_PATHS,
-  ]) {
-    assert.equal(paths.has(required), true, `package is missing ${required}`);
-  }
+    ]) {
+      assert.equal(paths.has(required), true, `package is missing ${required}`);
+    }
 
-  for (const path of paths) {
-    assert.doesNotMatch(path, /(^|\/)(?:\.env|\.oh-my-harness|node_modules|\.tmp|tests|src)(?:\/|$)/);
-    assert.doesNotMatch(path, /^(?:extensions|harness\/proxies|scripts\/proxies)\//);
+    const bundled = [...paths].filter((path) => path.startsWith("node_modules/"));
+    assert.ok(bundled.length > 0, "production dependency closure must be bundled");
+    assert.equal(bundled.some((path) => /node_modules\/(?:typescript|@types)(?:\/|$)/u.test(path)), false);
+    for (const path of paths) {
+      assert.doesNotMatch(path, /^(?:\.env|\.oh-my-harness|\.tmp|tests|src)(?:\/|$)/);
+      assert.doesNotMatch(path, /^(?:extensions|harness\/proxies|scripts\/proxies)\//);
+    }
+  } finally {
+    rmSync(cache, { recursive: true, force: true });
   }
 });
 
@@ -164,47 +203,37 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
   const stateRoot = join(root, "state");
   try {
     mkdirSync(arbitraryCwd);
-    const packInvocation = npmInvocation([
-      "pack",
-      "--json",
-      "--ignore-scripts",
-      "--pack-destination",
-      root,
-    ]);
-    const packed = spawnSync(
-      packInvocation.command,
-      packInvocation.args,
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: { ...process.env, npm_config_update_notifier: "false" },
-        windowsHide: true,
-      },
+    const source = { commit: "a".repeat(40), tree: "b".repeat(40) };
+    const built = await buildReleaseArtifact(REPO_ROOT, root, source);
+    const archive = built.archivePath;
+    assert.equal(basename(archive), "oh-my-harness-v0.3.0.tgz");
+    const manifestPaths = built.sidecar.archive.files.map(({ path }) => path);
+    assert.deepEqual(manifestPaths, [...manifestPaths].sort((left, right) => left.localeCompare(right)));
+    assert.equal(new Set(manifestPaths).size, manifestPaths.length);
+    await verifyReleaseArtifact(REPO_ROOT, archive, built.sidecar, source);
+    await assert.rejects(
+      buildReleaseArtifact(REPO_ROOT, root, source),
+      /already exists; refusing to overwrite/i,
     );
-    assert.equal(packed.status, 0, packed.stderr);
-    const report = JSON.parse(packed.stdout) as Array<{ filename: string }>;
-    const archive = join(root, String(report[0]?.filename));
+    await assert.rejects(
+      verifyReleaseArtifact(REPO_ROOT, archive, built.sidecar, {
+        ...source,
+        tree: "c".repeat(40),
+      }),
+      /source commit\/tree identity mismatch/i,
+    );
 
     await extractPackedArtifact(archive, packageRoot);
-    const installInvocation = npmInvocation([
-      "install",
-      "--ignore-scripts",
-      "--no-audit",
-      "--no-fund",
-      "--omit=dev",
-      "--offline",
-    ]);
-    const installed = spawnSync(
-      installInvocation.command,
-      installInvocation.args,
-      {
-        cwd: packageRoot,
-        encoding: "utf8",
-        env: { ...process.env, npm_config_update_notifier: "false" },
-        windowsHide: true,
-      },
-    );
-    assert.equal(installed.status, 0, installed.stderr);
+    const installCache = join(root, "empty-npm-cache");
+    mkdirSync(installCache);
+    assert.equal(existsSync(join(packageRoot, "node_modules", "yaml", "package.json")), false);
+    assert.equal(existsSync(join(packageRoot, "node_modules", "zod", "package.json")), true);
+    const offlineEnvironment = {
+      ...process.env,
+      npm_config_cache: installCache,
+      npm_config_offline: "true",
+      npm_config_registry: "http://127.0.0.1:9",
+    };
 
     const entrypoint = join(
       packageRoot,
@@ -215,11 +244,41 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
     const help = spawnSync(process.execPath, [entrypoint, "--help"], {
       cwd: arbitraryCwd,
       encoding: "utf8",
+      env: offlineEnvironment,
       windowsHide: true,
     });
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /Claude-first/);
     assert.match(help.stdout, /--apply/);
+
+    const version = spawnSync(process.execPath, [entrypoint, "--version"], {
+      cwd: arbitraryCwd,
+      encoding: "utf8",
+      env: offlineEnvironment,
+      windowsHide: true,
+    });
+    assert.equal(version.status, 0, version.stderr);
+    assert.equal(version.stdout.trim(), "omh 0.3.0");
+
+    const portableLauncher = spawnSync(process.execPath, [join(packageRoot, "omh"), "--version"], {
+      cwd: arbitraryCwd,
+      encoding: "utf8",
+      env: offlineEnvironment,
+      windowsHide: true,
+    });
+    assert.equal(portableLauncher.status, 0, portableLauncher.stderr);
+    assert.equal(portableLauncher.stdout.trim(), "omh 0.3.0");
+
+    const hostPreview = spawnSync(
+      process.execPath,
+      [entrypoint, "setup", "--profile", "mds-host", "--agents", "none", "--root", stateRoot, "--json"],
+      { cwd: arbitraryCwd, encoding: "utf8", env: offlineEnvironment, windowsHide: true },
+    );
+    assert.equal(hostPreview.status, 2, hostPreview.stderr);
+    const hostResult = JSON.parse(hostPreview.stdout) as { preview: { profileId: string; selectedAgents: string[] } };
+    assert.equal(hostResult.preview.profileId, "mds-host");
+    assert.deepEqual(hostResult.preview.selectedAgents, []);
+    assert.equal(existsSync(stateRoot), false);
 
     const preview = spawnSync(
       process.execPath,
@@ -237,6 +296,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       {
         cwd: arbitraryCwd,
         encoding: "utf8",
+        env: offlineEnvironment,
         windowsHide: true,
       },
     );
