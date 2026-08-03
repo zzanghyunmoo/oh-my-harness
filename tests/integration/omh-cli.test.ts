@@ -143,7 +143,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   const stateRoot = join(root, "state");
   const calls: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
   let pluginInstalled = false;
-  let managedPluginVersion = "0.2.0";
+  let managedPluginVersion = "0.3.0";
   let managedMarketplaceRoot: string | null = null;
   const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
@@ -470,7 +470,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       ),
       false,
     );
-    managedPluginVersion = "0.2.0";
+    managedPluginVersion = "0.3.0";
 
     const receiptPath = join(stateRoot, "receipts", "environment.json");
     assert.equal(existsSync(receiptPath), true);

@@ -54,7 +54,7 @@ function expectation(): ClaudeNativeExpectation {
           node_path: "/managed/node",
           receipt_path: "/managed/receipts/environment.json",
         },
-        version: "0.2.0",
+        version: "0.3.0",
       },
       {
         contentSha256: "2".repeat(64),
@@ -103,8 +103,8 @@ function readyObservation(): ClaudeNativeObservation {
         contentSha256: "1".repeat(64),
         enabled: true,
         id: "oh-my-harness@oh-my-harness",
-        installPath: "/cache/oh-my-harness/oh-my-harness/0.2.0",
-        version: "0.2.0",
+        installPath: "/cache/oh-my-harness/oh-my-harness/0.3.0",
+        version: "0.3.0",
       },
       {
         contentSha256: "2".repeat(64),

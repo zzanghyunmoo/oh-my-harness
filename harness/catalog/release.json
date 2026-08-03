@@ -2,7 +2,7 @@
   "$schema": "../contracts/release-catalog.schema.json",
   "artifacts": [
     {
-      "digest": "30be4d006c7b3b2f42bbf0b8f09c9832f43c243af5a3630b3cee643a63af8f62",
+      "digest": "e8568e26d8762c49c16c9da8372a2e38f746dbaed8c8d29e6e6a7303eedf97f8",
       "id": "capability-catalog",
       "kind": "catalog",
       "sourceId": "oh-my-harness-managed"
@@ -14,17 +14,17 @@
       "sourceId": "oh-my-harness-managed"
     },
     {
-      "digest": "3f410e89c37bef58df9bb2f2b97518f936d1c7221929a4fce07bf45b3df9bede",
+      "digest": "7f2e74732a1cd190a946214e77846e5ba19a398c342748e651b84d249be404cc",
       "id": "runtime-plugin",
       "kind": "plugin",
       "sourceId": "oh-my-harness-managed"
     }
   ],
-  "catalogRevision": "30be4d006c7b3b2f42bbf0b8f09c9832f43c243af5a3630b3cee643a63af8f62",
+  "catalogRevision": "e8568e26d8762c49c16c9da8372a2e38f746dbaed8c8d29e6e6a7303eedf97f8",
   "channel": "stable",
   "compatibility": {
-    "maximumCliVersion": "0.2.0",
-    "minimumCliVersion": "0.2.0"
+    "maximumCliVersion": "0.3.0",
+    "minimumCliVersion": "0.3.0"
   },
   "kind": "release-catalog",
   "schemaVersion": "2.0.0",

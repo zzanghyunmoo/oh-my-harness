@@ -42,6 +42,11 @@ export const CAPABILITY_IDS = [
 ] as const;
 
 export const BUILT_IN_PROFILE_IDS = ["personal", "company"] as const;
+export const COMPOSITION_PROFILE_IDS = ["mds-host"] as const;
+export const RELEASED_PROFILE_IDS = [
+  ...BUILT_IN_PROFILE_IDS,
+  ...COMPOSITION_PROFILE_IDS,
+] as const;
 
 export type AgentId = (typeof SUPPORTED_AGENT_IDS)[number];
 export type PackageId = (typeof PACKAGE_IDS)[number];

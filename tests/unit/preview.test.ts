@@ -117,6 +117,28 @@ test("U3 preview rejects required preflight failure before an apply plan exists"
   );
 });
 
+test("mds-host permits a canonical stable plan with no agents or actions", () => {
+  const input = {
+    ...previewInput(),
+    actions: [],
+    desiredState: { profileId: "mds-host", selectedAgents: [] },
+    observedState: { compositionOnly: true },
+    preflights: [],
+  };
+  const first = createApplyPlan(input);
+  const second = createApplyPlan(structuredClone(input));
+
+  assert.deepEqual(first.actions, []);
+  assert.equal(first.digest, second.digest);
+  assert.doesNotThrow(() =>
+    validateContractDocument("apply-plan", first, REPOSITORY_ROOT)
+  );
+
+  const normal = structuredClone(input);
+  normal.desiredState.profileId = "personal";
+  assert.throws(() => createApplyPlan(normal), /non-empty/i);
+});
+
 test("explicit environment identity and routes are digest-bound", () => {
   const windows = createApplyPlan(explicitPreviewInput("windows-native"));
   const wsl = createApplyPlan(explicitPreviewInput("wsl-ubuntu"));

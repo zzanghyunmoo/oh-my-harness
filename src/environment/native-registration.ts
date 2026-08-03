@@ -32,6 +32,7 @@ import { hashManagedDirectory } from "../install/managed-payload.js";
 import {
   loadOpenCodeCapabilityDefinitions,
 } from "../runtime/opencode.js";
+import { HARNESS_VERSION } from "../package-version.js";
 import {
   assertSafeManagedRootPath,
   atomicWriteFile,
@@ -493,7 +494,7 @@ export function registerClaudeRuntime(
 
   const pluginMatchesRoot = (root: string): boolean => {
     if (
-      plugin?.version !== "0.2.0"
+      plugin?.version !== HARNESS_VERSION
       || plugin.enabled !== true
       || typeof plugin.installPath !== "string"
       || !isAbsolute(plugin.installPath)
@@ -603,7 +604,7 @@ export function registerClaudeRuntime(
     }
   }
   const pluginCurrent =
-    currentPlugin?.version === "0.2.0"
+    currentPlugin?.version === HARNESS_VERSION
     && currentPlugin.enabled === true
     && installedPluginExact;
   if (currentPlugin !== undefined && !pluginCurrent) {
@@ -656,7 +657,7 @@ export function inspectClaudeManagedRuntimeRegistration(
     } else if (
       pluginMatches.length !== 1
       || pluginMatches[0]?.scope !== "user"
-      || pluginMatches[0]?.version !== "0.2.0"
+      || pluginMatches[0]?.version !== HARNESS_VERSION
       || pluginMatches[0]?.enabled !== true
       || typeof pluginMatches[0]?.installPath !== "string"
       || !isAbsolute(pluginMatches[0].installPath)
@@ -910,7 +911,7 @@ export function claudeRegistrationReady(
     const managedPluginReady =
       managedMatches.length === 1
       && managedPlugin?.scope === "user"
-      && managedPlugin.version === "0.2.0"
+      && managedPlugin.version === HARNESS_VERSION
       && managedPlugin.enabled === true
       && typeof managedPlugin.installPath === "string"
       && isAbsolute(managedPlugin.installPath)

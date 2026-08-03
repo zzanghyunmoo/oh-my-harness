@@ -53,6 +53,34 @@ test("compiled CLI rejects contradictory options with stable errors", () => {
     () => parseOmhArguments(["setup", "--digest", "a".repeat(64)]),
     /--digest requires --apply/,
   );
+  assert.throws(
+    () => parseOmhArguments(["setup", "--agents", "none"]),
+    /only valid with --profile mds-host/,
+  );
+});
+
+test("compiled CLI preserves caller-owned mds-host agent selection", () => {
+  const empty = parseOmhArguments(["setup", "--profile", "mds-host"]);
+  assert.deepEqual(empty.agents, []);
+
+  const explicit = parseOmhArguments([
+    "setup",
+    "--profile",
+    "mds-host",
+    "--agents",
+    "codex,opencode",
+  ]);
+  assert.deepEqual(explicit.agents, ["codex", "opencode"]);
+  assert.deepEqual(
+    parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--agents",
+      "none",
+    ]).agents,
+    [],
+  );
 });
 
 test("compiled CLI parses receipt-bound startup and managed runtime launch", () => {

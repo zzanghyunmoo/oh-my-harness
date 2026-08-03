@@ -57,7 +57,7 @@ test("U8 cached Claude plugin reconciles by receipt identity from arbitrary CWD"
       "cache",
       "oh-my-harness",
       "oh-my-harness",
-      "0.2.0",
+      "0.3.0",
     );
     const stateRoot = join(root, "managed state");
     const arbitraryCwd = join(root, "unrelated", "workspace");

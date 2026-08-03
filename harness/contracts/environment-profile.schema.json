@@ -3,6 +3,30 @@
   "$id": "https://oh-my-harness.dev/contracts/v2/environment-profile.schema.json",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "id": { "const": "mds-host" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "required": ["compositionOnly"],
+        "properties": {
+          "compositionOnly": { "const": true },
+          "selectedAgents": { "type": "array", "maxItems": 0 }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "selectedAgents": { "type": "array", "minItems": 1 }
+        }
+      }
+    }
+  ],
   "required": [
     "$schema",
     "schemaVersion",
@@ -33,9 +57,11 @@
       "type": "string",
       "minLength": 1
     },
+    "compositionOnly": {
+      "const": true
+    },
     "selectedAgents": {
       "type": "array",
-      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "enum": ["claude-code", "opencode", "codex"]

@@ -109,7 +109,7 @@ function readyOperations(
                 name: "oh-my-harness",
                 pluginId: "oh-my-harness@oh-my-harness",
                 source: { source: "local", path: PLUGIN_ROOT },
-                version: "0.2.0",
+                version: "0.3.0",
               }],
         };
       }

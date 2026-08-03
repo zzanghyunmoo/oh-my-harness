@@ -46,6 +46,38 @@ test("managed receipt preserves the selected-agent override in desired state", (
   assert.deepEqual(receipt.desiredState.selectedAgents, ["claude-code", "codex"]);
 });
 
+test("managed receipt permits empty readiness only for an empty mds-host composition", () => {
+  const empty = receiptFixture();
+  empty.desiredState = {
+    profileId: "mds-host",
+    selectedAgents: [],
+  };
+  empty.runtimeReadiness = [];
+  empty.startupConsent.profileId = "mds-host";
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", empty, REPO_ROOT)
+  );
+
+  const selected = structuredClone(empty);
+  selected.desiredState.selectedAgents = ["codex"];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", selected, REPO_ROOT),
+    /schema const|too many items|schema branch/i,
+  );
+
+  selected.runtimeReadiness = [{ agentId: "codex", state: "ready" }];
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", selected, REPO_ROOT)
+  );
+
+  const normal = receiptFixture();
+  normal.runtimeReadiness = [];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", normal, REPO_ROOT),
+    /schema const|too many items/i,
+  );
+});
+
 test("managed receipt accepts closed explicit environment state and legacy receipts", () => {
   const legacy = receiptFixture();
   assert.doesNotThrow(() =>

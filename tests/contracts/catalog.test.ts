@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   CAPABILITY_IDS,
   PACKAGE_IDS,
+  RELEASED_PROFILE_IDS,
   SUPPORTED_AGENT_IDS,
 } from "../../dist/domain/catalog.js";
 import {
@@ -33,6 +34,7 @@ test("U2 catalog contains the exact agents, packages, and requested capabilities
   assert.deepEqual(catalog.agents.agents.map(({ id }) => id).sort(), [...SUPPORTED_AGENT_IDS].sort());
   assert.deepEqual(catalog.packages.packages.map(({ id }) => id).sort(), [...PACKAGE_IDS].sort());
   assert.deepEqual(catalog.capabilities.capabilities.map(({ id }) => id).sort(), [...CAPABILITY_IDS].sort());
+  assert.deepEqual(catalog.profiles.map(({ id }) => id).sort(), [...RELEASED_PROFILE_IDS].sort());
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "lsp").length, 7);
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "workflow").length, 10);
   assert.deepEqual(agents.get("claude-code")?.defaultAddons, []);

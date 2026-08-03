@@ -189,6 +189,7 @@ function parseSelection(
   },
 ): CliSelectionOptions {
   let agents = [...(input.defaultAgents ?? SUPPORTED_AGENT_IDS)];
+  let agentsExplicit = false;
   let tools = [...(input.defaultTools ?? PACKAGE_IDS)];
   let apply = false;
   let digest: string | undefined;
@@ -270,12 +271,16 @@ function parseSelection(
     }
     if (flag === "--agents" || (flag === "--only" && input.allowAgents)) {
       if (!input.allowAgents) fail("agent selection is not valid for this command");
-      agents = commaSeparated(
-        valueAfter(argv, index, flag),
-        AGENT_ALIASES,
-        SUPPORTED_AGENT_IDS,
-        flag,
-      );
+      const value = valueAfter(argv, index, flag);
+      agents = value === "none"
+        ? []
+        : commaSeparated(
+            value,
+            AGENT_ALIASES,
+            SUPPORTED_AGENT_IDS,
+            flag,
+          );
+      agentsExplicit = true;
       index += 1;
       continue;
     }
@@ -296,6 +301,11 @@ function parseSelection(
     fail("--apply requires the exact --digest printed by preview");
   }
   if (!apply && digest !== undefined) fail("--digest requires --apply");
+  if (profile === "mds-host") {
+    if (!agentsExplicit) agents = [];
+  } else if (agents.length === 0) {
+    fail("--agents none is only valid with --profile mds-host");
+  }
   if (target === "windows-native" && !capabilitySetExplicit) {
     capabilitySet = "workflow-only";
   }

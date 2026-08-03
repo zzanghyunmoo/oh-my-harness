@@ -49,7 +49,7 @@ export function resolveDesiredState(
   },
 ): DesiredState {
   const requested = selectedAgentOverride ?? profile.selectedAgents;
-  if (requested.length === 0) {
+  if (requested.length === 0 && profile.compositionOnly !== true) {
     throw new Error("selected agents must be a non-empty combination");
   }
 

@@ -59,7 +59,10 @@ export function createApplyPlan(input: ApplyPlanInput): ApplyPlan {
   if (!/^[0-9a-f]{64}$/.test(input.catalogRevision)) {
     throw new Error("catalogRevision must be a SHA-256 digest");
   }
-  if (input.desiredState.selectedAgents.length === 0) {
+  if (
+    input.desiredState.selectedAgents.length === 0
+    && input.desiredState.profileId !== "mds-host"
+  ) {
     throw new Error("selected agents must be non-empty");
   }
   const explicitFields = [

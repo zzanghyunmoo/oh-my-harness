@@ -461,6 +461,56 @@ function inspectAgent(
   };
 }
 
+export function inspectCompositionAgent(
+  adapter: RuntimeAdapterDescriptor,
+  platformId: PlatformId,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): AgentEnvironmentStatus {
+  const artifact = adapter.platforms.find((entry) =>
+    entry.platformId === platformId);
+  if (!artifact) {
+    return {
+      command: adapter.command,
+      detail: `no reviewed ${platformId} executable identity`,
+      executablePath: null,
+      expectedVersion: adapter.version,
+      id: adapter.id,
+      ownership: "none",
+      state: "unsupported",
+    };
+  }
+  const external = findTrustedExecutable(adapter.command, { cwd, env });
+  if (external !== null) {
+    try {
+      if (sha256File(external) === artifact.executable.sha256) {
+        return {
+          command: adapter.command,
+          detail: "caller-provided executable matches the reviewed digest",
+          executablePath: external,
+          expectedVersion: adapter.version,
+          id: adapter.id,
+          ownership: "external",
+          state: "ready",
+        };
+      }
+    } catch {
+      // Report the exact identity failure without attempting acquisition.
+    }
+  }
+  return {
+    command: adapter.command,
+    detail: external === null
+      ? "caller must provide the reviewed executable on trusted PATH"
+      : "caller-provided executable differs from the reviewed digest",
+    executablePath: external,
+    expectedVersion: adapter.version,
+    id: adapter.id,
+    ownership: "none",
+    state: "drift",
+  };
+}
+
 function packageModel(
   catalog: CatalogBundle,
   profile: EnvironmentProfile,
@@ -948,13 +998,20 @@ function buildModel(
   const agents = desired.selectedAgents.map((id) => {
     const adapter = adapterById.get(id);
     if (!adapter) throw new Error(`missing runtime adapter: ${id}`);
-    return inspectAgent(
-      adapter,
-      stateRoot,
-      platformId,
-      options.env,
-      options.cwd,
-    );
+    return profile.compositionOnly === true
+      ? inspectCompositionAgent(
+          adapter,
+          platformId,
+          options.env,
+          options.cwd,
+        )
+      : inspectAgent(
+          adapter,
+          stateRoot,
+          platformId,
+          options.env,
+          options.cwd,
+        );
   });
   const runtimeAddons = buildRuntimeAddonModels(
     catalog,
@@ -1233,6 +1290,28 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
+export function plannedAgentOperation(
+  profile: Pick<EnvironmentProfile, "compositionOnly">,
+  agent: Pick<
+    AgentEnvironmentStatus,
+    "executablePath" | "id" | "ownership" | "state"
+  >,
+): "acquire-agent" | "verify-agent" {
+  if (profile.compositionOnly !== true) {
+    return agent.state === "ready" ? "verify-agent" : "acquire-agent";
+  }
+  if (
+    agent.state !== "ready"
+    || agent.ownership !== "external"
+    || agent.executablePath === null
+  ) {
+    throw new Error(
+      `${agent.id} composition requires an exact caller-provided executable identity`,
+    );
+  }
+  return "verify-agent";
+}
+
 function previousManagedPayloadRoot(
   model: EnvironmentModel,
   runtimeId: AgentId,
@@ -1317,6 +1396,12 @@ function nativeObservedTarget(
 }
 
 function preflights(model: EnvironmentModel): PlanPreflight[] {
+  if (
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0
+  ) {
+    return [];
+  }
   return [
     {
       detail:
@@ -1328,7 +1413,11 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
     ...model.agents.map((agent): PlanPreflight => ({
       id: `agent:${agent.id}`,
       required: true,
-      status: agent.state === "unsupported" ? "unsupported" : "ready",
+      status: agent.state === "unsupported"
+        ? "unsupported"
+        : model.profile.compositionOnly === true && agent.state !== "ready"
+          ? "unverifiable"
+          : "ready",
       detail: agent.detail,
     })),
     ...model.packages.map((entry): PlanPreflight => ({
@@ -1408,6 +1497,12 @@ function planActions(
     Pick<EnvironmentOrchestratorOptions, "env" | "os" | "repositoryRoot">
   >,
 ): PlanAction[] {
+  if (
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0
+  ) {
+    return [];
+  }
   const reconcilerSource = resolve(
     options.repositoryRoot,
     "dist",
@@ -1525,9 +1620,7 @@ function planActions(
       kind: "acquire",
       payload: {
         agentId: agent.id,
-        operation: agent.state === "ready"
-          ? "verify-agent"
-          : "acquire-agent",
+        operation: plannedAgentOperation(model.profile, agent),
         ownershipKind: "executable",
         ownershipScope: agent.ownership === "external" ? "external" : "managed",
         sourceDigest: artifact.executable.sha256,
@@ -1864,7 +1957,7 @@ function optionalGapIds(preflight: readonly PlanPreflight[]): string[] {
 
 function previewCommand(model: EnvironmentModel): string {
   return `omh setup --profile ${model.profile.id} --agents ${
-    model.selectedAgents.join(",")
+    model.selectedAgents.join(",") || "none"
   } --root ${JSON.stringify(model.stateRoot)}`;
 }
 
@@ -2071,6 +2164,17 @@ function runtimeExecutable(
   model: EnvironmentModel,
   options: ReturnType<typeof normalizedOptions>,
 ): string {
+  if (model.profile.compositionOnly === true) {
+    const agent = model.agents.find(({ id }) => id === runtimeId);
+    if (
+      agent?.state !== "ready"
+      || agent.ownership !== "external"
+      || agent.executablePath === null
+    ) {
+      throw new Error(`${runtimeId} caller-provided executable is unavailable`);
+    }
+    return agent.executablePath;
+  }
   const adapter = model.adapters.find(({ id }) => id === runtimeId);
   if (!adapter) throw new Error(`missing selected runtime adapter: ${runtimeId}`);
   const managed = managedRuntimePath(model.stateRoot, adapter, model.platformId);
@@ -3816,7 +3920,9 @@ export function inspectEnvironment(
   const payloadOwnership = receipt.ownership.filter(
     ({ id, kind }) => id === "plugin:runtime-package" && kind === "directory",
   );
-  let payloadReady = false;
+  let payloadReady =
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0;
   if (
     payloadOwnership.length === 1
     && payloadOwnership[0]?.target === model.managedPayload.activeRoot

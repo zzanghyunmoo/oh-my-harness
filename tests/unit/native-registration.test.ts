@@ -194,7 +194,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
                 id: "oh-my-harness@oh-my-harness",
                 installPath: installedRoot,
                 scope: "user",
-                version: "0.2.0",
+                version: "0.3.0",
               }],
         );
       }

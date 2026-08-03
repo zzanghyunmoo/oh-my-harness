@@ -194,6 +194,7 @@ export interface EnvironmentProfile {
   kind: "environment-profile";
   id: BuiltInProfileId | string;
   displayName: string;
+  compositionOnly?: true;
   selectedAgents: AgentId[];
   packages: {
     required: PackageId[];

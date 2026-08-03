@@ -76,6 +76,20 @@
     "legacyDesiredState": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "profileId": { "const": "mds-host" } }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "selectedAgents": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ],
       "required": ["profileId", "selectedAgents"],
       "properties": {
         "profileId": {
@@ -93,6 +107,20 @@
     "explicitDesiredState": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "profileId": { "const": "mds-host" } }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "selectedAgents": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ],
       "required": [
         "profileId",
         "selectedAgents",
@@ -165,7 +193,6 @@
     },
     "selectedAgents": {
       "type": "array",
-      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "enum": ["claude-code", "opencode", "codex"]
