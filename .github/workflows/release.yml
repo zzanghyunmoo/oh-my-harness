@@ -81,36 +81,218 @@ jobs:
         with:
           name: oh-my-harness-${{ github.sha }}
           path: release-dist
-      - name: Reject an existing release or asset and publish once
+      - name: Stage, verify, and atomically publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "release ${GITHUB_REF_NAME} already exists; refusing to overwrite" >&2
-            exit 1
+          archive_name="oh-my-harness-${GITHUB_REF_NAME}.tgz"
+          sidecar_name="oh-my-harness-${GITHUB_REF_NAME}.release.json"
+          archive_path="release-dist/${archive_name}"
+          sidecar_path="release-dist/${sidecar_name}"
+          release_title="Oh My Harness ${GITHUB_REF_NAME}"
+          draft_marker="<!-- oh-my-harness-release-draft:v1 tag=${GITHUB_REF_NAME} source=${GITHUB_SHA} -->"
+          scratch_directory="$(mktemp -d)"
+          draft_id=""
+          publish_transition_started=false
+
+          cleanup_draft() {
+            status=$?
+            trap - EXIT
+            if [[ -n "${draft_id}" && "${publish_transition_started}" != true ]]; then
+              if gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" \
+                  >"${scratch_directory}/cleanup-release.json" \
+                && DRAFT_ID="${draft_id}" DRAFT_MARKER="${draft_marker}" \
+                  node --input-type=module -e '
+                    import { readFileSync } from "node:fs";
+                    const release = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                    if (release.id !== Number(process.env.DRAFT_ID)
+                      || release.tag_name !== process.env.GITHUB_REF_NAME
+                      || release.body !== process.env.DRAFT_MARKER
+                      || release.draft !== true) {
+                      process.exit(1);
+                    }
+                  ' "${scratch_directory}/cleanup-release.json"; then
+                gh api -X DELETE \
+                  "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" >/dev/null \
+                  || echo "failed to remove unpublished release draft ${draft_id}; the next run will recover the marked draft" >&2
+              else
+                echo "release ${draft_id} is not the exact owned draft; refusing cleanup deletion" >&2
+              fi
+            fi
+            rm -rf "${scratch_directory}"
+            exit "${status}"
+          }
+          trap cleanup_draft EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          test -f "${archive_path}"
+          test -f "${sidecar_path}"
+
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            >"${scratch_directory}/releases.json"
+          existing_release="$(DRAFT_MARKER="${draft_marker}" RELEASE_TITLE="${release_title}" \
+            node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const pages = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const matches = pages.flat().filter(
+              (release) => release.tag_name === process.env.GITHUB_REF_NAME,
+            );
+            if (matches.length > 1) {
+              throw new Error("tag has " + matches.length + " release records");
+            }
+            if (matches.length === 0) {
+              process.stdout.write("none");
+            } else {
+              const release = matches[0];
+              const owned = release.body === process.env.DRAFT_MARKER
+                && release.name === process.env.RELEASE_TITLE
+                && release.prerelease === false;
+              process.stdout.write(
+                String(release.id) + "\t" + String(release.draft) + "\t"
+                  + String(owned),
+              );
+            }
+          ' "${scratch_directory}/releases.json")"
+          if [[ "${existing_release}" != none ]]; then
+            IFS=$'\t' read -r existing_id existing_draft existing_owned \
+              <<<"${existing_release}"
+            [[ "${existing_id}" =~ ^[0-9]+$ ]]
+            if [[ "${existing_draft}" != true ]]; then
+              echo "release ${GITHUB_REF_NAME} is already published; refusing to overwrite or delete" >&2
+              exit 1
+            fi
+            if [[ "${existing_owned}" != true ]]; then
+              echo "release ${GITHUB_REF_NAME} stale draft does not carry the exact current-source marker; refusing to delete" >&2
+              exit 1
+            fi
+            gh api -X DELETE \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_id}" >/dev/null
           fi
-          test -f "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz"
-          test -f "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json"
-          node --input-type=module -e '
+
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            -f name="${release_title}" \
+            -f body="${draft_marker}" \
+            -F draft=true \
+            -F prerelease=false \
+            >"${scratch_directory}/created-release.json"
+          draft_id="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const release = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            if (!Number.isSafeInteger(release.id) || release.id <= 0) {
+              throw new Error("created release has no valid numeric id");
+            }
+            process.stdout.write(String(release.id));
+          ' "${scratch_directory}/created-release.json")"
+          [[ "${draft_id}" =~ ^[0-9]+$ ]]
+          DRAFT_MARKER="${draft_marker}" RELEASE_TITLE="${release_title}" \
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const release = JSON.parse(readFileSync(process.argv[1], "utf8"));
+              if (release.draft !== true
+                || release.tag_name !== process.env.GITHUB_REF_NAME
+                || release.name !== process.env.RELEASE_TITLE
+                || release.body !== process.env.DRAFT_MARKER
+                || release.prerelease !== false) {
+                throw new Error("created release draft does not match its exact source marker");
+              }
+            ' "${scratch_directory}/created-release.json"
+
+          gh release upload "${GITHUB_REF_NAME}" \
+            "${archive_path}" \
+            "${sidecar_path}" \
+            --repo "${GITHUB_REPOSITORY}"
+
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases/${draft_id}/assets?per_page=100" \
+            >"${scratch_directory}/assets.json"
+          asset_ids="$(node --input-type=module -e '
+            import { readFileSync, statSync } from "node:fs";
+            import { basename } from "node:path";
+            const pages = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const assets = pages.flat();
+            if (assets.length !== 2) {
+              throw new Error("uploaded release has " + assets.length
+                + " assets, expected exactly 2");
+            }
+            const expected = process.argv.slice(2).map((path) => ({
+              name: basename(path),
+              size: statSync(path).size,
+            }));
+            const ordered = expected.map(({ name, size }) => {
+              const matches = assets.filter((asset) => asset.name === name);
+              if (matches.length !== 1
+                || matches[0].size !== size
+                || matches[0].state !== "uploaded"
+                || !Number.isSafeInteger(matches[0].id)) {
+                throw new Error("uploaded asset " + name
+                  + " has unexpected identity");
+              }
+              return matches[0].id;
+            });
+            process.stdout.write(ordered.join("\t"));
+          ' "${scratch_directory}/assets.json" "${archive_path}" "${sidecar_path}")"
+          IFS=$'\t' read -r archive_asset_id sidecar_asset_id <<<"${asset_ids}"
+          [[ "${archive_asset_id}" =~ ^[0-9]+$ ]]
+          [[ "${sidecar_asset_id}" =~ ^[0-9]+$ ]]
+
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${archive_asset_id}" \
+            >"${scratch_directory}/${archive_name}"
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${sidecar_asset_id}" \
+            >"${scratch_directory}/${sidecar_name}"
+          ARCHIVE_NAME="${archive_name}" node --input-type=module -e '
             import { createHash } from "node:crypto";
             import { readFileSync } from "node:fs";
-            const tag = process.env.GITHUB_REF_NAME;
-            const archivePath = "release-dist/oh-my-harness-" + tag + ".tgz";
-            const sidecarPath = "release-dist/oh-my-harness-" + tag + ".release.json";
-            const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
-            const archive = readFileSync(archivePath);
-            const digest = createHash("sha256").update(archive).digest("hex");
-            if (sidecar.archive?.filename !== ("oh-my-harness-" + tag + ".tgz")
-              || sidecar.archive?.size !== archive.length
-              || sidecar.archive?.sha256 !== digest) {
+            const [
+              localArchivePath,
+              localSidecarPath,
+              downloadedArchivePath,
+              downloadedSidecarPath,
+            ] = process.argv.slice(1);
+            const localArchive = readFileSync(localArchivePath);
+            const localSidecar = readFileSync(localSidecarPath);
+            const downloadedArchive = readFileSync(downloadedArchivePath);
+            const downloadedSidecar = readFileSync(downloadedSidecarPath);
+            if (!downloadedArchive.equals(localArchive)) {
+              throw new Error("downloaded archive bytes differ from the uploaded source");
+            }
+            if (!downloadedSidecar.equals(localSidecar)) {
+              throw new Error("downloaded sidecar bytes differ from the uploaded source");
+            }
+            const sidecar = JSON.parse(downloadedSidecar.toString("utf8"));
+            const archiveDigest = createHash("sha256")
+              .update(downloadedArchive)
+              .digest("hex");
+            if (sidecar.archive?.filename !== process.env.ARCHIVE_NAME
+              || sidecar.archive?.size !== downloadedArchive.length
+              || sidecar.archive?.sha256 !== archiveDigest
+              || sidecar.package?.tag !== process.env.GITHUB_REF_NAME
+              || sidecar.source?.commit !== process.env.GITHUB_SHA) {
               throw new Error("downloaded release assets do not match their sidecar");
             }
-          '
-          gh release create "${GITHUB_REF_NAME}" \
-            "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz" \
-            "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --notes "Verified immutable Oh My Harness ${GITHUB_REF_NAME} artifact." \
-            --title "Oh My Harness ${GITHUB_REF_NAME}" \
-            --verify-tag
+          ' \
+            "${archive_path}" \
+            "${sidecar_path}" \
+            "${scratch_directory}/${archive_name}" \
+            "${scratch_directory}/${sidecar_name}"
+
+          publish_transition_started=true
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" \
+            -F draft=false \
+            -f body="Verified immutable Oh My Harness ${GITHUB_REF_NAME} artifact." \
+            >"${scratch_directory}/published-release.json"
+          DRAFT_ID="${draft_id}" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const release = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            if (release.id !== Number(process.env.DRAFT_ID)
+              || release.tag_name !== process.env.GITHUB_REF_NAME
+              || release.draft !== false) {
+              throw new Error("release publish transition returned unexpected identity");
+            }
+          ' "${scratch_directory}/published-release.json"

@@ -109,7 +109,7 @@ test("cross-platform CI checks the committed patch against its event base", () =
   );
 });
 
-test("release workflow pins actions, isolates write permission, and refuses overwrite", () => {
+test("release workflow publishes one verified draft atomically", () => {
   const workflow = readFileSync(
     new URL("../../.github/workflows/release.yml", import.meta.url),
     "utf8",
@@ -142,8 +142,27 @@ test("release workflow pins actions, isolates write permission, and refuses over
     assert.match(workflow, new RegExp(`npm run ${gate.replaceAll(":", "\\:")}`));
   }
   assert.match(workflow, /downloaded release assets do not match their sidecar/u);
-  assert.match(workflow, /already exists; refusing to overwrite/u);
-  assert.match(workflow, /gh release create/u);
+  assert.match(workflow, /already published; refusing to overwrite or delete/u);
+  assert.match(workflow, /oh-my-harness-release-draft:v1/u);
+  assert.match(workflow, /stale draft does not carry the exact current-source marker/u);
+  assert.match(workflow, /trap cleanup_draft EXIT/u);
+  assert.match(
+    workflow,
+    /gh api -X POST "repos\/\$\{GITHUB_REPOSITORY\}\/releases"/u,
+  );
+  assert.match(workflow, /-F draft=true/u);
+  assert.match(workflow, /gh release upload "\$\{GITHUB_REF_NAME\}"/u);
+  assert.match(
+    workflow,
+    /uploaded release has [\s\S]*? assets, expected exactly 2/u,
+  );
+  assert.match(workflow, /Accept: application\/octet-stream/u);
+  assert.match(workflow, /downloaded archive bytes differ from the uploaded source/u);
+  assert.match(workflow, /sidecar\.archive\?\.sha256 !== archiveDigest/u);
+  assert.match(workflow, /release\.draft !== true/u);
+  assert.match(workflow, /publish_transition_started=true/u);
+  assert.equal((workflow.match(/-F draft=false/gu) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /gh release create/u);
 });
 
 test("packed artifact contains compiled entrypoints, runtime assets, and production closure only", () => {
