@@ -20,7 +20,6 @@ import {
   applyEdits,
   getNodeValue,
   modify,
-  parse as parseJsonc,
   parseTree,
   type ParseError,
 } from "jsonc-parser";
@@ -78,10 +77,38 @@ export interface ClaudeManagedRuntimeRegistrationState {
   readonly plugin: ClaudeRegistrationState;
 }
 
+export type ManagedRuntimeRegistrationDisposition =
+  | "missing"
+  | "ready"
+  | "collision";
+
+export function managedRuntimeRegistrationDisposition(
+  state: ClaudeManagedRuntimeRegistrationState,
+): ManagedRuntimeRegistrationDisposition {
+  if (state.marketplace === "ready" && state.plugin === "ready") {
+    return "ready";
+  }
+  if (state.marketplace === "missing" && state.plugin === "missing") {
+    return "missing";
+  }
+  return "collision";
+}
+
 export interface OpenCodePackageAddonRegistration {
   readonly packageName: "oh-my-openagent";
   readonly spec: string;
 }
+
+export type OpenCodeManagedRuntimeRegistrationState =
+  | "missing"
+  | "ready"
+  | "previous"
+  | "collision";
+
+export type OpenCodeManagedRuntimeRegistration = Pick<
+  ManagedNativeRegistration,
+  "activeRoot" | "previousActiveRoot"
+>;
 
 export interface CodexMarketplaceAddonRegistration {
   readonly manifestPath: ".agents/plugins/marketplace.json";
@@ -955,66 +982,39 @@ export function codexRegistrationReady(
 }
 
 export function registerOpenCodeRuntime(
-  registration: ManagedNativeRegistration,
+  registration: OpenCodeManagedRuntimeRegistration,
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
 ): void {
-  const configPath = openCodeConfigPath(env, platform);
-  const current = existsSync(configPath)
-    ? readBoundedRegularFile(configPath, MAX_OPEN_CODE_CONFIG_BYTES)
-        .toString("utf8")
-    : "{}\n";
-  const parsed = parseJsonc(current) as { readonly plugin?: unknown } | undefined;
-  if (
-    parsed === undefined
-    || (parsed.plugin !== undefined && !Array.isArray(parsed.plugin))
-  ) {
-    throw new Error("OpenCode plugin configuration is not an array");
-  }
-  const sourcePath = resolve(
-    registration.activeRoot,
-    ".opencode",
-    "plugins",
-    "oh-my-harness.js",
+  const { configPath, current, plugins } = openCodePluginEntries(env, platform);
+  const state = classifyOpenCodeManagedRuntimeRegistration(
+    plugins,
+    registration,
   );
-  const pluginUrl = pathToFileURL(sourcePath).href;
-  const plugins = Array.isArray(parsed.plugin) ? parsed.plugin : [];
-  if (plugins.some((entry) => typeof entry !== "string")) {
-    throw new Error("OpenCode plugin configuration contains a non-string entry");
+  if (state === "collision") {
+    throw new Error(
+      "oh-my-harness collides with an existing OpenCode plugin registration",
+    );
   }
-  const stringPlugins = plugins as string[];
-  const previousSourcePath = registration.previousActiveRoot === undefined
+  if (state === "ready") return;
+
+  const currentSources = openCodeManagedRuntimeSources(registration.activeRoot);
+  const previousSources = registration.previousActiveRoot === undefined
     ? null
-    : resolve(
-        registration.previousActiveRoot,
-        ".opencode",
-        "plugins",
-        "oh-my-harness.js",
-      );
-  const previousPluginUrl = previousSourcePath === null
-    ? null
-    : pathToFileURL(previousSourcePath).href;
-  const withoutPrevious = stringPlugins.filter(
-    (entry) =>
-      entry !== previousSourcePath
-      && entry !== previousPluginUrl,
-  );
-  if (
-    withoutPrevious.includes(pluginUrl)
-    || withoutPrevious.includes(sourcePath)
-  ) {
-    if (withoutPrevious.length !== stringPlugins.length) {
-      const edits = modify(current, ["plugin"], withoutPrevious, {
-        formattingOptions: { insertSpaces: true, tabSize: 2 },
-      });
-      atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
-    }
-    return;
-  }
-  const edits = modify(current, ["plugin"], [...withoutPrevious, pluginUrl], {
+    : openCodeManagedRuntimeSources(registration.previousActiveRoot);
+  const preserved = state === "previous" && previousSources !== null
+    ? plugins.filter((entry) => !previousSources.accepted.has(entry))
+    : [...plugins];
+  const edits = modify(current, ["plugin"], [...preserved, currentSources.url], {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   });
   atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
+  if (
+    inspectOpenCodeManagedRuntimeRegistration(registration, env, platform)
+    !== "ready"
+  ) {
+    throw new Error("OpenCode native registration could not be verified");
+  }
 }
 
 function openCodePluginEntries(
@@ -1049,18 +1049,84 @@ function openCodePluginEntries(
     || pluginProperties.length > 1
     || parsed === undefined
     || (parsed.plugin !== undefined && !Array.isArray(parsed.plugin))
-    || (
-      Array.isArray(parsed.plugin)
-      && parsed.plugin.some((entry) => typeof entry !== "string")
-    )
   ) {
     throw new Error("OpenCode plugin configuration is not a string array");
+  }
+  if (
+    Array.isArray(parsed.plugin)
+    && parsed.plugin.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error("OpenCode plugin configuration contains a non-string entry");
   }
   return {
     configPath,
     current,
     plugins: (parsed.plugin ?? []) as readonly string[],
   };
+}
+
+function openCodeManagedRuntimeSources(root: string): {
+  readonly accepted: ReadonlySet<string>;
+  readonly url: string;
+} {
+  const path = resolve(
+    root,
+    ".opencode",
+    "plugins",
+    "oh-my-harness.js",
+  );
+  const url = pathToFileURL(path).href;
+  return {
+    accepted: new Set([path, url]),
+    url,
+  };
+}
+
+function isOpenCodeManagedRuntimeEntry(value: string): boolean {
+  const [withoutSuffix = value] = value.split(/[?#]/u, 1);
+  const normalized = withoutSuffix.replaceAll("\\", "/");
+  return normalized === ".opencode/plugins/oh-my-harness.js"
+    || normalized === "./.opencode/plugins/oh-my-harness.js"
+    || normalized.endsWith("/.opencode/plugins/oh-my-harness.js");
+}
+
+function classifyOpenCodeManagedRuntimeRegistration(
+  plugins: readonly string[],
+  registration: OpenCodeManagedRuntimeRegistration,
+): OpenCodeManagedRuntimeRegistrationState {
+  const matches = plugins.filter(isOpenCodeManagedRuntimeEntry);
+  if (matches.length === 0) return "missing";
+  if (matches.length !== 1) return "collision";
+
+  const [match] = matches;
+  if (match === undefined) return "collision";
+  if (
+    openCodeManagedRuntimeSources(registration.activeRoot).accepted.has(match)
+  ) {
+    return "ready";
+  }
+  if (
+    registration.previousActiveRoot !== undefined
+    && openCodeManagedRuntimeSources(
+      registration.previousActiveRoot,
+    ).accepted.has(match)
+  ) {
+    return "previous";
+  }
+  return "collision";
+}
+
+export function inspectOpenCodeManagedRuntimeRegistration(
+  registration: OpenCodeManagedRuntimeRegistration,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): OpenCodeManagedRuntimeRegistrationState {
+  try {
+    const { plugins } = openCodePluginEntries(env, platform);
+    return classifyOpenCodeManagedRuntimeRegistration(plugins, registration);
+  } catch {
+    return "collision";
+  }
 }
 
 function isOpenCodeOmoSpec(value: string): boolean {
@@ -1167,30 +1233,11 @@ export function openCodeRegistrationReady(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
 ): boolean {
-  const configPath = openCodeConfigPath(env, platform);
-  if (!existsSync(configPath)) return false;
-  try {
-    const value = parseJsonc(
-      readBoundedRegularFile(configPath, MAX_OPEN_CODE_CONFIG_BYTES)
-        .toString("utf8"),
-    ) as { readonly plugin?: unknown } | undefined;
-    if (
-      !Array.isArray(value?.plugin)
-      || value.plugin.some((entry) => typeof entry !== "string")
-    ) {
-      return false;
-    }
-    const source = resolve(
-      runtimePackageRoot,
-      ".opencode",
-      "plugins",
-      "oh-my-harness.js",
-    );
-    return value.plugin.includes(source)
-      || value.plugin.includes(pathToFileURL(source).href);
-  } catch {
-    return false;
-  }
+  return inspectOpenCodeManagedRuntimeRegistration(
+    { activeRoot: runtimePackageRoot },
+    env,
+    platform,
+  ) === "ready";
 }
 
 interface CodexMarketplaceObservation {

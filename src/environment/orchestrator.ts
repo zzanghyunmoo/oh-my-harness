@@ -139,6 +139,8 @@ import {
   inspectClaudeOfficialPluginRegistration,
   inspectClaudeManagedRuntimeRegistration,
   inspectCodexManagedRuntimeRegistration,
+  inspectOpenCodeManagedRuntimeRegistration,
+  managedRuntimeRegistrationDisposition,
   inspectOpenCodeSkillRegistration,
   inspectOpenCodePackageAddon,
   openCodeSkillsReady,
@@ -154,6 +156,8 @@ import {
   registerOpenCodePackageAddon,
   registerOpenCodeSkills,
   registerOpenCodeRuntime,
+  type ManagedRuntimeRegistrationDisposition,
+  type OpenCodeManagedRuntimeRegistrationState,
   type OpenCodeSkillRegistration,
   type CodexMarketplaceAddonRegistration,
 } from "./native-registration.js";
@@ -164,12 +168,6 @@ import {
   plannedAgentOperation,
   type AgentEnvironmentStatus,
 } from "./runtime-policy.js";
-
-export {
-  inspectCompositionAgent,
-  plannedAgentOperation,
-} from "./runtime-policy.js";
-export type { AgentEnvironmentStatus } from "./runtime-policy.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
 const MARKER_SCHEMA_VERSION = "2.0.0";
@@ -1258,7 +1256,111 @@ function nativeObservedTarget(
     : marker;
 }
 
-function preflights(model: EnvironmentModel): PlanPreflight[] {
+function describeOpenCodeNativeRegistration(
+  state: OpenCodeManagedRuntimeRegistrationState,
+  hasPrevious: boolean,
+): string {
+  switch (state) {
+    case "collision":
+      return "OpenCode configuration has a malformed, duplicate, or foreign oh-my-harness registration";
+    case "previous":
+      return "OpenCode registration exactly matches the prior managed payload";
+    case "ready":
+      return "OpenCode registration exactly matches the current managed payload";
+    case "missing":
+      return hasPrevious
+        ? "OpenCode prior managed registration is missing"
+        : "OpenCode registration can be installed additively";
+  }
+}
+
+function describeCommandNativeRegistration(
+  runtimeName: "Claude" | "Codex",
+  disposition: ManagedRuntimeRegistrationDisposition,
+  hasPrevious: boolean,
+): string {
+  if (hasPrevious) {
+    return disposition === "ready"
+      ? `${runtimeName} registration exactly matches the prior managed payload`
+      : `${runtimeName} registration no longer matches the prior managed payload`;
+  }
+  switch (disposition) {
+    case "ready":
+      return `${runtimeName} registration exactly matches the current managed payload`;
+    case "missing":
+      return `${runtimeName} registration can be installed additively`;
+    case "collision":
+      return `${runtimeName} registration is malformed, partial, duplicate, foreign, or missing from its prior managed payload`;
+  }
+}
+
+function nativeRuntimePreflights(
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): PlanPreflight[] {
+  return model.selectedAgents.flatMap((runtimeId): PlanPreflight[] => {
+    const previousActiveRoot = previousManagedPayloadRoot(model, runtimeId);
+    if (runtimeId === "opencode") {
+      const state = inspectOpenCodeManagedRuntimeRegistration(
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          ...(previousActiveRoot === null ? {} : { previousActiveRoot }),
+        },
+        options.env,
+        options.os,
+      );
+      const accepted = state === "ready"
+        || (previousActiveRoot === null && state === "missing")
+        || (previousActiveRoot !== null && state === "previous");
+      return [{
+        detail: describeOpenCodeNativeRegistration(
+          state,
+          previousActiveRoot !== null,
+        ),
+        id: "native-registration:opencode",
+        required: true,
+        status: accepted ? "ready" : "unverifiable",
+      }];
+    }
+
+    const agent = model.agents.find(({ id }) => id === runtimeId);
+    if (agent?.state !== "ready" || agent.executablePath === null) return [];
+    const executable = agent.executablePath;
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const inspect = runtimeId === "claude-code"
+      ? inspectClaudeManagedRuntimeRegistration
+      : inspectCodexManagedRuntimeRegistration;
+    const observation = inspect(
+      executable,
+      {
+        activeRoot: previousActiveRoot ?? model.managedPayload.activeRoot,
+        receiptPath: model.receiptPath,
+      },
+      nativeRun,
+    );
+    const disposition = managedRuntimeRegistrationDisposition(observation);
+    const accepted = previousActiveRoot === null
+      ? disposition !== "collision"
+      : disposition === "ready";
+    const runtimeName = runtimeId === "claude-code" ? "Claude" : "Codex";
+    return [{
+      detail: describeCommandNativeRegistration(
+        runtimeName,
+        disposition,
+        previousActiveRoot !== null,
+      ),
+      id: `native-registration:${runtimeId}`,
+      required: true,
+      status: accepted ? "ready" : "unverifiable",
+    }];
+  });
+}
+
+function preflights(
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): PlanPreflight[] {
   if (
     model.profile.compositionOnly === true
     && model.selectedAgents.length === 0
@@ -1339,6 +1441,7 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           ? "unverifiable"
           : "ready",
     })),
+    ...nativeRuntimePreflights(model, options),
     ...cleanPreflights(model),
     ...(model.toolRouteRequested
       ? [{
@@ -1862,7 +1965,7 @@ function buildEnvironmentPreview(
   readonly preview: EnvironmentPreview;
 } {
   const model = buildModel(selection, normalized);
-  const checks = preflights(model);
+  const checks = preflights(model, normalized);
   const blockers = blockingIds(checks);
   const actions = blockers.length === 0 ? planActions(model, normalized) : [];
   const plan = blockers.length === 0
@@ -3350,16 +3453,16 @@ function prepareActionRollback(
     if (previousActiveRoot !== null) {
       const nativeRun = (command: string, args: readonly string[]) =>
         runCommand(command, args, options);
+      const state = inspectClaudeManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: previousActiveRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
       if (
-        !claudeRegistrationReady(
-          executable,
-          {
-            activeRoot: previousActiveRoot,
-            receiptPath: model.receiptPath,
-          },
-          [],
-          nativeRun,
-        )
+        managedRuntimeRegistrationDisposition(state) !== "ready"
       ) {
         throw new Error(
           "Claude managed registration no longer matches the prior receipt",
@@ -3383,6 +3486,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
+      const disposition = managedRuntimeRegistrationDisposition(state);
       if (state.marketplace === "collision") {
         throw new Error(
           "Claude marketplace oh-my-harness points to another source",
@@ -3393,12 +3497,12 @@ function prepareActionRollback(
           "oh-my-harness@oh-my-harness collides with an existing user-owned Claude plugin",
         );
       }
-      if (state.marketplace !== state.plugin) {
+      if (disposition === "collision") {
         throw new Error(
           "Claude managed runtime registration is partial and cannot be adopted",
         );
       }
-      if (state.marketplace === "missing") {
+      if (disposition === "missing") {
         native = {
           activeRoot: model.managedPayload.activeRoot,
           executablePath: executable,
@@ -3426,7 +3530,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
-      if (state.marketplace !== "ready" || state.plugin !== "ready") {
+      if (managedRuntimeRegistrationDisposition(state) !== "ready") {
         throw new Error(
           "Codex managed registration no longer matches the prior receipt",
         );
@@ -3447,6 +3551,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
+      const disposition = managedRuntimeRegistrationDisposition(state);
       if (state.marketplace === "collision") {
         throw new Error(
           "Codex marketplace oh-my-harness points to another root",
@@ -3457,12 +3562,12 @@ function prepareActionRollback(
           "oh-my-harness@oh-my-harness collides with an existing Codex plugin registration",
         );
       }
-      if (state.marketplace !== state.plugin) {
+      if (disposition === "collision") {
         throw new Error(
           "Codex managed runtime registration is partial and cannot be adopted",
         );
       }
-      if (state.marketplace === "missing") {
+      if (disposition === "missing") {
         native = {
           activeRoot: model.managedPayload.activeRoot,
           executablePath: executable,

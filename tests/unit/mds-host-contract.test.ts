@@ -14,7 +14,7 @@ import test from "node:test";
 import {
   inspectCompositionAgent,
   plannedAgentOperation,
-} from "../../dist/environment/orchestrator.js";
+} from "../../dist/environment/runtime-policy.js";
 
 const readyExternal = {
   executablePath: "/trusted/bin/codex",

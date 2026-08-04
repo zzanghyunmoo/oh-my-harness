@@ -17,11 +17,28 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
-import { hashManagedDirectory } from "../../dist/install/managed-payload.js";
+import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import {
+  hashManagedDirectory,
+  inspectManagedRuntimePayload,
+} from "../../dist/install/managed-payload.js";
 import { gitTreeSha1 } from "../../dist/install/official-marketplace.js";
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function assertCliNativeRegistrationBlocked(
+  result: Awaited<ReturnType<typeof runOmh>>,
+  agentId: "claude-code" | "opencode" | "codex",
+): void {
+  assert.equal(result.state, "blocked");
+  assert.equal(result.preview?.plan, null);
+  assert.equal(result.preview?.digest, null);
+  assert.equal(
+    result.preview?.blockers.includes(`native-registration:${agentId}`),
+    true,
+  );
 }
 
 function createExecutable(directory: string, command: string): string {
@@ -146,6 +163,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   let pluginInstalled = false;
   let managedPluginVersion = "0.3.0";
   let managedMarketplaceRoot: string | null = null;
+  let codexManagedMarketplaceRoot: string | null = null;
   const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
 
@@ -207,6 +225,8 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     );
 
     const claudePath = createExecutable(binaryRoot, "claude");
+    const openCodePath = createExecutable(binaryRoot, "opencode");
+    const codexPath = createExecutable(binaryRoot, "codex");
     for (const command of [
       "linear",
       "ntn",
@@ -225,25 +245,32 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       createExecutable(binaryRoot, command);
     }
 
-    const descriptorPath = join(
-      repositoryRoot,
-      "harness",
-      "adapters",
-      "claude-code.json",
-    );
-    const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8")) as {
-      platforms: Array<{
-        architecture: string;
-        os: string;
-        executable: { sha256: string };
-      }>;
-    };
-    const platform = descriptor.platforms.find(
-      (entry) => entry.os === process.platform && entry.architecture === process.arch,
-    );
-    assert.ok(platform, `fixture has no ${process.platform}-${process.arch} adapter`);
-    platform.executable.sha256 = sha256(claudePath);
-    writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+    for (const [adapterId, executablePath] of [
+      ["claude-code", claudePath],
+      ["opencode", openCodePath],
+      ["codex", codexPath],
+    ] as const) {
+      const descriptorPath = join(
+        repositoryRoot,
+        "harness",
+        "adapters",
+        `${adapterId}.json`,
+      );
+      const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8")) as {
+        platforms: Array<{
+          architecture: string;
+          os: string;
+          executable: { sha256: string };
+        }>;
+      };
+      const platform = descriptor.platforms.find(
+        (entry) =>
+          entry.os === process.platform && entry.architecture === process.arch,
+      );
+      assert.ok(platform, `fixture has no ${process.platform}-${process.arch} adapter`);
+      platform.executable.sha256 = sha256(executablePath);
+      writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+    }
 
     const env = {
       ...process.env,
@@ -269,6 +296,22 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       runCommand(command: string, args: readonly string[]) {
         calls.push({ command, args: [...args] });
         const invocation = args.join(" ");
+        if (command === codexPath) {
+          if (invocation === "plugin marketplace list --json") {
+            return JSON.stringify({
+              marketplaces: codexManagedMarketplaceRoot === null
+                ? []
+                : [{
+                    name: "oh-my-harness",
+                    root: codexManagedMarketplaceRoot,
+                  }],
+            });
+          }
+          if (invocation === "plugin list --json") {
+            return JSON.stringify({ installed: [] });
+          }
+          throw new Error(`unexpected Codex mutation: ${invocation}`);
+        }
         if (invocation === "plugin marketplace list --json") {
           return JSON.stringify([...marketplaces].map(([name, path]) => ({
             name,
@@ -331,6 +374,12 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         return "";
       },
     };
+    const mutationCount = () =>
+      calls.filter(({ args }) =>
+        /^(?:plugin marketplace add|plugin install|plugin uninstall) /u.test(
+          args.join(" "),
+        )
+      ).length;
     const hostPreview = await runOmh(
       [
         "setup",
@@ -365,6 +414,151 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     );
     assert.equal(existsSync(join(root, "host-state")), false);
 
+    const currentOnlyStateRoot = join(root, "current-only-clean-state");
+    const previousPayloadRoot = join(
+      currentOnlyStateRoot,
+      "payloads",
+      "generations",
+      "previous",
+    );
+    const currentPayload = inspectManagedRuntimePayload(
+      repositoryRoot,
+      currentOnlyStateRoot,
+    );
+    mkdirSync(join(currentPayload.activeRoot, "plugins"), { recursive: true });
+    cpSync(
+      join(repositoryRoot, "plugins", "oh-my-harness"),
+      join(currentPayload.activeRoot, "plugins", "oh-my-harness"),
+      { recursive: true },
+    );
+    const currentOnlyReceiptRoot = join(currentOnlyStateRoot, "receipts");
+    mkdirSync(currentOnlyReceiptRoot, { recursive: true });
+    writeFileSync(
+      join(currentOnlyReceiptRoot, "environment.json"),
+      `${JSON.stringify({
+        $schema: "../contracts/managed-state-receipt.schema.json",
+        appliedAt: "2026-08-04T00:00:00.000Z",
+        catalogRevision: hostPreview.preview?.catalogRevision,
+        completedActionIds: [],
+        desiredState: {
+          profileId: "mds-host",
+          selectedAgents: ["claude-code"],
+        },
+        kind: "managed-state-receipt",
+        ownership: [
+          {
+            digest: "a".repeat(64),
+            id: "plugin:runtime-package",
+            kind: "directory",
+            scope: "managed",
+            target: previousPayloadRoot,
+          },
+          {
+            digest: "b".repeat(64),
+            id: "runtime:claude-code:native",
+            kind: "registration",
+            scope: "managed",
+            target: join(
+              currentOnlyStateRoot,
+              "markers",
+              "runtimes",
+              "claude-code.json",
+            ),
+          },
+        ],
+        planDigest: "c".repeat(64),
+        runtimeReadiness: [{ agentId: "claude-code", state: "ready" }],
+        schemaVersion: "2.0.0",
+        startupConsent: {
+          addReviewedContent: true,
+          artifactClasses: ["managed-skill"],
+          channelId: "stable",
+          permissionScopes: ["workspace:read"],
+          profileId: "mds-host",
+          repairPinned: true,
+        },
+      }, null, 2)}\n`,
+    );
+    managedMarketplaceRoot = currentPayload.activeRoot;
+    marketplaces.set("oh-my-harness", currentPayload.activeRoot);
+    pluginInstalled = true;
+    const currentOnlyPreview = previewEnvironment(
+      {
+        clean: true,
+        profileId: "mds-host",
+        selectedAgents: ["claude-code"],
+        selectedPackages: [],
+        stateRoot: currentOnlyStateRoot,
+      },
+      commonOptions,
+    );
+    assert.equal(currentOnlyPreview.readiness, "blocked");
+    assert.equal(currentOnlyPreview.plan, null);
+    assert.equal(
+      currentOnlyPreview.blockers.includes(
+        "native-registration:claude-code",
+      ),
+      true,
+    );
+    assert.equal(mutationCount(), 0);
+    pluginInstalled = false;
+    managedMarketplaceRoot = null;
+    marketplaces.delete("oh-my-harness");
+
+    const openCodeConfigPath = join(
+      env.XDG_CONFIG_HOME,
+      "opencode",
+      "opencode.json",
+    );
+    const foreignOpenCodePlugin = `file://${join(
+      root,
+      "foreign",
+      ".opencode",
+      "plugins",
+      "oh-my-harness.js",
+    )}`;
+    mkdirSync(join(openCodeConfigPath, ".."), { recursive: true });
+    const foreignOpenCodeConfig = `${JSON.stringify({
+      plugin: [foreignOpenCodePlugin],
+    }, null, 2)}\n`;
+    writeFileSync(openCodeConfigPath, foreignOpenCodeConfig);
+    const openCodeStateRoot = join(root, "host-opencode-state");
+    const openCodeCollision = await runOmh(
+      [
+        "setup",
+        "--profile",
+        "mds-host",
+        "--agents",
+        "opencode",
+        "--root",
+        openCodeStateRoot,
+      ],
+      commonOptions,
+    );
+    assertCliNativeRegistrationBlocked(openCodeCollision, "opencode");
+    assert.equal(readFileSync(openCodeConfigPath, "utf8"), foreignOpenCodeConfig);
+    assert.equal(existsSync(openCodeStateRoot), false);
+    rmSync(openCodeConfigPath);
+
+    codexManagedMarketplaceRoot = join(root, "foreign-codex-marketplace");
+    const codexStateRoot = join(root, "host-codex-state");
+    const codexCollision = await runOmh(
+      [
+        "setup",
+        "--profile",
+        "mds-host",
+        "--agents",
+        "codex",
+        "--root",
+        codexStateRoot,
+      ],
+      commonOptions,
+    );
+    assertCliNativeRegistrationBlocked(codexCollision, "codex");
+    assert.equal(existsSync(codexStateRoot), false);
+    assert.equal(mutationCount(), 0);
+    codexManagedMarketplaceRoot = null;
+
     const previewArgs = [
       "setup",
       "--profile",
@@ -381,7 +575,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(first.exitCode, 2);
     assert.equal(first.preview?.digest, second.preview?.digest);
     assert.equal(existsSync(stateRoot), false);
-    assert.equal(calls.length, 0);
+    assert.equal(mutationCount(), 0);
     assert.ok(first.preview?.digest);
     const payloadAction = first.preview.plan?.actions.find(
       ({ id }) => id === "plugin:runtime-package",
@@ -398,19 +592,13 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     const userOwnedMarketplace = join(root, "user-owned-marketplace");
     mkdirSync(userOwnedMarketplace);
     marketplaces.set("oh-my-harness", userOwnedMarketplace);
-    const blockedByUserMarketplace = await runOmh(
-      [...previewArgs, "--apply", "--digest", first.preview.digest],
-      commonOptions,
+    const blockedByUserMarketplace = await runOmh(previewArgs, commonOptions);
+    assertCliNativeRegistrationBlocked(
+      blockedByUserMarketplace,
+      "claude-code",
     );
-    assert.equal(blockedByUserMarketplace.state, "partial-unready");
-    assert.match(
-      blockedByUserMarketplace.apply?.failure ?? "",
-      /Claude marketplace oh-my-harness points to another source/u,
-    );
-    assert.doesNotMatch(
-      blockedByUserMarketplace.apply?.failure ?? "",
-      /rollback failed/u,
-    );
+    assert.equal(mutationCount(), 0);
+    assert.equal(existsSync(stateRoot), false);
     assert.equal(marketplaces.get("oh-my-harness"), userOwnedMarketplace);
     assert.equal(pluginInstalled, false);
     marketplaces.delete("oh-my-harness");
@@ -430,12 +618,6 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       true,
     );
     const callsAfterApply = calls.length;
-    const mutationCount = () =>
-      calls.filter(({ args }) =>
-        /^(?:plugin marketplace add|plugin install|plugin uninstall) /u.test(
-          args.join(" "),
-        )
-      ).length;
     const mutationsAfterApply = mutationCount();
 
     const idempotentPreview = await runOmh(previewArgs, commonOptions);
@@ -485,26 +667,8 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
 
     managedPluginVersion = "9.9.9";
     const collisionPreview = await runOmh(previewArgs, commonOptions);
-    assert.ok(collisionPreview.preview?.digest);
-    const callsBeforeCollision = calls.length;
-    const collision = await runOmh(
-      [
-        ...previewArgs,
-        "--apply",
-        "--digest",
-        collisionPreview.preview.digest,
-      ],
-      commonOptions,
-    );
-    assert.equal(collision.state, "partial-unready");
-    assert.match(collision.apply?.failure ?? "", /user-owned Claude plugin/u);
+    assertCliNativeRegistrationBlocked(collisionPreview, "claude-code");
     assert.equal(mutationCount(), mutationsAfterApply);
-    assert.equal(
-      calls.slice(callsBeforeCollision).some(
-        ({ args }) => args.join(" ").startsWith("plugin uninstall "),
-      ),
-      false,
-    );
     managedPluginVersion = "0.3.0";
 
     const receiptPath = join(stateRoot, "receipts", "environment.json");
@@ -615,7 +779,6 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(repaired.envelope?.context.mode, expectedStartupMode);
     assert.equal(existsSync(payload.target), true);
 
-    const callsBeforeStale = calls.length;
     const stale = await runOmh(
       [...previewArgs, "--apply", "--digest", first.preview.digest],
       commonOptions,
@@ -624,7 +787,6 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(stale.exitCode, 4);
     assert.ok(calls.length > callsAfterApply);
     assert.equal(mutationCount(), mutationsAfterApply);
-    assert.equal(calls.length, callsBeforeStale);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
