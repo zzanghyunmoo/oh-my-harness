@@ -73,6 +73,7 @@ jobs:
             release-dist/
             dist/
             scripts/release.mjs
+            package.json
           if-no-files-found: error
           overwrite: false
           retention-days: 1

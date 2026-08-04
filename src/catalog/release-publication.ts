@@ -272,7 +272,7 @@ async function cleanupOwnedDraft(
   operations: ReleasePublicationOperations,
 ): Promise<void> {
   const observed = await operations.getRelease(releaseId);
-  if (!ownedDraft(observed, input)) {
+  if (observed.id !== releaseId || !ownedDraft(observed, input)) {
     throw new Error(
       `release ${releaseId} is not the exact owned draft; refusing cleanup deletion`,
     );
@@ -306,7 +306,7 @@ async function prepareVerifiedReleaseDraft(
           `release ${input.tag} stale draft does not carry the exact current-source marker; refusing to delete`,
         );
       }
-      await operations.deleteRelease(existing.id);
+      await cleanupOwnedDraft(existing.id, input, operations);
     }
 
     const created = await operations.createDraft({

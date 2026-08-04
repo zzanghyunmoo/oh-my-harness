@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -147,7 +149,7 @@ test("release workflow publishes one verified draft atomically", () => {
   }
   assert.match(
     workflow,
-    /path: \|\n\s+release-dist\/\n\s+dist\/\n\s+scripts\/release\.mjs/u,
+    /path: \|\n\s+release-dist\/\n\s+dist\/\n\s+scripts\/release\.mjs\n\s+package\.json/u,
   );
   assert.match(
     workflow,
@@ -158,6 +160,54 @@ test("release workflow publishes one verified draft atomically", () => {
   assert.doesNotMatch(workflow, /-F draft=false/u);
   assert.doesNotMatch(workflow, /gh release create/u);
   assert.doesNotMatch(workflow, /gh release upload/u);
+});
+
+test("publish workflow runtime closure starts without node_modules", () => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), "omh-release-runtime-"));
+  try {
+    mkdirSync(join(artifactRoot, "release-dist"));
+    mkdirSync(join(artifactRoot, "scripts"));
+    cpSync(join(REPO_ROOT, "dist"), join(artifactRoot, "dist"), {
+      recursive: true,
+    });
+    copyFileSync(
+      join(REPO_ROOT, "scripts", "release.mjs"),
+      join(artifactRoot, "scripts", "release.mjs"),
+    );
+    copyFileSync(
+      join(REPO_ROOT, "package.json"),
+      join(artifactRoot, "package.json"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(artifactRoot, "scripts", "release.mjs"),
+        "publish",
+        "owner/repository",
+        "v0.3.0",
+        "c".repeat(40),
+        "release-dist/oh-my-harness-v0.3.0.tgz",
+        "release-dist/oh-my-harness-v0.3.0.release.json",
+      ],
+      {
+        cwd: artifactRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: "" },
+        windowsHide: true,
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /requires a trusted gh executable/u);
+    assert.doesNotMatch(
+      result.stderr,
+      /ERR_MODULE_NOT_FOUND|tar-stream|Cannot use import statement/u,
+    );
+    assert.equal(existsSync(join(artifactRoot, "node_modules")), false);
+  } finally {
+    rmSync(artifactRoot, { force: true, recursive: true });
+  }
 });
 
 test("packed artifact contains compiled entrypoints, runtime assets, and production closure only", () => {

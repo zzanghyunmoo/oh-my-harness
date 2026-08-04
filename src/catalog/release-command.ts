@@ -1,18 +1,12 @@
 import { resolve } from "node:path";
 
-import {
-  buildReleaseArtifact,
-  loadReleaseSidecar,
-  resolveReleaseSourceIdentity,
-  verifyReleaseArtifact,
-  type ReleaseSidecar,
-  type ReleaseSourceIdentity,
+import type {
+  ReleaseSidecar,
+  ReleaseSourceIdentity,
 } from "./release.js";
-import {
-  githubReleaseOperations,
-  publishVerifiedRelease,
-  type ReleasePublicationInput,
-  type ReleasePublicationResult,
+import type {
+  ReleasePublicationInput,
+  ReleasePublicationResult,
 } from "./release-publication.js";
 
 export interface ReleaseCommandOperations {
@@ -27,7 +21,7 @@ export interface ReleaseCommandOperations {
   readonly loadSidecar: (
     repositoryRoot: string,
     sidecarPath: string,
-  ) => ReleaseSidecar;
+  ) => ReleaseSidecar | Promise<ReleaseSidecar>;
   readonly publishArtifact: (
     input: ReleasePublicationInput,
   ) => Promise<ReleasePublicationResult>;
@@ -35,7 +29,7 @@ export interface ReleaseCommandOperations {
   readonly resolveSourceIdentity: (
     repositoryRoot: string,
     tag: string,
-  ) => ReleaseSourceIdentity;
+  ) => ReleaseSourceIdentity | Promise<ReleaseSourceIdentity>;
   readonly verifyArtifact: (
     repositoryRoot: string,
     archivePath: string,
@@ -52,16 +46,37 @@ export interface ReleaseCommandResult {
 
 function defaultOperations(currentDirectory: string): ReleaseCommandOperations {
   return {
-    buildArtifact: buildReleaseArtifact,
-    loadSidecar: loadReleaseSidecar,
-    publishArtifact: async (input) =>
-      publishVerifiedRelease(
+    async buildArtifact(repositoryRoot, outputDirectory) {
+      const { buildReleaseArtifact } = await import("./release.js");
+      return buildReleaseArtifact(repositoryRoot, outputDirectory);
+    },
+    async loadSidecar(repositoryRoot, sidecarPath) {
+      const { loadReleaseSidecar } = await import("./release.js");
+      return loadReleaseSidecar(repositoryRoot, sidecarPath);
+    },
+    async publishArtifact(input) {
+      const { githubReleaseOperations, publishVerifiedRelease } = await import(
+        "./release-publication.js"
+      );
+      return publishVerifiedRelease(
         input,
         githubReleaseOperations(input.repository, { cwd: currentDirectory }),
-      ),
+      );
+    },
     resolvePath: (base, path) => resolve(base, path),
-    resolveSourceIdentity: resolveReleaseSourceIdentity,
-    verifyArtifact: verifyReleaseArtifact,
+    async resolveSourceIdentity(repositoryRoot, tag) {
+      const { resolveReleaseSourceIdentity } = await import("./release.js");
+      return resolveReleaseSourceIdentity(repositoryRoot, tag);
+    },
+    async verifyArtifact(repositoryRoot, archivePath, sidecar, source) {
+      const { verifyReleaseArtifact } = await import("./release.js");
+      return verifyReleaseArtifact(
+        repositoryRoot,
+        archivePath,
+        sidecar,
+        source,
+      );
+    },
   };
 }
 
@@ -95,8 +110,8 @@ export async function runReleaseCommand(
   if (command === "verify" && args.length === 2) {
     const archive = operations.resolvePath(currentDirectory, args[0]!);
     const sidecarPath = operations.resolvePath(currentDirectory, args[1]!);
-    const sidecar = operations.loadSidecar(repositoryRoot, sidecarPath);
-    const source = operations.resolveSourceIdentity(
+    const sidecar = await operations.loadSidecar(repositoryRoot, sidecarPath);
+    const source = await operations.resolveSourceIdentity(
       repositoryRoot,
       sidecar.package.tag,
     );
