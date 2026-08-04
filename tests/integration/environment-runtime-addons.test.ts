@@ -13,12 +13,14 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import { createTrustedWindowsToolPath } from "../support/trusted-windows-tools.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 test("selected OpenCode and Codex runtimes derive exact default OMO actions", () => {
   const root = mkdtempSync(join(tmpdir(), "omh-runtime-addon-preview-"));
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     const openCodeState = join(root, "opencode", "windows-native");
     const openCodeConfig = join(root, "opencode-config");
     const openCode = previewEnvironment(
@@ -34,7 +36,7 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
         arch: "x64",
         env: {
           OPENCODE_CONFIG_DIR: openCodeConfig,
-          PATH: "",
+          PATH: trustedTools,
         },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,
@@ -121,7 +123,7 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
         arch: "x64",
         env: {
           CODEX_HOME: join(root, "codex-home"),
-          PATH: process.env.PATH ?? "",
+          PATH: trustedTools,
         },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,
@@ -158,7 +160,7 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
         arch: "x64",
         env: {
           CLAUDE_CONFIG_DIR: join(root, "claude-config"),
-          PATH: process.env.PATH ?? "",
+          PATH: trustedTools,
         },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,

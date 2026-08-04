@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import { runOmh } from "../../dist/cli/main.js";
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import { createTrustedWindowsToolPath } from "../support/trusted-windows-tools.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -72,6 +73,7 @@ test("clean preview removes only exact managed ownership in the selected instanc
   const userOwned = join(root, "user-config.json");
   const content = "managed\n";
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     mkdirSync(join(stateRoot, "legacy"), { recursive: true });
     mkdirSync(receiptRoot, { recursive: true });
     writeFileSync(managed, content);
@@ -142,7 +144,10 @@ test("clean preview removes only exact managed ownership in the selected instanc
       },
       {
         arch: "x64",
-        env: { APPDATA: root, PATH: "" },
+        env: {
+          PATH: trustedTools,
+          XDG_CONFIG_HOME: join(root, "config"),
+        },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,
       },
@@ -202,6 +207,7 @@ test("OpenCode workflow preview plans native skills and blocks a user-owned coll
   const stateRoot = join(root, "instances", "windows-native");
   const configRoot = join(root, "config");
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     const selection = {
       capabilitySet: "workflow-only" as const,
       profileId: "personal",
@@ -212,7 +218,7 @@ test("OpenCode workflow preview plans native skills and blocks a user-owned coll
     };
     const options = {
       arch: "x64",
-      env: { PATH: "", XDG_CONFIG_HOME: configRoot },
+      env: { PATH: trustedTools, XDG_CONFIG_HOME: configRoot },
       os: "win32" as const,
       repositoryRoot: REPOSITORY_ROOT,
     };
@@ -258,6 +264,7 @@ test("U6 windows-native packages are WSL routes and never local installers", () 
   const root = mkdtempSync(join(tmpdir(), "omh-instance-routes-"));
   const stateRoot = join(root, "instances", "windows-native");
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     const fingerprint = "d".repeat(64);
     const preview = previewEnvironment(
       {
@@ -272,7 +279,10 @@ test("U6 windows-native packages are WSL routes and never local installers", () 
       },
       {
         arch: "x64",
-        env: { PATH: "", XDG_CONFIG_HOME: join(root, "config") },
+        env: {
+          PATH: trustedTools,
+          XDG_CONFIG_HOME: join(root, "config"),
+        },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,
       },
