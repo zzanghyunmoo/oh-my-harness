@@ -62,6 +62,7 @@ test("compiled CLI rejects contradictory options with stable errors", () => {
 test("compiled CLI preserves caller-owned mds-host agent selection", () => {
   const empty = parseOmhArguments(["setup", "--profile", "mds-host"]);
   assert.deepEqual(empty.agents, []);
+  assert.deepEqual(empty.tools, []);
 
   const explicit = parseOmhArguments([
     "setup",
@@ -80,6 +81,38 @@ test("compiled CLI preserves caller-owned mds-host agent selection", () => {
       "none",
     ]).agents,
     [],
+  );
+  assert.deepEqual(
+    parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--target",
+      "windows-native",
+    ]).tools,
+    [],
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--tools",
+      "github",
+    ]),
+    /--tools is not valid with --profile mds-host/,
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--target",
+      "windows-native",
+      "--tool-route",
+      "wsl-ubuntu",
+    ]),
+    /--tool-route is not valid with --profile mds-host/,
   );
 });
 

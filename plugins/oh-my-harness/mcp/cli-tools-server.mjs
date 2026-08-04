@@ -248,9 +248,11 @@ async function handle(message) {
   if (message.id === undefined) return;
   if (message.method === "initialize") {
     const policy = activeSessionPolicy();
-    const description = policy.mode === "ready"
-      ? `profile ${policy.profileId}: issue-tracker=${policy.bindings["issue-tracker"]}, wiki=${policy.bindings.wiki}, git=${policy.bindings.git}`
-      : `status-only (${policy.reason})`;
+    const description = policy.mode !== "ready"
+      ? `status-only (${policy.reason})`
+      : policy.bindings === null
+        ? `profile ${policy.profileId}: no workspace CLI backends (composition-only)`
+        : `profile ${policy.profileId}: issue-tracker=${policy.bindings["issue-tracker"]}, wiki=${policy.bindings.wiki}, git=${policy.bindings.git}`;
     result(message.id, {
       protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
       capabilities: { tools: { listChanged: false } },

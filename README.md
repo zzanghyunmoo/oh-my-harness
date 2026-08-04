@@ -85,8 +85,9 @@ profile, agent 선택, platform, observed pre-image로 plan을 다시 만들고 
   `--agents`로 OpenCode/Codex를 명시합니다.
 - `mds-host`: my-desk-setup이 호스트 기본 설치에 합성하는 package-free
   Composition Profile입니다. 에이전트를 고르지 않으면 안정적인 no-op이고,
-  고르면 기존 executable과 native 등록을 검증만 합니다. CLI 패키지 설치와
-  인증은 이 프로필이 수행하지 않습니다.
+  고르면 MDS 소유 executable은 exact digest로 검증만 합니다. Oh My Harness는
+  선택된 에이전트에 고정된 workflow, plugin과 OMO/LazyCodex add-on을 native
+  surface에 합성하지만 agent executable, CLI 패키지 또는 인증은 소유하지 않습니다.
 - custom: `create → validate → preview → publish`로 로컬 repository diff를
   만든 뒤 review/merge/release된 프로필만 trusted selection이 됩니다.
 

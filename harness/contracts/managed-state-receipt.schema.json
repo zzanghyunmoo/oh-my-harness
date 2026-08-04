@@ -165,6 +165,13 @@
             "type": "object",
             "properties": { "profileId": { "const": "mds-host" } }
           },
+          "then": {
+            "type": "object",
+            "properties": {
+              "selectedPackages": { "type": "array", "maxItems": 0 },
+              "toolRoutes": { "type": "array", "maxItems": 0 }
+            }
+          },
           "else": {
             "type": "object",
             "properties": {

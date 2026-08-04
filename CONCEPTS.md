@@ -22,10 +22,12 @@ into a larger machine setup without transferring package or authentication
 ownership.
 
 The released `mds-host` Composition Profile permits an empty agent selection as
-a deterministic no-op. When agents are selected, Oh My Harness verifies their
-existing executables and native registrations but does not acquire them, expose
-profile CLI backends, or automate authentication. Only the reserved `mds-host`
-ID may declare `compositionOnly: true`.
+a deterministic no-op. When agents are selected, Oh My Harness verifies the
+MDS-owned executables by exact digest, then composes its pinned workflows,
+plugins, and OMO/LazyCodex add-ons onto runtime-native surfaces. It does not
+acquire agent executables, expose profile CLI backends, or automate
+authentication. Only the reserved `mds-host` ID may declare
+`compositionOnly: true`.
 
 ### Environment Instance
 

@@ -26,6 +26,23 @@ import {
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
+function currentSourceIdentity(): { readonly commit: string; readonly tree: string } {
+  const result = spawnSync(
+    "git",
+    ["rev-parse", "HEAD^{commit}", "HEAD^{tree}"],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const [commit, tree] = result.stdout.trim().split(/\r?\n/u);
+  assert.match(commit ?? "", /^[0-9a-f]{40}$/u);
+  assert.match(tree ?? "", /^[0-9a-f]{40}$/u);
+  return { commit: commit!, tree: tree! };
+}
+
 function npmInvocation(args: readonly string[]): {
   readonly command: string;
   readonly args: readonly string[];
@@ -220,7 +237,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
   const stateRoot = join(root, "state");
   try {
     mkdirSync(arbitraryCwd);
-    const source = { commit: "a".repeat(40), tree: "b".repeat(40) };
+    const source = currentSourceIdentity();
     const built = await buildReleaseArtifact(REPO_ROOT, root, source);
     const archive = built.archivePath;
     assert.equal(basename(archive), "oh-my-harness-v0.3.0.tgz");
@@ -270,6 +287,25 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       npm_config_offline: "true",
       npm_config_registry: "http://127.0.0.1:9",
     };
+
+    const harnessInvocation = npmInvocation([
+      "run",
+      "harness:install",
+      "--",
+      "--help",
+    ]);
+    const harnessHelp = spawnSync(
+      harnessInvocation.command,
+      harnessInvocation.args,
+      {
+        cwd: packageRoot,
+        encoding: "utf8",
+        env: offlineEnvironment,
+        windowsHide: true,
+      },
+    );
+    assert.equal(harnessHelp.status, 0, harnessHelp.stderr);
+    assert.match(harnessHelp.stdout, /Usage: npm run harness:install/u);
 
     const entrypoint = join(
       packageRoot,

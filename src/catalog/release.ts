@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   constants,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +16,8 @@ import {
 import { tmpdir } from "node:os";
 import {
   basename,
+  dirname,
+  isAbsolute,
   join,
   relative,
   resolve,
@@ -23,10 +27,12 @@ import { gunzipSync } from "node:zlib";
 import tar from "tar-stream";
 
 import {
+  findTrustedExecutable,
   readBoundedRegularFile,
   sha256Bytes,
 } from "../environment/filesystem.js";
 import { loadCapabilityProvenance } from "../install/capabilities.js";
+import { resolveTrustedInvocation } from "../tools/invoke.js";
 import { loadCatalogBundle } from "./load.js";
 import { validateJsonSchema, type JsonSchema } from "./schema.js";
 
@@ -35,6 +41,7 @@ const MAX_ARTIFACT_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_TOTAL_BYTES = 128 * 1024 * 1024;
 const MAX_RELEASE_SIDECAR_BYTES = 8 * 1024 * 1024;
 const NPM_PACK_TIMEOUT_MS = 5 * 60 * 1000;
+const GIT_COMMAND_TIMEOUT_MS = 30_000;
 const GIT_OBJECT = /^[0-9a-f]{40}$/u;
 
 export interface ReleaseDistribution {
@@ -171,22 +178,248 @@ export function buildReleaseManifest(repositoryRoot: string, cliVersion: string)
   };
 }
 
+function trustedGit(repositoryRoot: string): string {
+  const executable = findTrustedExecutable("git", {
+    cwd: repositoryRoot,
+    env: process.env,
+    platform: process.platform,
+  });
+  if (executable === null) {
+    throw new Error("release requires a trusted Git executable outside the repository");
+  }
+  return executable;
+}
+
+function isolatedGitEnvironment(executable: string): NodeJS.ProcessEnv {
+  return {
+    PATH: dirname(executable),
+    HOME: process.platform === "win32"
+      ? process.env.USERPROFILE ?? ""
+      : "/dev/null",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_PAGER: "cat",
+    GIT_TERMINAL_PROMPT: "0",
+    LC_ALL: "C",
+    ...(process.env.SYSTEMROOT === undefined
+      ? {}
+      : { SYSTEMROOT: process.env.SYSTEMROOT }),
+    ...(process.env.TEMP === undefined ? {} : { TEMP: process.env.TEMP }),
+    ...(process.env.TMP === undefined ? {} : { TMP: process.env.TMP }),
+  };
+}
+
+function gitResult(
+  repositoryRoot: string,
+  args: readonly string[],
+  encoding: BufferEncoding | null = "utf8",
+) {
+  const executable = trustedGit(repositoryRoot);
+  return spawnSync(executable, ["-C", repositoryRoot, ...args], {
+    encoding,
+    env: isolatedGitEnvironment(executable),
+    maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+    windowsHide: true,
+  });
+}
+
 function git(repositoryRoot: string, args: readonly string[]): string {
-  const result = spawnSync("git", args, { cwd: repositoryRoot, encoding: "utf8", windowsHide: true });
-  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
-  return result.stdout.trim();
+  const result = gitResult(repositoryRoot, args);
+  if (result.error) {
+    throw new Error(`git ${args.join(" ")} failed to execute: ${result.error.message}`);
+  }
+  if (result.signal) {
+    throw new Error(`git ${args.join(" ")} was terminated by ${result.signal}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${String(result.stderr).trim()}`);
+  }
+  return String(result.stdout).trim();
+}
+
+function gitBytes(repositoryRoot: string, args: readonly string[]): Buffer {
+  const result = gitResult(repositoryRoot, args, null);
+  if (result.error) {
+    throw new Error(`git ${args.join(" ")} failed to execute: ${result.error.message}`);
+  }
+  if (result.signal) {
+    throw new Error(`git ${args.join(" ")} was terminated by ${result.signal}`);
+  }
+  if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+    throw new Error(
+      `git ${args.join(" ")} failed: ${Buffer.isBuffer(result.stderr) ? result.stderr.toString("utf8").trim() : String(result.stderr).trim()}`,
+    );
+  }
+  return result.stdout;
+}
+
+function gitOptional(repositoryRoot: string, args: readonly string[]): string {
+  const result = gitResult(repositoryRoot, args);
+  if (result.status === 1) return "";
+  if (result.error || result.signal || result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed`);
+  }
+  return String(result.stdout).trim();
+}
+
+function assertReleaseRepositoryIsolation(repositoryRoot: string): void {
+  const commonText = git(repositoryRoot, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
+  const commonDirectory = isAbsolute(commonText)
+    ? commonText
+    : resolve(repositoryRoot, commonText);
+  if (existsSync(join(commonDirectory, "objects", "info", "alternates"))) {
+    throw new Error("release repository must not use Git object alternates");
+  }
+  if (
+    git(repositoryRoot, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/replace/",
+    ]) !== ""
+  ) {
+    throw new Error("release repository must not use Git replacement refs");
+  }
+  if (
+    gitOptional(repositoryRoot, [
+      "config",
+      "--local",
+      "--get-regexp",
+      "^remote\\..*\\.promisor$",
+    ]) !== ""
+  ) {
+    throw new Error("release repository must not use promisor remotes");
+  }
+}
+
+function resolveHeadSourceIdentity(
+  repositoryRoot: string,
+): ReleaseSourceIdentity {
+  assertReleaseRepositoryIsolation(repositoryRoot);
+  const commit = git(repositoryRoot, ["rev-parse", "HEAD^{commit}"]);
+  const tree = git(repositoryRoot, ["rev-parse", "HEAD^{tree}"]);
+  if (!GIT_OBJECT.test(commit) || !GIT_OBJECT.test(tree)) {
+    throw new Error("release source identity is invalid");
+  }
+  git(repositoryRoot, ["fsck", "--strict", "--no-dangling", commit]);
+  return { commit, tree };
 }
 
 export function resolveReleaseSourceIdentity(
   repositoryRoot: string,
   tag: string,
 ): ReleaseSourceIdentity {
-  const commit = git(repositoryRoot, ["rev-parse", "HEAD^{commit}"]);
-  const tree = git(repositoryRoot, ["rev-parse", "HEAD^{tree}"]);
+  const { commit, tree } = resolveHeadSourceIdentity(repositoryRoot);
   const tagCommit = git(repositoryRoot, ["rev-parse", `${tag}^{commit}`]);
-  if (!GIT_OBJECT.test(commit) || !GIT_OBJECT.test(tree)) throw new Error("release source identity is invalid");
   if (tagCommit !== commit) throw new Error(`release tag ${tag} does not point to source commit ${commit}`);
   return { commit, tree };
+}
+
+function safeGitArchiveSegments(path: string): readonly string[] {
+  const normalized = path.replaceAll("\\", "/");
+  const segments = normalized.endsWith("/")
+    ? normalized.slice(0, -1).split("/")
+    : normalized.split("/");
+  if (
+    normalized.startsWith("/")
+    || segments.length === 0
+    || segments.some((segment) =>
+      segment === "" || segment === "." || segment === ".."
+    )
+  ) {
+    throw new Error(`unsafe Git archive member: ${path}`);
+  }
+  return segments;
+}
+
+export async function materializeReleaseSource(
+  repositoryRoot: string,
+  identity: ReleaseSourceIdentity,
+  destination: string,
+): Promise<void> {
+  const observed = resolveHeadSourceIdentity(repositoryRoot);
+  if (
+    identity.commit !== observed.commit
+    || identity.tree !== observed.tree
+  ) {
+    throw new Error("release source identity does not match the checked-out HEAD");
+  }
+  const archive = gitBytes(repositoryRoot, [
+    "archive",
+    "--format=tar",
+    identity.commit,
+  ]);
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  const extract = tar.extract();
+  const names = new Set<string>();
+  let entries = 0;
+  let totalBytes = 0;
+  const completed = new Promise<void>((resolvePromise, reject) => {
+    extract.on("entry", (header, stream, next) => {
+      try {
+        entries += 1;
+        if (entries > MAX_ARTIFACT_ENTRIES) {
+          throw new Error("Git release archive has too many entries");
+        }
+        const segments = safeGitArchiveSegments(header.name);
+        const folded = segments.join("/").normalize("NFC").toLowerCase();
+        if (names.has(folded)) {
+          throw new Error(`duplicate Git archive member: ${header.name}`);
+        }
+        names.add(folded);
+        const target = join(destination, ...segments);
+        if (header.type === "directory") {
+          mkdirSync(target, { recursive: true, mode: header.mode ?? 0o755 });
+          stream.resume();
+          stream.once("end", next);
+          return;
+        }
+        if (header.type !== "file") {
+          throw new Error(`unsupported Git archive member: ${header.name}`);
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        stream.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MAX_ARTIFACT_FILE_BYTES) {
+            stream.destroy(
+              new Error(`oversized Git archive member: ${header.name}`),
+            );
+          } else {
+            chunks.push(chunk);
+          }
+        });
+        stream.once("error", reject);
+        stream.once("end", () => {
+          totalBytes += size;
+          if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
+            reject(new Error("Git release archive exceeds the total byte limit"));
+            return;
+          }
+          mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+          writeFileSync(target, Buffer.concat(chunks), {
+            mode: header.mode ?? 0o644,
+          });
+          chmodSync(target, header.mode ?? 0o644);
+          next();
+        });
+      } catch (error) {
+        stream.resume();
+        reject(error);
+      }
+    });
+    extract.once("finish", resolvePromise);
+    extract.once("error", reject);
+  });
+  extract.end(archive);
+  await completed;
 }
 
 function assertSafeArchivePath(path: string): void {
@@ -340,40 +573,141 @@ export async function buildReleaseArtifact(
   outputDirectory: string,
   source?: ReleaseSourceIdentity,
 ): Promise<{ readonly archivePath: string; readonly sidecarPath: string; readonly sidecar: ReleaseSidecar }> {
-  const packageManifest = readJson(join(repositoryRoot, "package.json")) as { name?: unknown; version?: unknown };
-  if (packageManifest.name !== "oh-my-harness" || typeof packageManifest.version !== "string") {
-    throw new Error("release package identity is invalid");
+  const observed = resolveHeadSourceIdentity(repositoryRoot);
+  const identity = source ?? observed;
+  if (
+    identity.commit !== observed.commit
+    || identity.tree !== observed.tree
+  ) {
+    throw new Error("release source identity does not match the checked-out HEAD");
   }
-  const expected = buildReleaseManifest(repositoryRoot, packageManifest.version);
-  const tracked = readJson(join(repositoryRoot, "harness", "catalog", "release.json"));
-  if (JSON.stringify(tracked) !== JSON.stringify(expected)) throw new Error("canonical release catalog is stale");
-  const identity = source ?? resolveReleaseSourceIdentity(repositoryRoot, expected.distribution.tag);
-  if (!GIT_OBJECT.test(identity.commit) || !GIT_OBJECT.test(identity.tree)) throw new Error("release source identity is invalid");
-  mkdirSync(outputDirectory, { recursive: true });
-  const archivePath = join(outputDirectory, expected.distribution.archiveFilename);
-  const sidecarPath = join(outputDirectory, expected.distribution.sidecarFilename);
-
-  const staging = mkdtempSync(join(tmpdir(), "omh-release-pack-"));
+  const staging = mkdtempSync(join(tmpdir(), "omh-release-build-"));
+  const sourceRoot = join(staging, "source");
+  const packRoot = join(staging, "pack");
+  let archivePath: string | null = null;
+  let sidecarPath: string | null = null;
   let archiveCreated = false;
   let sidecarCreated = false;
   try {
-    const npmEntrypoint = process.env.npm_execpath;
-    const command = npmEntrypoint ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
-    const args = npmEntrypoint
-      ? [npmEntrypoint, "pack", "--json", "--ignore-scripts", "--pack-destination", staging]
-      : ["pack", "--json", "--ignore-scripts", "--pack-destination", staging];
-    const packed = spawnSync(command, args, {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        npm_config_audit: "false",
-        npm_config_cache: join(staging, "npm-cache"),
-        npm_config_fund: "false",
-        npm_config_offline: "true",
-        npm_config_registry: "http://127.0.0.1:9",
-        npm_config_update_notifier: "false",
+    await materializeReleaseSource(repositoryRoot, identity, sourceRoot);
+    const packageManifest = readJson(join(sourceRoot, "package.json")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    if (
+      packageManifest.name !== "oh-my-harness"
+      || typeof packageManifest.version !== "string"
+    ) {
+      throw new Error("release package identity is invalid");
+    }
+    if (source === undefined) {
+      const tagged = resolveReleaseSourceIdentity(
+        repositoryRoot,
+        `v${packageManifest.version}`,
+      );
+      if (
+        tagged.commit !== identity.commit
+        || tagged.tree !== identity.tree
+      ) {
+        throw new Error("release tag identity changed during source export");
+      }
+    }
+    const expected = buildReleaseManifest(sourceRoot, packageManifest.version);
+    const tracked = readJson(
+      join(sourceRoot, "harness", "catalog", "release.json"),
+    );
+    if (JSON.stringify(tracked) !== JSON.stringify(expected)) {
+      throw new Error("canonical release catalog is stale");
+    }
+    mkdirSync(outputDirectory, { recursive: true });
+    archivePath = join(outputDirectory, expected.distribution.archiveFilename);
+    sidecarPath = join(outputDirectory, expected.distribution.sidecarFilename);
+    if (existsSync(archivePath) || existsSync(sidecarPath)) {
+      throw new Error("release output already exists; refusing to overwrite");
+    }
+
+    const npmInvocation = resolveTrustedInvocation(["npm"], {
+      env: process.env,
+      platform: process.platform,
+      workspace: repositoryRoot,
+    });
+    if (npmInvocation === undefined) {
+      throw new Error("release requires a trusted npm invocation");
+    }
+    const command = npmInvocation.command;
+    const npmPrefix = [...npmInvocation.argsPrefix];
+    const npmEnvironment = {
+      ...process.env,
+      npm_config_audit: "false",
+      npm_config_fund: "false",
+      npm_config_offline: "true",
+      npm_config_registry: "http://127.0.0.1:9",
+      npm_config_update_notifier: "false",
+    };
+    const installed = spawnSync(
+      command,
+      [...npmPrefix, "ci", "--ignore-scripts", "--offline"],
+      {
+        cwd: sourceRoot,
+        encoding: "utf8",
+        env: npmEnvironment,
+        maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
+        timeout: NPM_PACK_TIMEOUT_MS,
+        windowsHide: true,
       },
+    );
+    if (installed.error) {
+      throw new Error(`npm ci failed to execute: ${installed.error.message}`);
+    }
+    if (installed.signal) {
+      throw new Error(`npm ci was terminated by signal ${installed.signal}`);
+    }
+    if (installed.status !== 0) {
+      throw new Error(`npm ci failed: ${installed.stderr.trim()}`);
+    }
+    const compiler = join(
+      sourceRoot,
+      "node_modules",
+      "typescript",
+      "bin",
+      "tsc",
+    );
+    const compiled = spawnSync(
+      process.execPath,
+      [compiler, "-p", join(sourceRoot, "tsconfig.build.json")],
+      {
+        cwd: sourceRoot,
+        encoding: "utf8",
+        env: npmEnvironment,
+        maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
+        timeout: NPM_PACK_TIMEOUT_MS,
+        windowsHide: true,
+      },
+    );
+    if (compiled.error) {
+      throw new Error(`release build failed to execute: ${compiled.error.message}`);
+    }
+    if (compiled.signal) {
+      throw new Error(`release build was terminated by signal ${compiled.signal}`);
+    }
+    if (compiled.status !== 0) {
+      throw new Error(
+        `release build failed: ${compiled.stderr.trim() || compiled.stdout.trim()}`,
+      );
+    }
+    mkdirSync(packRoot, { recursive: true, mode: 0o700 });
+    const args = [
+      ...npmPrefix,
+      "pack",
+      "--json",
+      "--ignore-scripts",
+      "--pack-destination",
+      packRoot,
+    ];
+    const packed = spawnSync(command, args, {
+      cwd: sourceRoot,
+      encoding: "utf8",
+      env: npmEnvironment,
       maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
       timeout: NPM_PACK_TIMEOUT_MS,
       windowsHide: true,
@@ -391,7 +725,7 @@ export async function buildReleaseArtifact(
       throw new Error("npm pack returned an unexpected package identity");
     }
     try {
-      copyFileSync(join(staging, item.filename), archivePath, constants.COPYFILE_EXCL);
+      copyFileSync(join(packRoot, item.filename), archivePath, constants.COPYFILE_EXCL);
       archiveCreated = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
@@ -410,7 +744,7 @@ export async function buildReleaseArtifact(
       schemaVersion: "2.0.0",
       source: identity,
     };
-    await verifyReleaseArtifact(repositoryRoot, archivePath, sidecar, identity);
+    await verifyReleaseArtifact(sourceRoot, archivePath, sidecar, identity);
     const stagedSidecarPath = join(staging, expected.distribution.sidecarFilename);
     writeFileSync(stagedSidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
     try {
@@ -424,8 +758,12 @@ export async function buildReleaseArtifact(
     }
     return { archivePath, sidecar, sidecarPath };
   } catch (error) {
-    if (archiveCreated) rmSync(archivePath, { force: true });
-    if (sidecarCreated) rmSync(sidecarPath, { force: true });
+    if (archiveCreated && archivePath !== null) {
+      rmSync(archivePath, { force: true });
+    }
+    if (sidecarCreated && sidecarPath !== null) {
+      rmSync(sidecarPath, { force: true });
+    }
     throw error;
   } finally {
     try {

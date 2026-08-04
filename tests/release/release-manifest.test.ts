@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -18,9 +20,14 @@ import {
   buildReleaseManifest,
   inspectReleaseArchive,
   loadReleaseSidecar,
+  materializeReleaseSource,
   resolveReleaseSourceIdentity,
   verifyReleaseArtifact,
 } from "../../dist/catalog/release.js";
+import {
+  runReleaseCommand,
+  type ReleaseCommandOperations,
+} from "../../dist/catalog/release-command.js";
 import { validateContractDocument } from "../../dist/catalog/load.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -123,6 +130,34 @@ test("release source identity requires the exact local tag commit", () => {
   }
 });
 
+test("release source materialization excludes dirty and ignored checkout bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-release-materialize-"));
+  const materialized = join(root, "materialized");
+  try {
+    git(root, ["init"]);
+    git(root, ["config", "user.name", "Oh My Harness Test"]);
+    git(root, ["config", "user.email", "test@oh-my-harness.invalid"]);
+    writeFileSync(join(root, ".gitignore"), "dist/\n");
+    writeFileSync(join(root, "source.txt"), "committed\n");
+    git(root, ["add", ".gitignore", "source.txt"]);
+    git(root, ["commit", "-m", "source"]);
+    git(root, ["tag", "v0.3.0"]);
+    const identity = resolveReleaseSourceIdentity(root, "v0.3.0");
+
+    writeFileSync(join(root, "source.txt"), "dirty\n");
+    writeFileSync(join(root, "untracked.txt"), "untracked\n");
+    mkdirSync(join(root, "dist"));
+    writeFileSync(join(root, "dist", "provenance-backdoor.js"), "ignored\n");
+
+    await materializeReleaseSource(root, identity, materialized);
+    assert.equal(readFileSync(join(materialized, "source.txt"), "utf8"), "committed\n");
+    assert.equal(existsSync(join(materialized, "untracked.txt")), false);
+    assert.equal(existsSync(join(materialized, "dist")), false);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
 test("release sidecar loading is bounded and schema-closed", () => {
   const root = mkdtempSync(join(tmpdir(), "omh-release-sidecar-"));
   try {
@@ -183,4 +218,126 @@ test("release verification fails closed on tag/version before reading an asset",
     }),
     /tag\/version identity mismatch/i,
   );
+});
+
+function commandSidecar() {
+  return {
+    $schema: "harness/contracts/release-catalog.schema.json#/$defs/releaseSidecar" as const,
+    archive: {
+      filename: "oh-my-harness-v0.3.0.tgz",
+      files: [],
+      sha256: "a".repeat(64),
+      size: 1,
+    },
+    catalogRevision: "b".repeat(64),
+    kind: "release-sidecar" as const,
+    package: {
+      name: "oh-my-harness" as const,
+      tag: "v0.3.0",
+      version: "0.3.0",
+    },
+    schemaVersion: "2.0.0" as const,
+    source: { commit: "c".repeat(40), tree: "d".repeat(40) },
+  };
+}
+
+function commandOperations(calls: string[]): ReleaseCommandOperations {
+  const sidecar = commandSidecar();
+  return {
+    async buildArtifact(repositoryRoot, outputDirectory) {
+      calls.push(`build:${repositoryRoot}:${outputDirectory}`);
+      return {
+        archivePath: "/output/archive.tgz",
+        sidecar,
+        sidecarPath: "/output/release.json",
+      };
+    },
+    loadSidecar(repositoryRoot, sidecarPath) {
+      calls.push(`load:${repositoryRoot}:${sidecarPath}`);
+      return sidecar;
+    },
+    resolvePath(base, path) {
+      calls.push(`resolve:${base}:${path}`);
+      return `${base}/${path}`;
+    },
+    resolveSourceIdentity(repositoryRoot, tag) {
+      calls.push(`source:${repositoryRoot}:${tag}`);
+      return sidecar.source;
+    },
+    async verifyArtifact(repositoryRoot, archivePath, value, source) {
+      calls.push(
+        `verify:${repositoryRoot}:${archivePath}:${value.package.tag}:${source.commit}`,
+      );
+    },
+  };
+}
+
+test("release command dispatches build and emits immutable artifact identity", async () => {
+  const calls: string[] = [];
+  const result = await runReleaseCommand(
+    "/repo",
+    "/cwd",
+    ["build", "output"],
+    commandOperations(calls),
+  );
+  assert.deepEqual(result, {
+    exitCode: 0,
+    stderr: "",
+    stdout: `${JSON.stringify({
+      archive: "/output/archive.tgz",
+      sidecar: "/output/release.json",
+      source: commandSidecar().source,
+    })}\n`,
+  });
+  assert.deepEqual(calls, [
+    "resolve:/cwd:output",
+    "build:/repo:/cwd/output",
+  ]);
+});
+
+test("release command dispatches verify through sidecar-bound source identity", async () => {
+  const calls: string[] = [];
+  const result = await runReleaseCommand(
+    "/repo",
+    "/cwd",
+    ["verify", "archive.tgz", "release.json"],
+    commandOperations(calls),
+  );
+  assert.deepEqual(result, {
+    exitCode: 0,
+    stderr: "",
+    stdout: `${JSON.stringify({
+      archive: "/cwd/archive.tgz",
+      verified: true,
+    })}\n`,
+  });
+  assert.deepEqual(calls, [
+    "resolve:/cwd:archive.tgz",
+    "resolve:/cwd:release.json",
+    "load:/repo:/cwd/release.json",
+    "source:/repo:v0.3.0",
+    `verify:/repo:/cwd/archive.tgz:v0.3.0:${"c".repeat(40)}`,
+  ]);
+});
+
+test("release command rejects unknown commands and wrong arity without operations", async () => {
+  for (const argv of [
+    [] as const,
+    ["build"] as const,
+    ["build", "one", "two"] as const,
+    ["verify", "archive"] as const,
+    ["unknown"] as const,
+  ]) {
+    const calls: string[] = [];
+    const result = await runReleaseCommand(
+      "/repo",
+      "/cwd",
+      argv,
+      commandOperations(calls),
+    );
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^usage:/u);
+    assert.deepEqual(calls, []);
+  }
 });

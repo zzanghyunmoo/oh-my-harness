@@ -384,6 +384,9 @@ function selectedPackageIds(
 ): readonly PackageId[] {
   const requested = override
     ?? [...profile.packages.required, ...profile.packages.optional];
+  if (profile.compositionOnly === true && requested.length > 0) {
+    throw new Error("composition profiles must not select CLI packages");
+  }
   const unique = new Set<PackageId>();
   for (const id of requested) {
     if (!isPackageId(id)) throw new Error(`unsupported package: ${id}`);

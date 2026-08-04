@@ -26,7 +26,6 @@ const PACKAGE_INPUTS = [
   "omh.cmd",
   "plugins/",
   "scripts/harness/",
-  "scripts/profile-pack.mjs",
   "scripts/validate-dual-environment.ps1",
   "scripts/tools/",
 ];
@@ -43,6 +42,7 @@ const RETIRED_SURFACE_PATTERN = new RegExp(
 );
 const RETIRED_NAMESPACE_PATTERN = new RegExp(
   [
+    `(^|[^a-z0-9_-])${RETIRED_NAMESPACE_ID}([^a-z0-9_-]|$)`,
     `(^|/)${RETIRED_NAMESPACE_ID}(/|$)`,
     `name:\\s*${RETIRED_NAMESPACE_ID}([^a-z0-9_-]|$)`,
     `(^|[^a-z0-9_-])${RETIRED_NAMESPACE_ID}:`,

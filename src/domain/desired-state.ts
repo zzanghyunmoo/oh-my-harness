@@ -80,6 +80,14 @@ export function resolveDesiredState(
     if (!isPackageId(id)) throw new Error(`unsupported selected package: ${id}`);
     return id;
   });
+  if (
+    profile.compositionOnly === true
+    && (selectedPackages.length > 0 || explicit.toolRoutes.length > 0)
+  ) {
+    throw new Error(
+      "composition profiles must not select packages or tool routes",
+    );
+  }
   validateExplicitDesiredState({
     capabilitySet: explicit.capabilitySet,
     instance: explicit.instance,

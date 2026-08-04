@@ -192,6 +192,7 @@ function parseSelection(
   let agents = [...(input.defaultAgents ?? SUPPORTED_AGENT_IDS)];
   let agentsExplicit = false;
   let tools = [...(input.defaultTools ?? PACKAGE_IDS)];
+  let toolsExplicit = false;
   let apply = false;
   let digest: string | undefined;
   let json = false;
@@ -293,6 +294,7 @@ function parseSelection(
         PACKAGE_IDS,
         flag,
       );
+      toolsExplicit = true;
       index += 1;
       continue;
     }
@@ -304,6 +306,13 @@ function parseSelection(
   if (!apply && digest !== undefined) fail("--digest requires --apply");
   if (isCompositionProfileId(profile)) {
     if (!agentsExplicit) agents = [];
+    if (toolsExplicit) {
+      fail("--tools is not valid with --profile mds-host");
+    }
+    if (toolRoute !== undefined) {
+      fail("--tool-route is not valid with --profile mds-host");
+    }
+    tools = [];
   } else if (agents.length === 0) {
     fail("--agents none is only valid with --profile mds-host");
   }

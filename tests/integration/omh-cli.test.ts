@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -330,6 +331,40 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         return "";
       },
     };
+    const hostPreview = await runOmh(
+      [
+        "setup",
+        "--profile",
+        "mds-host",
+        "--agents",
+        "claude-code",
+        "--root",
+        join(root, "host-state"),
+      ],
+      commonOptions,
+    );
+    assert.equal(hostPreview.state, "preview");
+    assert.equal(hostPreview.preview?.readiness, "preview");
+    assert.deepEqual(hostPreview.preview?.packages, []);
+    assert.deepEqual(
+      hostPreview.preview?.agents.map(
+        ({ id, ownership, state }) => ({ id, ownership, state }),
+      ),
+      [{ id: "claude-code", ownership: "external", state: "ready" }],
+    );
+    const hostAgentAction = hostPreview.preview?.plan?.actions.find(
+      ({ id }) => id === "agent:claude-code",
+    );
+    assert.equal(hostAgentAction?.target, realpathSync(claudePath));
+    assert.equal(hostAgentAction?.payload?.operation, "verify-agent");
+    assert.equal(
+      hostPreview.preview?.plan?.actions.some(
+        ({ payload }) => payload?.operation === "acquire-agent",
+      ),
+      false,
+    );
+    assert.equal(existsSync(join(root, "host-state")), false);
+
     const previewArgs = [
       "setup",
       "--profile",

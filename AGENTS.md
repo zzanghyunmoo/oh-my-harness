@@ -75,7 +75,7 @@ oh-my-harness/
 - 각 패키지 항목은 최소한 ID, 설명, executable, upstream/source, 지원 OS/architecture, exact version 또는 provenance policy, 설치 방법, 인증 안내, built-in profile별 required/optional 분류를 가진다.
 - `personal` 기본 required는 Linear, Notion, `gh`; optional은 Jira, Confluence, `glab`이다.
 - `company` 기본 required는 Jira, Confluence, `glab`; optional은 Linear, Notion, `gh`다.
-- `mds-host`는 my-desk-setup이 호출하는 package-free Composition Profile이다. 빈 에이전트 선택은 안정적인 no-op이고, 명시된 에이전트는 기존 executable과 native 등록을 검증만 하며 설치·인증을 소유하지 않는다.
+- `mds-host`는 my-desk-setup이 호출하는 package-free Composition Profile이다. 빈 에이전트 선택은 안정적인 no-op이다. 명시된 에이전트의 MDS 소유 executable은 exact digest로 검증만 하고, Oh My Harness가 고정한 workflow, plugin과 OMO/LazyCodex add-on은 runtime-native surface에 합성한다. agent executable, CLI package와 인증은 소유하지 않는다.
 - missing required는 profile을 unready로 만들고 missing optional은 `ready-with-optional-gaps`로 보고한다.
 - custom profile은 로컬에서 create → validate → preview → repository diff 생성 순서를 따른다. commit, push, PR 생성은 별도의 명시적 외부-write 의도가 있어야 한다.
 - merged/released profile만 다른 사용자의 trusted selectable profile이 된다.

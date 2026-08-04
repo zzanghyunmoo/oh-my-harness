@@ -106,6 +106,37 @@ test("managed receipt accepts closed explicit environment state and legacy recei
     validateContractDocument("managed-state-receipt", explicit, REPO_ROOT)
   );
 
+  const compositionPackages = structuredClone(explicit);
+  compositionPackages.desiredState.profileId = "mds-host";
+  compositionPackages.desiredState.selectedAgents = [];
+  compositionPackages.desiredState.toolRoutes = [];
+  compositionPackages.runtimeReadiness = [];
+  compositionPackages.startupConsent.profileId = "mds-host";
+  assert.throws(
+    () => validateContractDocument(
+      "managed-state-receipt",
+      compositionPackages,
+      REPO_ROOT,
+    ),
+    /too many items|schema branch/i,
+  );
+
+  const compositionRoute = structuredClone(compositionPackages);
+  compositionRoute.desiredState.selectedPackages = [];
+  compositionRoute.desiredState.toolRoutes = [{
+    packageId: "github",
+    receiptFingerprint: "c".repeat(64),
+    targetInstanceId: "wsl-ubuntu",
+  }];
+  assert.throws(
+    () => validateContractDocument(
+      "managed-state-receipt",
+      compositionRoute,
+      REPO_ROOT,
+    ),
+    /too many items|schema branch/i,
+  );
+
   const secretRoute = structuredClone(explicit);
   secretRoute.desiredState.toolRoutes[0].accessToken = "ghp_forbidden";
   assert.throws(
