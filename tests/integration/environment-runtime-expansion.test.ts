@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import { createTrustedWindowsToolPath } from "../support/trusted-windows-tools.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -21,8 +22,10 @@ test("clean preview carries the prior payload root only for previously managed r
     "runtimes",
     "opencode.json",
   );
+  const configRoot = join(root, "config");
 
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     mkdirSync(receiptRoot, { recursive: true });
     const catalog = loadCatalogBundle(REPOSITORY_ROOT);
     writeFileSync(
@@ -76,6 +79,19 @@ test("clean preview carries the prior payload root only for previously managed r
         },
       }),
     );
+    const openCodeConfig = join(configRoot, "opencode", "opencode.json");
+    mkdirSync(join(configRoot, "opencode"), { recursive: true });
+    writeFileSync(
+      openCodeConfig,
+      `${JSON.stringify({
+        plugin: [pathToFileURL(join(
+          previousActiveRoot,
+          ".opencode",
+          "plugins",
+          "oh-my-harness.js",
+        )).href],
+      }, null, 2)}\n`,
+    );
 
     const preview = previewEnvironment(
       {
@@ -91,8 +107,8 @@ test("clean preview carries the prior payload root only for previously managed r
         arch: "x64",
         env: {
           APPDATA: root,
-          PATH: process.env.PATH ?? "",
-          XDG_CONFIG_HOME: join(root, "config"),
+          PATH: trustedTools,
+          XDG_CONFIG_HOME: configRoot,
         },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,

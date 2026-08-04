@@ -31,6 +31,7 @@ const paths = [
   "harness/contracts/managed-state-receipt.schema.json",
   "harness/contracts/release-catalog.schema.json",
   "harness/profiles/company.json",
+  "harness/profiles/mds-host.json",
   "harness/profiles/personal.json",
   "plugins/oh-my-harness/profiles/runtime-tools.json",
 ] as const;

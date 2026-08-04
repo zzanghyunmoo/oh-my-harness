@@ -1,8 +1,0 @@
-{
-  "name": "@oh-my-harness/quotio-provider",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Quotio LiteLLM proxy provider for Pi coding agent (OpenAI-compatible)",
-  "main": "index.js",
-  "type": "module"
-}

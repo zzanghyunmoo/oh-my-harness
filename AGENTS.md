@@ -1,14 +1,13 @@
 # AGENTS.md — oh-my-harness v2 프로젝트 가드레일
 
-Oh My Harness v2는 원하는 코딩 에이전트와 공유 CLI 패키지, 검증된 플러그인·스킬을 프로필로 설치하고 유지하는 cross-runtime 환경 관리자다. 지원 대상은 Claude Code, OpenCode, Codex이며 Pi는 신규 제품 surface에서 제거한다. Claude Code를 먼저 완성하되 카탈로그와 정책은 처음부터 runtime-neutral하게 설계하고 세 런타임 parity까지 같은 제품 범위로 다룬다.
+Oh My Harness v2는 원하는 코딩 에이전트와 공유 CLI 패키지, 검증된 플러그인·스킬을 프로필로 설치하고 유지하는 cross-runtime 환경 관리자다. 지원 대상은 Claude Code, OpenCode, Codex다. Claude Code를 먼저 완성하되 카탈로그와 정책은 처음부터 runtime-neutral하게 설계하고 세 런타임 parity까지 같은 제품 범위로 다룬다.
 
-이 문서는 2026-07-24 v2 reset 이후의 현재 가드레일이다. 이전 Pi, connector,
-proxy, 전체 Compound Engineering 문서는 역사적 근거일 뿐 새 구현의 권한이
-아니다.
+이 문서는 2026-07-24 v2 reset 이후의 현재 가드레일이다. 현재 tracked tree와
+배포 입력은 세 지원 런타임의 제품 계약만 유지한다.
 
 ## 제품 원칙
 
-- 사용자는 `personal`, `company`, 또는 검증된 `custom` Environment Profile과 하나 이상의 에이전트를 선택한다.
+- 사용자는 `personal`, `company`, 또는 검증된 `custom` Environment Profile과 하나 이상의 에이전트를 선택한다. 패키지와 capability를 소유하지 않는 `mds-host` Composition Profile만 선택 에이전트가 없는 안정적인 호스트 준비 계약을 허용한다.
 - Claude-first는 delivery 순서일 뿐 Claude manifest가 source of truth라는 뜻이 아니다.
 - Capability Catalog, Environment Profile, Catalog Revision, Managed-state Receipt가 desired state의 canonical contract다.
 - 공식·upstream 구현을 우선 사용한다. 적합한 upstream이 없을 때만 이 저장소에 portable semantic contract와 runtime-native 패키지를 만든다.
@@ -17,7 +16,7 @@ proxy, 전체 Compound Engineering 문서는 역사적 근거일 뿐 새 구현�
 
 ## 목표 프로젝트 구조
 
-v2 마이그레이션 중 legacy 파일이 남아 있을 수 있지만 새 기능은 아래 ownership에 맞춘다.
+새 기능은 아래 ownership에 맞춘다.
 
 ```text
 oh-my-harness/
@@ -31,12 +30,11 @@ oh-my-harness/
 │   ├── reconcile/                # startup reconciliation
 │   ├── runtime/                  # Claude/OpenCode/Codex native adapters
 │   ├── state/                    # receipts, ownership, locks, journal
-│   ├── migration/                # v1 read-only inspection/removal preview
 │   └── tools/                    # 외부 CLI 정책과 실행 adapter
 ├── dist/                         # TypeScript build output, 직접 편집 금지
 ├── harness/
 │   ├── catalog/                  # agents, packages, capabilities, provenance
-│   ├── profiles/                 # personal, company, published custom
+│   ├── profiles/                 # personal, company, mds-host, published custom
 │   ├── contracts/                # closed JSON Schemas
 │   └── adapters/                 # runtime acquisition/native capability data
 ├── plugins/oh-my-harness/        # repository-managed native plugin payload
@@ -72,11 +70,12 @@ oh-my-harness/
 
 ## 카탈로그와 프로필 규칙
 
-- 카탈로그의 agent ID는 `claude-code`, `opencode`, `codex`다. Pi를 신규 schema, help, selector, readiness matrix에 추가하지 않는다.
+- 카탈로그의 agent ID는 정확히 `claude-code`, `opencode`, `codex`다. unknown ID는 schema, help, selector와 readiness matrix에서 fail closed한다.
 - 패키지 catalog는 Notion CLI, Linear CLI, Jira CLI, Confluence CLI, `gh`, `glab`을 다룬다.
 - 각 패키지 항목은 최소한 ID, 설명, executable, upstream/source, 지원 OS/architecture, exact version 또는 provenance policy, 설치 방법, 인증 안내, built-in profile별 required/optional 분류를 가진다.
 - `personal` 기본 required는 Linear, Notion, `gh`; optional은 Jira, Confluence, `glab`이다.
 - `company` 기본 required는 Jira, Confluence, `glab`; optional은 Linear, Notion, `gh`다.
+- `mds-host`는 my-desk-setup이 호출하는 package-free Composition Profile이다. 빈 에이전트 선택은 안정적인 no-op이다. 명시된 에이전트의 MDS 소유 executable은 exact digest로 검증만 하고, Oh My Harness가 고정한 workflow, plugin과 OMO/LazyCodex add-on은 runtime-native surface에 합성한다. agent executable, CLI package와 인증은 소유하지 않는다.
 - missing required는 profile을 unready로 만들고 missing optional은 `ready-with-optional-gaps`로 보고한다.
 - custom profile은 로컬에서 create → validate → preview → repository diff 생성 순서를 따른다. commit, push, PR 생성은 별도의 명시적 외부-write 의도가 있어야 한다.
 - merged/released profile만 다른 사용자의 trusted selectable profile이 된다.
@@ -125,7 +124,7 @@ oh-my-harness/
 - remote/local write는 사용자의 정확한 변경 의도와 `confirmedWrite=true`가 모두 필요하다.
 - auth가 끝나지 않은 설치는 `installed-unconfigured`로 구분하고 login guidance만 제공한다.
 
-## 상태, 소유권, 마이그레이션
+## 상태와 소유권
 
 - managed payload, receipt, lock, journal은 기본적으로 `~/.oh-my-harness`에 저장하고 저장소에 커밋하지 않는다.
 - runtime plugin payload는 content-addressed store와 receipt-owned generation을
@@ -139,9 +138,7 @@ oh-my-harness/
   managed root 밖 경로, symlink escape, pre-image가 바뀐 target에는 쓰지 않는다.
   startup repair는 정확히
   `payloads/store/<digest> → payloads/generations/<digest>`만 허용한다.
-- v1/Pi/Compound Engineering 상태는 read-only migration inspector로 탐지한다. receipt가 없거나 손상된 경로는 `suspected`로만 보고한다.
-- Pi와 v1 plugin/payload 제거는 exact removal preview가 있을 때만 수행하며 user-owned 파일을 추정 삭제하지 않는다.
-- legacy connector/proxy/provider 코드는 v2 제품 surface로 확장하지 않는다. 독립적 가치가 있는 코드는 별도 결정 전까지 보존하되 canonical CLI/profile/catalog에 포함하지 않는다.
+- receipt로 소유권을 증명하지 못한 파일은 추정 삭제하거나 덮어쓰지 않는다.
 
 ## 테스트와 검증
 
@@ -153,12 +150,12 @@ oh-my-harness/
 - 최소 검증 범위:
   - catalog/profile/receipt closed-schema와 deterministic revision/digest
   - preview 무변경, stale-preview 거부, partial apply 재시도
-  - personal/company/custom required·optional 해석
+  - personal/company/custom required·optional 해석과 mds-host composition-only 무도구 계약
   - six-package platform/install/auth guidance
   - three-runtime capability parity와 unsupported honesty
   - profile-scoped tool exposure와 execution-time 재검사
   - startup no-op/repair/conflict/concurrency/timeout/crash recovery
-  - user-owned config 보존과 v1/Pi migration preview
+  - user-owned config 보존과 exact managed ownership
   - arbitrary CWD의 marketplace/plugin/MCP/hook 실행
   - `npm pack` payload와 Linux/macOS/Windows CI
 - security boundary를 OS나 runtime 전체에서 skip하지 않는다. platform-specific fixture로 같은 invariant를 검증한다.
@@ -192,5 +189,3 @@ oh-my-harness/
 - Node.js와 TypeScript는 `package.json`의 exact supported range를 따른다.
 - `@modelcontextprotocol/sdk`는 MCP adapter에만 사용하고 catalog/domain core가 MCP 타입에 종속되지 않게 한다.
 - OpenCode/Codex/Claude 전용 SDK 또는 manifest type은 각 runtime adapter 경계 밖으로 누출하지 않는다.
-- Pi ExtensionAPI와 `@earendil-works/pi-coding-agent`는 v2 dependency에
-  다시 추가하지 않는다.

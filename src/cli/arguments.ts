@@ -2,6 +2,7 @@ import { isAbsolute, win32 } from "node:path";
 
 import {
   CAPABILITY_IDS,
+  isCompositionProfileId,
   PACKAGE_IDS,
   SUPPORTED_AGENT_IDS,
 } from "../domain/catalog.js";
@@ -189,7 +190,9 @@ function parseSelection(
   },
 ): CliSelectionOptions {
   let agents = [...(input.defaultAgents ?? SUPPORTED_AGENT_IDS)];
+  let agentsExplicit = false;
   let tools = [...(input.defaultTools ?? PACKAGE_IDS)];
+  let toolsExplicit = false;
   let apply = false;
   let digest: string | undefined;
   let json = false;
@@ -270,12 +273,16 @@ function parseSelection(
     }
     if (flag === "--agents" || (flag === "--only" && input.allowAgents)) {
       if (!input.allowAgents) fail("agent selection is not valid for this command");
-      agents = commaSeparated(
-        valueAfter(argv, index, flag),
-        AGENT_ALIASES,
-        SUPPORTED_AGENT_IDS,
-        flag,
-      );
+      const value = valueAfter(argv, index, flag);
+      agents = value === "none"
+        ? []
+        : commaSeparated(
+            value,
+            AGENT_ALIASES,
+            SUPPORTED_AGENT_IDS,
+            flag,
+          );
+      agentsExplicit = true;
       index += 1;
       continue;
     }
@@ -287,6 +294,7 @@ function parseSelection(
         PACKAGE_IDS,
         flag,
       );
+      toolsExplicit = true;
       index += 1;
       continue;
     }
@@ -296,6 +304,18 @@ function parseSelection(
     fail("--apply requires the exact --digest printed by preview");
   }
   if (!apply && digest !== undefined) fail("--digest requires --apply");
+  if (isCompositionProfileId(profile)) {
+    if (!agentsExplicit) agents = [];
+    if (toolsExplicit) {
+      fail("--tools is not valid with --profile mds-host");
+    }
+    if (toolRoute !== undefined) {
+      fail("--tool-route is not valid with --profile mds-host");
+    }
+    tools = [];
+  } else if (agents.length === 0) {
+    fail("--agents none is only valid with --profile mds-host");
+  }
   if (target === "windows-native" && !capabilitySetExplicit) {
     capabilitySet = "workflow-only";
   }

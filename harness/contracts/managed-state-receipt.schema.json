@@ -3,6 +3,35 @@
   "$id": "https://oh-my-harness.dev/contracts/v2/managed-state-receipt.schema.json",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "runtimeReadiness": { "type": "array", "maxItems": 0 }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "desiredState": {
+            "type": "object",
+            "required": ["profileId", "selectedAgents"],
+            "properties": {
+              "profileId": { "const": "mds-host" },
+              "selectedAgents": { "type": "array", "maxItems": 0 }
+            }
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "runtimeReadiness": { "type": "array", "minItems": 1 }
+        }
+      }
+    }
+  ],
   "required": [
     "$schema",
     "schemaVersion",
@@ -51,7 +80,6 @@
     },
     "runtimeReadiness": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "$ref": "#/$defs/runtimeReadiness"
       }
@@ -101,6 +129,20 @@
     "legacyDesiredState": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "profileId": { "const": "mds-host" } }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "selectedAgents": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ],
       "required": ["profileId", "selectedAgents"],
       "properties": {
         "profileId": {
@@ -117,6 +159,27 @@
     "explicitDesiredState": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "profileId": { "const": "mds-host" } }
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "selectedPackages": { "type": "array", "maxItems": 0 },
+              "toolRoutes": { "type": "array", "maxItems": 0 }
+            }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "selectedAgents": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ],
       "required": [
         "profileId",
         "selectedAgents",
@@ -188,7 +251,6 @@
     },
     "selectedAgents": {
       "type": "array",
-      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "$ref": "#/$defs/agentId"

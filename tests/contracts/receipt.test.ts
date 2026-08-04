@@ -46,6 +46,38 @@ test("managed receipt preserves the selected-agent override in desired state", (
   assert.deepEqual(receipt.desiredState.selectedAgents, ["claude-code", "codex"]);
 });
 
+test("managed receipt permits empty readiness only for an empty mds-host composition", () => {
+  const empty = receiptFixture();
+  empty.desiredState = {
+    profileId: "mds-host",
+    selectedAgents: [],
+  };
+  empty.runtimeReadiness = [];
+  empty.startupConsent.profileId = "mds-host";
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", empty, REPO_ROOT)
+  );
+
+  const selected = structuredClone(empty);
+  selected.desiredState.selectedAgents = ["codex"];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", selected, REPO_ROOT),
+    /schema const|too many items|schema branch/i,
+  );
+
+  selected.runtimeReadiness = [{ agentId: "codex", state: "ready" }];
+  assert.doesNotThrow(() =>
+    validateContractDocument("managed-state-receipt", selected, REPO_ROOT)
+  );
+
+  const normal = receiptFixture();
+  normal.runtimeReadiness = [];
+  assert.throws(
+    () => validateContractDocument("managed-state-receipt", normal, REPO_ROOT),
+    /schema const|too many items/i,
+  );
+});
+
 test("managed receipt accepts closed explicit environment state and legacy receipts", () => {
   const legacy = receiptFixture();
   assert.doesNotThrow(() =>
@@ -72,6 +104,37 @@ test("managed receipt accepts closed explicit environment state and legacy recei
   };
   assert.doesNotThrow(() =>
     validateContractDocument("managed-state-receipt", explicit, REPO_ROOT)
+  );
+
+  const compositionPackages = structuredClone(explicit);
+  compositionPackages.desiredState.profileId = "mds-host";
+  compositionPackages.desiredState.selectedAgents = [];
+  compositionPackages.desiredState.toolRoutes = [];
+  compositionPackages.runtimeReadiness = [];
+  compositionPackages.startupConsent.profileId = "mds-host";
+  assert.throws(
+    () => validateContractDocument(
+      "managed-state-receipt",
+      compositionPackages,
+      REPO_ROOT,
+    ),
+    /too many items|schema branch/i,
+  );
+
+  const compositionRoute = structuredClone(compositionPackages);
+  compositionRoute.desiredState.selectedPackages = [];
+  compositionRoute.desiredState.toolRoutes = [{
+    packageId: "github",
+    receiptFingerprint: "c".repeat(64),
+    targetInstanceId: "wsl-ubuntu",
+  }];
+  assert.throws(
+    () => validateContractDocument(
+      "managed-state-receipt",
+      compositionRoute,
+      REPO_ROOT,
+    ),
+    /too many items|schema branch/i,
   );
 
   const secretRoute = structuredClone(explicit);
@@ -164,8 +227,15 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
     sequence: 1,
     catalogRevision: SHA256,
     compatibility: {
-      minimumCliVersion: "0.2.0",
-      maximumCliVersion: "0.2.0",
+      minimumCliVersion: "0.3.0",
+      maximumCliVersion: "0.3.0",
+    },
+    distribution: {
+      archiveFilename: "oh-my-harness-v0.3.0.tgz",
+      packageName: "oh-my-harness",
+      sidecarFilename: "oh-my-harness-v0.3.0.release.json",
+      tag: "v0.3.0",
+      version: "0.3.0",
     },
     artifacts: [
       {
@@ -185,12 +255,12 @@ test("apply-plan and release-catalog distribution boundaries validate closed fix
   );
 });
 
-test("managed receipt rejects Pi, duplicate agents, unknown fields, and secret-like content", () => {
-  const pi = receiptFixture();
-  pi.desiredState.selectedAgents = ["pi"];
+test("managed receipt rejects unknown or duplicate agents, unknown fields, and secret-like content", () => {
+  const unknownAgent = receiptFixture();
+  unknownAgent.desiredState.selectedAgents = ["unknown-agent"];
   assert.throws(
-    () => validateContractDocument("managed-state-receipt", pi, REPO_ROOT),
-    /schema enum|schema branch|Pi runtime/i,
+    () => validateContractDocument("managed-state-receipt", unknownAgent, REPO_ROOT),
+    /schema enum|schema branch/i,
   );
 
   const duplicate = receiptFixture();

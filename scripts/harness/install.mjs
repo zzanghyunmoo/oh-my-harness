@@ -51,11 +51,15 @@ import {
   resolveGitExecutable,
 } from "./upstream.mjs";
 import { resolveTrustedFile, resolveTrustedInvocation } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
+import { HARNESS_VERSION } from "../../dist/package-version.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode"]);
 export const RUNTIME_IDS = DEFAULT_RUNTIME_IDS;
-const HARNESS_PACKAGE = Object.freeze({ name: "oh-my-harness", version: "0.2.0" });
+const HARNESS_PACKAGE = Object.freeze({
+  name: "oh-my-harness",
+  version: HARNESS_VERSION,
+});
 const HARNESS_MARKETPLACE = "oh-my-harness";
 const CE_MARKETPLACE = "compound-engineering-plugin";
 const CE_PLUGIN = "compound-engineering";

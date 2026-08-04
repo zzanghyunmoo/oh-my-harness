@@ -31,15 +31,16 @@ Expose one package executable, `omh`, as the canonical human interface while ret
 
 Do not merge the underlying scopes:
 
-- Agent selection installs an exact runtime and registers the harness plugin for that runtime.
+- In an ordinary Environment Profile, agent selection installs an exact runtime and registers the harness plugin for that runtime.
+- In the `mds-host` Composition Profile, agent selection exact-digest-verifies the MDS-owned executable, then composes pinned workflows, plugins, and add-ons without acquiring the executable, CLI packages, or authentication.
 - Tool selection installs an external executable once and shares it through machine `PATH`.
 - Project configuration decides whether a runtime extension uses those tools; it does not reinstall the executable.
 
-The combined apply path must validate that every selected missing tool has a package manager before it mutates agent installations. Delegate to the existing installer modules instead of copying download, digest, registration, or package-manager behavior into the CLI.
+For ordinary Environment Profiles, the combined apply path must validate that every selected missing tool has a package manager before it mutates agent installations. Delegate to the existing installer modules instead of copying download, digest, registration, or package-manager behavior into the CLI. Composition Profiles keep their stricter caller-owned executable and package-free boundary.
 
 Place dependencies required by the installed CLI in `dependencies`, not `devDependencies`, and smoke-test a temporary `npm install --global .` prefix. Keep a repository launcher so a fresh clone can run `./omh setup` immediately after `npm ci`.
 
-Do not add a separate management skill for bootstrap. The executable owns discoverability through `--help`, while the existing OMP skill can explain the scope distinction and require explicit user intent before adding `--apply`.
+Do not add a separate management skill for bootstrap. The executable owns discoverability through `--help`, and mutating examples must require explicit user intent before adding `--apply`.
 
 ## Verification
 

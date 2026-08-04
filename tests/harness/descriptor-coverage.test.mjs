@@ -31,7 +31,7 @@ test("equivalent permutations normalize while membership and order drift fail", 
 
 test("runtime filters, duplicates, and non-production cardinality fail closed", async () => {
   const context = await loadRuntimeDescriptors({ repoRoot: REPO_ROOT });
-  assert.throws(() => generateExpectedKeys(context.featureIds, context.runtimeIds, { runtimeFilter: ["pi"] }), /filter/i);
+  assert.throws(() => generateExpectedKeys(context.featureIds, context.runtimeIds, { runtimeFilter: ["unknown-runtime"] }), /filter/i);
   assert.throws(() => generateExpectedKeys([...context.featureIds, context.featureIds[0]], context.runtimeIds), /duplicate/i);
   assert.throws(() => generateExpectedKeys(context.featureIds, [...context.runtimeIds, "unknown"]), /exact three runtime/i);
   assert.throws(() => generateExpectedKeys(context.featureIds.slice(1), context.runtimeIds), /29 feature/i);

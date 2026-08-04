@@ -8,8 +8,11 @@ import { fileURLToPath } from "node:url";
 import {
   BUILT_IN_PROFILE_IDS,
   CAPABILITY_IDS,
+  isCompositionProfileId,
   PACKAGE_IDS,
+  RELEASED_PROFILE_IDS,
   SUPPORTED_AGENT_IDS,
+  WORKFLOW_CAPABILITY_IDS,
   type AgentId,
 } from "../domain/catalog.js";
 import { readBoundedRegularFile } from "../environment/filesystem.js";
@@ -200,7 +203,6 @@ function validateReferences(source: CatalogSourceDocuments): void {
   );
 
   const agentIds = new Set<string>(source.agents.agents.map(({ id }) => id));
-  if (agentIds.has("pi")) throw new Error("Pi runtime is forbidden in v2");
   const packageIds = new Set<string>(
     source.packages.packages.map(({ id }) => id),
   );
@@ -346,6 +348,31 @@ function validateProfileReferences(
   packageIds: ReadonlySet<string>,
   capabilities: ReadonlyMap<string, CapabilityCatalogEntry>,
 ): void {
+  const compositionOnly = isCompositionProfileId(profile.id);
+  if (compositionOnly !== (profile.compositionOnly === true)) {
+    throw new Error(
+      `${profile.id}: compositionOnly is reserved for the mds-host profile`,
+    );
+  }
+  if (compositionOnly) {
+    assertExactIds(
+      profile.selectedAgents,
+      [],
+      "mds-host default agent selection",
+    );
+    assertExactIds(
+      [...profile.packages.required, ...profile.packages.optional],
+      [],
+      "mds-host package selection",
+    );
+    assertExactIds(
+      profile.capabilities,
+      WORKFLOW_CAPABILITY_IDS,
+      "mds-host capability selection",
+    );
+  } else if (profile.selectedAgents.length === 0) {
+    throw new Error(`${profile.id}: selected agents must be non-empty`);
+  }
   const required = new Set(profile.packages.required);
   for (const packageId of profile.packages.optional) {
     if (required.has(packageId)) {
@@ -429,7 +456,7 @@ export function readCatalogSource(
     capabilities: readJson(join(catalogRoot, "capabilities.json")) as CatalogSourceDocuments["capabilities"],
     channel: readJson(join(catalogRoot, "channel.json")) as CatalogSourceDocuments["channel"],
     upstreams: readJson(join(catalogRoot, "upstreams", "registry.json")) as CatalogSourceDocuments["upstreams"],
-    profiles: BUILT_IN_PROFILE_IDS.map(
+    profiles: RELEASED_PROFILE_IDS.map(
       (profileId) =>
         readJson(join(profileRoot, `${profileId}.json`)) as EnvironmentProfile,
     )

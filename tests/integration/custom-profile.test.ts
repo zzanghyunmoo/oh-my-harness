@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
+import { runOmh } from "../../dist/cli/main.js";
 import {
   applyCustomProfilePublication,
   createCustomProfile,
@@ -71,7 +73,7 @@ test("U12 custom profile create, preview, apply, and released selection are dete
   }
 });
 
-test("U12 publication rejects built-in overwrite, unknown IDs, and secret-like fields", () => {
+test("U12 publication rejects released overwrite, unknown IDs, and secret-like fields", () => {
   const root = fixtureRepository();
   try {
     assert.throws(
@@ -79,7 +81,18 @@ test("U12 publication rejects built-in overwrite, unknown IDs, and secret-like f
         repositoryRoot: root,
         profile: { ...profile(), id: "personal" },
       }),
-      /built-in profile/i,
+      /released profile/i,
+    );
+    const releasedComposition = loadCatalogBundle(root).profiles.find(
+      ({ id }) => id === "mds-host",
+    );
+    assert.ok(releasedComposition);
+    assert.throws(
+      () => previewCustomProfilePublication({
+        repositoryRoot: root,
+        profile: releasedComposition,
+      }),
+      /released profile/i,
     );
     assert.throws(
       () => previewCustomProfilePublication({
@@ -100,6 +113,36 @@ test("U12 publication rejects built-in overwrite, unknown IDs, and secret-like f
         } as never,
       }),
       /secret-bearing field|additional field/i,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("U12 validate and preview both reject custom composition profiles", async () => {
+  const root = fixtureRepository();
+  const file = join(root, "invalid-composition.json");
+  try {
+    writeFileSync(
+      file,
+      `${JSON.stringify({ ...profile(), compositionOnly: true }, null, 2)}\n`,
+    );
+    await assert.rejects(
+      runOmh(["profiles", "validate", "--file", file], {
+        repositoryRoot: root,
+      }),
+      /compositionOnly|contract validation|schema not constraint/i,
+    );
+    await assert.rejects(
+      runOmh([
+        "profiles",
+        "preview",
+        "--file",
+        file,
+        "--repo",
+        root,
+      ], { repositoryRoot: root }),
+      /compositionOnly|contract validation|schema not constraint/i,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

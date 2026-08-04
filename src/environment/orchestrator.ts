@@ -83,9 +83,9 @@ import {
   codexAddonSnapshot,
   createRuntimeAddonGitOperations,
   inspectCodexAddonSnapshot,
-  materializeCodexAddonSnapshot,
+  inspectRuntimeAddonArchive,
+  materializeCodexAddonSnapshotFromArchive,
   verifyCodexAddonGitMarketplace,
-  verifyOpenCodeAddonPackageMetadata,
   type CodexAddonSnapshot,
   type RuntimeAddonGitOperations,
 } from "../install/runtime-addon-acquisition.js";
@@ -99,7 +99,9 @@ import type {
 } from "../ports/state.js";
 import {
   applyExactPlan,
+  recoverPendingApply,
   StalePreviewError,
+  type ApplyDependencies,
   type ApplyResult,
 } from "../planning/apply.js";
 import type {
@@ -139,6 +141,8 @@ import {
   inspectClaudeOfficialPluginRegistration,
   inspectClaudeManagedRuntimeRegistration,
   inspectCodexManagedRuntimeRegistration,
+  inspectOpenCodeManagedRuntimeRegistration,
+  managedRuntimeRegistrationDisposition,
   inspectOpenCodeSkillRegistration,
   inspectOpenCodePackageAddon,
   openCodeSkillsReady,
@@ -154,9 +158,18 @@ import {
   registerOpenCodePackageAddon,
   registerOpenCodeSkills,
   registerOpenCodeRuntime,
+  type ManagedRuntimeRegistrationDisposition,
+  type OpenCodeManagedRuntimeRegistrationState,
   type OpenCodeSkillRegistration,
   type CodexMarketplaceAddonRegistration,
 } from "./native-registration.js";
+import {
+  inspectAgent,
+  inspectCompositionAgent,
+  managedRuntimePath,
+  plannedAgentOperation,
+  type AgentEnvironmentStatus,
+} from "./runtime-policy.js";
 
 const RECONCILER_ACTION_ID = "omh-reconciler";
 const MARKER_SCHEMA_VERSION = "2.0.0";
@@ -171,16 +184,6 @@ export type EnvironmentReadiness =
   | "stale-preview"
   | "unconfigured"
   | "unverifiable";
-
-export interface AgentEnvironmentStatus {
-  readonly id: AgentId;
-  readonly command: string;
-  readonly expectedVersion: string;
-  readonly executablePath: string | null;
-  readonly state: "ready" | "installable" | "unsupported" | "drift";
-  readonly ownership: "external" | "managed" | "none";
-  readonly detail: string;
-}
 
 export interface CapabilityEnvironmentStatus {
   readonly id: string;
@@ -320,8 +323,8 @@ interface OpenCodeRuntimeAddonModel extends RuntimeAddonModelBase {
   readonly addon: OpenCodePackageAddon;
   readonly agentId: "opencode";
   readonly kind: "opencode-package";
-  readonly metadataInvocation: TrustedInvocation | null;
   readonly nativeState: "collision" | "missing" | "ready";
+  readonly sourceArchivePath: string | null;
 }
 
 interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
@@ -335,6 +338,7 @@ interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
     readonly plugin: "collision" | "missing" | "ready";
   };
   readonly snapshot: CodexAddonSnapshot;
+  readonly sourceArchivePath: string | null;
 }
 
 type RuntimeAddonModel =
@@ -381,6 +385,9 @@ function selectedPackageIds(
 ): readonly PackageId[] {
   const requested = override
     ?? [...profile.packages.required, ...profile.packages.optional];
+  if (profile.compositionOnly === true && requested.length > 0) {
+    throw new Error("composition profiles must not select CLI packages");
+  }
   const unique = new Set<PackageId>();
   for (const id of requested) {
     if (!isPackageId(id)) throw new Error(`unsupported package: ${id}`);
@@ -388,77 +395,6 @@ function selectedPackageIds(
     unique.add(id);
   }
   return [...unique];
-}
-
-function managedRuntimePath(
-  stateRoot: string,
-  adapter: RuntimeAdapterDescriptor,
-  platformId: PlatformId,
-): string {
-  const extension = platformId.startsWith("win32-") ? ".exe" : "";
-  return join(
-    stateRoot,
-    "runtimes",
-    adapter.id,
-    adapter.version,
-    `${adapter.id}${extension}`,
-  );
-}
-
-function inspectAgent(
-  adapter: RuntimeAdapterDescriptor,
-  stateRoot: string,
-  platformId: PlatformId,
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-): AgentEnvironmentStatus {
-  const artifact = adapter.platforms.find((entry) =>
-    entry.platformId === platformId);
-  if (!artifact) {
-    return {
-      command: adapter.command,
-      detail: `no reviewed ${platformId} artifact`,
-      executablePath: null,
-      expectedVersion: adapter.version,
-      id: adapter.id,
-      ownership: "none",
-      state: "unsupported",
-    };
-  }
-  const managed = managedRuntimePath(stateRoot, adapter, platformId);
-  const external = findTrustedExecutable(adapter.command, { cwd, env });
-  for (const [path, ownership] of [
-    [managed, "managed"],
-    [external, "external"],
-  ] as const) {
-    if (path === null || !existsSync(path)) continue;
-    try {
-      if (sha256File(path) === artifact.executable.sha256) {
-        return {
-          command: adapter.command,
-          detail: `${ownership} executable matches reviewed digest`,
-          executablePath: path,
-          expectedVersion: adapter.version,
-          id: adapter.id,
-          ownership,
-          state: "ready",
-        };
-      }
-    } catch {
-      // A mismatched or unreadable candidate remains visible below.
-    }
-  }
-  return {
-    command: adapter.command,
-    detail: external === null
-      ? "reviewed runtime is available for exact acquisition"
-      : "PATH runtime differs from reviewed digest; a separate managed runtime is required",
-    executablePath: external,
-    expectedVersion: adapter.version,
-    id: adapter.id,
-    ownership: "none",
-    state: external === null ? "installable" : "drift",
-  };
 }
 
 function packageModel(
@@ -637,39 +573,14 @@ function runtimeAddonFingerprint(addon: DefaultRuntimeAddon): string {
   return sha256Bytes(stableJson(addon));
 }
 
-function resolveNpmMetadataInvocation(
-  options: ReturnType<typeof normalizedOptions>,
-): TrustedInvocation | null {
-  const ambient = resolveTrustedInvocation(["npm"], {
-    env: options.env,
-    platform: options.os,
-    workspace: options.cwd,
-  });
-  if (ambient !== undefined) return ambient;
-  const npmCli = join(
-    dirname(process.execPath),
-    "node_modules",
-    "npm",
-    "bin",
-    "npm-cli.js",
-  );
-  try {
-    const stat = lstatSync(npmCli);
-    if (
-      !stat.isSymbolicLink()
-      && stat.isFile()
-      && isPathStrictlyWithin(dirname(process.execPath), npmCli)
-    ) {
-      return {
-        argsPrefix: [npmCli],
-        command: process.execPath,
-        executablePath: process.execPath,
-      };
-    }
-  } catch {
-    // The target must provide a trusted npm executable when Node does not bundle it.
-  }
-  return null;
+function runtimeAddonArchive(
+  repositoryRoot: string,
+  relativePath: string,
+  expectedSha256: string,
+): string | null {
+  const path = resolve(repositoryRoot, relativePath);
+  if (!isPathStrictlyWithin(repositoryRoot, path)) return null;
+  return inspectRuntimeAddonArchive(path, expectedSha256) ? path : null;
 }
 
 function isOpenCodePackageAddon(
@@ -728,7 +639,11 @@ function buildRuntimeAddonModels(
     return entry.defaultAddons.map((addon): RuntimeAddonModel => {
       const fingerprint = runtimeAddonFingerprint(addon);
       if (isOpenCodePackageAddon(addon)) {
-        const metadataInvocation = resolveNpmMetadataInvocation(options);
+        const sourceArchivePath = runtimeAddonArchive(
+          options.repositoryRoot,
+          addon.registration.snapshotArchivePath,
+          addon.registration.snapshotArchiveSha256,
+        );
         const nativeState = inspectOpenCodePackageAddon(
           {
             packageName: addon.registration.packageName,
@@ -739,7 +654,7 @@ function buildRuntimeAddonModels(
         );
         const state = nativeState === "collision"
           ? "conflict" as const
-          : metadataInvocation === null
+          : sourceArchivePath === null
             ? "unverifiable" as const
             : nativeState === "ready"
               ? "ready" as const
@@ -749,14 +664,14 @@ function buildRuntimeAddonModels(
           agentId: "opencode",
           fingerprint,
           kind: "opencode-package",
-          metadataInvocation,
           nativeState,
+          sourceArchivePath,
           status: {
             agentId: "opencode",
             detail: nativeState === "collision"
               ? "OpenCode contains a legacy, duplicate, or differently pinned OMO package"
-              : metadataInvocation === null
-                ? "trusted npm is unavailable for exact OMO metadata verification"
+              : sourceArchivePath === null
+                ? "the reviewed OpenCode OMO archive is unavailable"
                 : nativeState === "ready"
                   ? `${addon.registration.spec} is registered exactly`
                   : `${addon.registration.spec} can be registered additively`,
@@ -771,6 +686,11 @@ function buildRuntimeAddonModels(
         throw new Error("unsupported default add-on registration");
       }
       const snapshot = codexAddonSnapshot(addon, stateRoot);
+      const sourceArchivePath = runtimeAddonArchive(
+        options.repositoryRoot,
+        addon.registration.snapshotArchivePath,
+        addon.registration.snapshotArchiveSha256,
+      );
       const gitPath = findTrustedExecutable("git", {
         cwd: options.cwd,
         env: options.env,
@@ -822,7 +742,7 @@ function buildRuntimeAddonModels(
         || partial;
       const sourceAvailable =
         inspectCodexAddonSnapshot(addon, stateRoot)
-        || gitOperations !== null;
+        || sourceArchivePath !== null;
       const ready =
         nativeState.marketplace === "ready"
         && nativeState.plugin === "ready";
@@ -842,6 +762,7 @@ function buildRuntimeAddonModels(
         kind: "codex-marketplace",
         nativeState,
         snapshot,
+        sourceArchivePath,
         status: {
           agentId: "codex",
           detail: conflict
@@ -850,7 +771,7 @@ function buildRuntimeAddonModels(
               ? `${addon.registration.selector} ${addon.version} is registered exactly`
               : sourceAvailable
                 ? `${addon.registration.selector} ${addon.version} can be acquired and registered`
-                : "trusted Git or an exact managed OMO snapshot is required",
+                : "the reviewed embedded or managed Codex OMO snapshot is required",
           fingerprint,
           id: addon.id,
           state,
@@ -948,13 +869,20 @@ function buildModel(
   const agents = desired.selectedAgents.map((id) => {
     const adapter = adapterById.get(id);
     if (!adapter) throw new Error(`missing runtime adapter: ${id}`);
-    return inspectAgent(
-      adapter,
-      stateRoot,
-      platformId,
-      options.env,
-      options.cwd,
-    );
+    return profile.compositionOnly === true
+      ? inspectCompositionAgent(
+          adapter,
+          platformId,
+          options.env,
+          options.cwd,
+        )
+      : inspectAgent(
+          adapter,
+          stateRoot,
+          platformId,
+          options.env,
+          options.cwd,
+        );
   });
   const runtimeAddons = buildRuntimeAddonModels(
     catalog,
@@ -1233,6 +1161,17 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
+function compositionAgentTarget(
+  stateRoot: string,
+  id: AgentId,
+): string {
+  return join(stateRoot, "external", "agents", id);
+}
+
+function compositionNodeTarget(stateRoot: string): string {
+  return join(stateRoot, "external", "runtime", "node");
+}
+
 function previousManagedPayloadRoot(
   model: EnvironmentModel,
   runtimeId: AgentId,
@@ -1316,7 +1255,117 @@ function nativeObservedTarget(
     : marker;
 }
 
-function preflights(model: EnvironmentModel): PlanPreflight[] {
+function describeOpenCodeNativeRegistration(
+  state: OpenCodeManagedRuntimeRegistrationState,
+  hasPrevious: boolean,
+): string {
+  switch (state) {
+    case "collision":
+      return "OpenCode configuration has a malformed, duplicate, or foreign oh-my-harness registration";
+    case "previous":
+      return "OpenCode registration exactly matches the prior managed payload";
+    case "ready":
+      return "OpenCode registration exactly matches the current managed payload";
+    case "missing":
+      return hasPrevious
+        ? "OpenCode prior managed registration is missing"
+        : "OpenCode registration can be installed additively";
+  }
+}
+
+function describeCommandNativeRegistration(
+  runtimeName: "Claude" | "Codex",
+  disposition: ManagedRuntimeRegistrationDisposition,
+  hasPrevious: boolean,
+): string {
+  if (hasPrevious) {
+    return disposition === "ready"
+      ? `${runtimeName} registration exactly matches the prior managed payload`
+      : `${runtimeName} registration no longer matches the prior managed payload`;
+  }
+  switch (disposition) {
+    case "ready":
+      return `${runtimeName} registration exactly matches the current managed payload`;
+    case "missing":
+      return `${runtimeName} registration can be installed additively`;
+    case "collision":
+      return `${runtimeName} registration is malformed, partial, duplicate, foreign, or missing from its prior managed payload`;
+  }
+}
+
+function nativeRuntimePreflights(
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): PlanPreflight[] {
+  return model.selectedAgents.flatMap((runtimeId): PlanPreflight[] => {
+    const previousActiveRoot = previousManagedPayloadRoot(model, runtimeId);
+    if (runtimeId === "opencode") {
+      const state = inspectOpenCodeManagedRuntimeRegistration(
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          ...(previousActiveRoot === null ? {} : { previousActiveRoot }),
+        },
+        options.env,
+        options.os,
+      );
+      const accepted = state === "ready"
+        || (previousActiveRoot === null && state === "missing")
+        || (previousActiveRoot !== null && state === "previous");
+      return [{
+        detail: describeOpenCodeNativeRegistration(
+          state,
+          previousActiveRoot !== null,
+        ),
+        id: "native-registration:opencode",
+        required: true,
+        status: accepted ? "ready" : "unverifiable",
+      }];
+    }
+
+    const agent = model.agents.find(({ id }) => id === runtimeId);
+    if (agent?.state !== "ready" || agent.executablePath === null) return [];
+    const executable = agent.executablePath;
+    const nativeRun = (command: string, args: readonly string[]) =>
+      runCommand(command, args, options);
+    const inspect = runtimeId === "claude-code"
+      ? inspectClaudeManagedRuntimeRegistration
+      : inspectCodexManagedRuntimeRegistration;
+    const observation = inspect(
+      executable,
+      {
+        activeRoot: previousActiveRoot ?? model.managedPayload.activeRoot,
+        receiptPath: model.receiptPath,
+      },
+      nativeRun,
+    );
+    const disposition = managedRuntimeRegistrationDisposition(observation);
+    const accepted = previousActiveRoot === null
+      ? disposition !== "collision"
+      : disposition === "ready";
+    const runtimeName = runtimeId === "claude-code" ? "Claude" : "Codex";
+    return [{
+      detail: describeCommandNativeRegistration(
+        runtimeName,
+        disposition,
+        previousActiveRoot !== null,
+      ),
+      id: `native-registration:${runtimeId}`,
+      required: true,
+      status: accepted ? "ready" : "unverifiable",
+    }];
+  });
+}
+
+function preflights(
+  model: EnvironmentModel,
+  options: ReturnType<typeof normalizedOptions>,
+): PlanPreflight[] {
+  if (
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0
+  ) {
+    return [];
+  }
   return [
     {
       detail:
@@ -1328,7 +1377,11 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
     ...model.agents.map((agent): PlanPreflight => ({
       id: `agent:${agent.id}`,
       required: true,
-      status: agent.state === "unsupported" ? "unsupported" : "ready",
+      status: agent.state === "unsupported"
+        ? "unsupported"
+        : model.profile.compositionOnly === true && agent.state !== "ready"
+          ? "unverifiable"
+          : "ready",
       detail: agent.detail,
     })),
     ...model.packages.map((entry): PlanPreflight => ({
@@ -1387,6 +1440,7 @@ function preflights(model: EnvironmentModel): PlanPreflight[] {
           ? "unverifiable"
           : "ready",
     })),
+    ...nativeRuntimePreflights(model, options),
     ...cleanPreflights(model),
     ...(model.toolRouteRequested
       ? [{
@@ -1408,6 +1462,12 @@ function planActions(
     Pick<EnvironmentOrchestratorOptions, "env" | "os" | "repositoryRoot">
   >,
 ): PlanAction[] {
+  if (
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0
+  ) {
+    return [];
+  }
   const reconcilerSource = resolve(
     options.repositoryRoot,
     "dist",
@@ -1424,8 +1484,8 @@ function planActions(
   const actions: PlanAction[] = [];
   for (const addon of model.runtimeAddons) {
     if (addon.kind === "opencode-package") {
-      if (addon.metadataInvocation === null) {
-        throw new Error("trusted npm is unavailable for OpenCode OMO");
+      if (addon.sourceArchivePath === null) {
+        throw new Error("reviewed OpenCode OMO archive is unavailable");
       }
       const target = runtimeAddonMarkerPath(
         model.stateRoot,
@@ -1442,15 +1502,16 @@ function planActions(
         id: "addon:opencode:omo:source",
         kind: "acquire",
         payload: {
-          argsPrefix: addon.metadataInvocation.argsPrefix,
-          command: addon.metadataInvocation.command,
           content,
           contentDigest: sha256Bytes(content),
           fingerprint: addon.fingerprint,
-          operation: "verify-opencode-addon-metadata",
+          operation: "verify-opencode-addon-source",
           ownershipKind: "file",
           ownershipScope: "managed",
           packageName: addon.addon.registration.packageName,
+          snapshotArchivePath: addon.addon.registration.snapshotArchivePath,
+          snapshotArchiveSha256:
+            addon.addon.registration.snapshotArchiveSha256,
           version: addon.addon.version,
         },
         preimage: observeRegularFile(target),
@@ -1465,10 +1526,12 @@ function planActions(
       payload: {
         contentDigest: addon.snapshot.digest,
         fingerprint: addon.fingerprint,
-        ...(addon.gitPath === null ? {} : { gitPath: addon.gitPath }),
         operation: "acquire-codex-addon-snapshot",
         ownershipKind: "directory",
         ownershipScope: "managed",
+        snapshotArchivePath: addon.addon.registration.snapshotArchivePath,
+        snapshotArchiveSha256:
+          addon.addon.registration.snapshotArchiveSha256,
       },
       preimage: observeManagedPath(addon.snapshot.root),
       required: true,
@@ -1487,7 +1550,7 @@ function planActions(
       },
       preimage: observeRegularFile(process.execPath),
       required: true,
-      target: process.execPath,
+      target: compositionNodeTarget(model.stateRoot),
     },
     {
       id: "plugin:runtime-package",
@@ -1517,17 +1580,18 @@ function planActions(
     const artifact = adapter?.platforms.find(({ platformId }) =>
       platformId === model.platformId);
     if (!adapter || !artifact) continue;
-    const target = agent.state === "ready" && agent.executablePath !== null
-      ? agent.executablePath
-      : managedRuntimePath(model.stateRoot, adapter, model.platformId);
+    const target = model.profile.compositionOnly === true
+        && agent.ownership === "external"
+      ? compositionAgentTarget(model.stateRoot, agent.id)
+      : agent.state === "ready" && agent.executablePath !== null
+        ? agent.executablePath
+        : managedRuntimePath(model.stateRoot, adapter, model.platformId);
     actions.push({
       id: `agent:${agent.id}`,
       kind: "acquire",
       payload: {
         agentId: agent.id,
-        operation: agent.state === "ready"
-          ? "verify-agent"
-          : "acquire-agent",
+        operation: plannedAgentOperation(model.profile, agent),
         ownershipKind: "executable",
         ownershipScope: agent.ownership === "external" ? "external" : "managed",
         sourceDigest: artifact.executable.sha256,
@@ -1720,7 +1784,7 @@ function planActions(
       payload: {
         content,
         contentDigest: sha256Bytes(content),
-        nodePath: process.execPath,
+        nodePath: compositionNodeTarget(model.stateRoot),
         observedTarget,
         operation: "register-runtime",
         ownershipKind: "registration",
@@ -1826,7 +1890,19 @@ function observedState(
 ): Readonly<Record<string, unknown>> {
   return {
     addons: model.runtimeAddons.map(({ status }) => status),
-    agents: model.agents,
+    agents: model.profile.compositionOnly === true
+      ? model.agents.map((agent) => ({
+          ...agent,
+          ...(agent.executablePath === null
+            ? {}
+            : {
+                executablePath: compositionAgentTarget(
+                  model.stateRoot,
+                  agent.id,
+                ),
+              }),
+        }))
+      : model.agents,
     packages: model.packages,
     native: Object.fromEntries(
       model.selectedAgents.map((runtimeId) => {
@@ -1864,8 +1940,12 @@ function optionalGapIds(preflight: readonly PlanPreflight[]): string[] {
 
 function previewCommand(model: EnvironmentModel): string {
   return `omh setup --profile ${model.profile.id} --agents ${
-    model.selectedAgents.join(",")
+    selectedAgentsArgument(model.selectedAgents)
   } --root ${JSON.stringify(model.stateRoot)}`;
+}
+
+function selectedAgentsArgument(selectedAgents: readonly AgentId[]): string {
+  return selectedAgents.join(",") || "none";
 }
 
 function normalizedOptions(
@@ -1906,7 +1986,7 @@ function buildEnvironmentPreview(
   readonly preview: EnvironmentPreview;
 } {
   const model = buildModel(selection, normalized);
-  const checks = preflights(model);
+  const checks = preflights(model, normalized);
   const blockers = blockingIds(checks);
   const actions = blockers.length === 0 ? planActions(model, normalized) : [];
   const plan = blockers.length === 0
@@ -1969,17 +2049,6 @@ function payloadString(action: PlanAction, key: string): string {
     throw new Error(`${action.id} is missing payload.${key}`);
   }
   return value;
-}
-
-function payloadStringArray(action: PlanAction, key: string): readonly string[] {
-  const value = action.payload?.[key];
-  if (
-    !Array.isArray(value)
-    || value.some((entry) => typeof entry !== "string")
-  ) {
-    throw new Error(`${action.id} is missing payload.${key}`);
-  }
-  return value as readonly string[];
 }
 
 function runCommand(
@@ -2071,6 +2140,17 @@ function runtimeExecutable(
   model: EnvironmentModel,
   options: ReturnType<typeof normalizedOptions>,
 ): string {
+  if (model.profile.compositionOnly === true) {
+    const agent = model.agents.find(({ id }) => id === runtimeId);
+    if (
+      agent?.state !== "ready"
+      || agent.ownership !== "external"
+      || agent.executablePath === null
+    ) {
+      throw new Error(`${runtimeId} caller-provided executable is unavailable`);
+    }
+    return agent.executablePath;
+  }
   const adapter = model.adapters.find(({ id }) => id === runtimeId);
   if (!adapter) throw new Error(`missing selected runtime adapter: ${runtimeId}`);
   const managed = managedRuntimePath(model.stateRoot, adapter, model.platformId);
@@ -2129,8 +2209,9 @@ async function executeAction(
 ): Promise<{ readonly verified: boolean; readonly detail?: string }> {
   const operation = payloadString(action, "operation");
   if (operation === "verify-file") {
+    const target = action.id === "omh-node" ? process.execPath : action.target;
     return {
-      verified: sha256File(action.target) === payloadString(action, "contentDigest"),
+      verified: sha256File(target) === payloadString(action, "contentDigest"),
     };
   }
   if (operation === "materialize-runtime-package") {
@@ -2141,37 +2222,29 @@ async function executeAction(
         === payloadString(action, "contentDigest"),
     };
   }
-  if (operation === "verify-opencode-addon-metadata") {
+  if (operation === "verify-opencode-addon-source") {
     const addon = model.runtimeAddons.find(
       (candidate): candidate is OpenCodeRuntimeAddonModel =>
         candidate.kind === "opencode-package",
     );
     if (
       addon === undefined
-      || addon.metadataInvocation === null
+      || addon.sourceArchivePath === null
       || addon.fingerprint !== payloadString(action, "fingerprint")
       || addon.addon.registration.packageName
         !== payloadString(action, "packageName")
       || addon.addon.version !== payloadString(action, "version")
-      || addon.metadataInvocation.command !== payloadString(action, "command")
-      || stableJson(addon.metadataInvocation.argsPrefix)
-        !== stableJson(payloadStringArray(action, "argsPrefix"))
+      || addon.addon.registration.snapshotArchivePath
+        !== payloadString(action, "snapshotArchivePath")
+      || addon.addon.registration.snapshotArchiveSha256
+        !== payloadString(action, "snapshotArchiveSha256")
+      || !inspectRuntimeAddonArchive(
+        addon.sourceArchivePath,
+        addon.addon.registration.snapshotArchiveSha256,
+      )
     ) {
-      throw new Error("OpenCode OMO metadata preflight changed after preview");
+      throw new Error("OpenCode OMO source changed after preview");
     }
-    const output = runCommand(
-      addon.metadataInvocation.command,
-      [
-        ...addon.metadataInvocation.argsPrefix,
-        "view",
-        `${addon.addon.registration.packageName}@${addon.addon.version}`,
-        "version",
-        "dist",
-        "--json",
-      ],
-      options,
-    );
-    verifyOpenCodeAddonPackageMetadata(addon.addon, output);
     atomicWriteFile(action.target, payloadString(action, "content"));
     return {
       verified:
@@ -2192,27 +2265,19 @@ async function executeAction(
       throw new Error("Codex OMO snapshot identity changed after preview");
     }
     if (!inspectCodexAddonSnapshot(addon.addon, model.stateRoot)) {
-      const plannedGit = payloadString(action, "gitPath");
-      const currentGit = findTrustedExecutable("git", {
-        cwd: options.cwd,
-        env: options.env,
-        platform: options.os,
-      });
       if (
-        currentGit === null
-        || resolve(currentGit) !== resolve(plannedGit)
+        addon.sourceArchivePath === null
+        || addon.addon.registration.snapshotArchivePath
+          !== payloadString(action, "snapshotArchivePath")
+        || addon.addon.registration.snapshotArchiveSha256
+          !== payloadString(action, "snapshotArchiveSha256")
       ) {
-        throw new Error("trusted Git changed after Codex OMO preview");
+        throw new Error("Codex OMO source changed after preview");
       }
-      materializeCodexAddonSnapshot(
+      await materializeCodexAddonSnapshotFromArchive(
+        addon.sourceArchivePath,
         addon.addon,
         model.stateRoot,
-        createRuntimeAddonGitOperations(
-          currentGit,
-          (command, args, environment) =>
-            runCommand(command, args, { ...options, env: environment }),
-          options.env,
-        ),
       );
     }
     return {
@@ -2311,8 +2376,14 @@ async function executeAction(
     };
   }
   if (operation === "verify-agent") {
+    const agentId = payloadString(action, "agentId");
+    if (!isAgentId(agentId)) {
+      throw new Error(`${action.id}: unknown caller-owned agent`);
+    }
+    const executable = runtimeExecutable(agentId, model, options);
     return {
-      verified: sha256File(action.target) === payloadString(action, "sourceDigest"),
+      verified:
+        sha256File(executable) === payloadString(action, "sourceDigest"),
     };
   }
   if (operation === "install-package") {
@@ -2763,7 +2834,7 @@ function recoveryPayload(
       "register-opencode-skill",
       "register-runtime",
       "remove-owned",
-      "verify-opencode-addon-metadata",
+      "verify-opencode-addon-source",
     ].includes(value.operation)
     || !Array.isArray(value.snapshots)
     || value.snapshots.length < 1
@@ -3383,16 +3454,16 @@ function prepareActionRollback(
     if (previousActiveRoot !== null) {
       const nativeRun = (command: string, args: readonly string[]) =>
         runCommand(command, args, options);
+      const state = inspectClaudeManagedRuntimeRegistration(
+        executable,
+        {
+          activeRoot: previousActiveRoot,
+          receiptPath: model.receiptPath,
+        },
+        nativeRun,
+      );
       if (
-        !claudeRegistrationReady(
-          executable,
-          {
-            activeRoot: previousActiveRoot,
-            receiptPath: model.receiptPath,
-          },
-          [],
-          nativeRun,
-        )
+        managedRuntimeRegistrationDisposition(state) !== "ready"
       ) {
         throw new Error(
           "Claude managed registration no longer matches the prior receipt",
@@ -3416,6 +3487,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
+      const disposition = managedRuntimeRegistrationDisposition(state);
       if (state.marketplace === "collision") {
         throw new Error(
           "Claude marketplace oh-my-harness points to another source",
@@ -3426,12 +3498,12 @@ function prepareActionRollback(
           "oh-my-harness@oh-my-harness collides with an existing user-owned Claude plugin",
         );
       }
-      if (state.marketplace !== state.plugin) {
+      if (disposition === "collision") {
         throw new Error(
           "Claude managed runtime registration is partial and cannot be adopted",
         );
       }
-      if (state.marketplace === "missing") {
+      if (disposition === "missing") {
         native = {
           activeRoot: model.managedPayload.activeRoot,
           executablePath: executable,
@@ -3459,7 +3531,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
-      if (state.marketplace !== "ready" || state.plugin !== "ready") {
+      if (managedRuntimeRegistrationDisposition(state) !== "ready") {
         throw new Error(
           "Codex managed registration no longer matches the prior receipt",
         );
@@ -3480,6 +3552,7 @@ function prepareActionRollback(
         },
         nativeRun,
       );
+      const disposition = managedRuntimeRegistrationDisposition(state);
       if (state.marketplace === "collision") {
         throw new Error(
           "Codex marketplace oh-my-harness points to another root",
@@ -3490,12 +3563,12 @@ function prepareActionRollback(
           "oh-my-harness@oh-my-harness collides with an existing Codex plugin registration",
         );
       }
-      if (state.marketplace !== state.plugin) {
+      if (disposition === "collision") {
         throw new Error(
           "Codex managed runtime registration is partial and cannot be adopted",
         );
       }
-      if (state.marketplace === "missing") {
+      if (disposition === "missing") {
         native = {
           activeRoot: model.managedPayload.activeRoot,
           executablePath: executable,
@@ -3642,36 +3715,19 @@ function completedActionReady(action: PlanAction): boolean {
     : sha256File(action.target) === expected;
 }
 
-export async function applyEnvironment(
-  selection: EnvironmentSelection,
-  expectedDigest: string,
-  options: EnvironmentOrchestratorOptions,
-): Promise<{
-  readonly preview: EnvironmentPreview;
-  readonly result: ApplyResult;
-}> {
-  const normalized = normalizedOptions(options);
-  const { model, preview } = buildEnvironmentPreview(selection, normalized);
-  if (preview.plan === null || preview.digest === null) {
-    throw new Error(`environment preview is blocked: ${preview.blockers.join(", ")}`);
-  }
-  if (preview.digest !== expectedDigest) {
-    throw new StalePreviewError("environment preview digest is stale");
-  }
-  const result = await applyExactPlan(preview.plan, expectedDigest, {
-    state: new FileStateStore(model.stateRoot, {
-      validateReceipt(value) {
-        validateContractDocument(
-          "managed-state-receipt",
-          value,
-          normalized.repositoryRoot,
-        );
-        return value as ManagedStateReceipt;
-      },
-    }),
+function environmentApplyDependencies(
+  model: EnvironmentModel,
+  normalized: ReturnType<typeof normalizedOptions>,
+  state: FileStateStore,
+): ApplyDependencies {
+  return {
+    state,
     commitRecovery: async (recovery) =>
       commitEnvironmentRecovery(recovery, model, normalized),
-    observe: async (action) => actionPreimage(action),
+    observe: async (action) =>
+      action.id === "omh-node"
+        ? observeRegularFile(process.execPath)
+        : actionPreimage(action),
     prepare: async (action) => prepareActionRollback(
       action,
       model,
@@ -3682,7 +3738,66 @@ export async function applyEnvironment(
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
+  };
+}
+
+export async function applyEnvironment(
+  selection: EnvironmentSelection,
+  expectedDigest: string,
+  options: EnvironmentOrchestratorOptions,
+): Promise<{
+  readonly preview: EnvironmentPreview;
+  readonly result: ApplyResult;
+}> {
+  const normalized = normalizedOptions(options);
+  let current = buildEnvironmentPreview(selection, normalized);
+  let state: FileStateStore | null = null;
+  const journalPath = join(current.model.stateRoot, "journal", "apply.json");
+  if (existsSync(journalPath)) {
+    state = new FileStateStore(current.model.stateRoot, {
+      validateReceipt(value) {
+        validateContractDocument(
+          "managed-state-receipt",
+          value,
+          normalized.repositoryRoot,
+        );
+        return value as ManagedStateReceipt;
+      },
+    });
+    const recovery = await recoverPendingApply(
+      environmentApplyDependencies(current.model, normalized, state),
+    );
+    if (recovery.failure !== undefined) {
+      throw new Error(
+        `environment interrupted apply recovery failed: ${recovery.failure}`,
+      );
+    }
+    if (recovery.recovered) {
+      current = buildEnvironmentPreview(selection, normalized);
+    }
+  }
+  const { model, preview } = current;
+  if (preview.plan === null || preview.digest === null) {
+    throw new Error(`environment preview is blocked: ${preview.blockers.join(", ")}`);
+  }
+  if (preview.digest !== expectedDigest) {
+    throw new StalePreviewError("environment preview digest is stale");
+  }
+  state ??= new FileStateStore(model.stateRoot, {
+    validateReceipt(value) {
+      validateContractDocument(
+        "managed-state-receipt",
+        value,
+        normalized.repositoryRoot,
+      );
+      return value as ManagedStateReceipt;
+    },
   });
+  const result = await applyExactPlan(
+    preview.plan,
+    expectedDigest,
+    environmentApplyDependencies(model, normalized, state),
+  );
   return { preview, result };
 }
 
@@ -3816,7 +3931,9 @@ export function inspectEnvironment(
   const payloadOwnership = receipt.ownership.filter(
     ({ id, kind }) => id === "plugin:runtime-package" && kind === "directory",
   );
-  let payloadReady = false;
+  let payloadReady =
+    model.profile.compositionOnly === true
+    && model.selectedAgents.length === 0;
   if (
     payloadOwnership.length === 1
     && payloadOwnership[0]?.target === model.managedPayload.activeRoot
@@ -4082,7 +4199,7 @@ export function inspectEnvironment(
       ? []
       : [
           `omh setup --profile ${receipt.desiredState.profileId} --agents ${
-            receipt.desiredState.selectedAgents.join(",")
+            selectedAgentsArgument(receipt.desiredState.selectedAgents)
           } --root ${JSON.stringify(stateRoot)}`,
         ],
     schemaVersion: "2.0.0",
@@ -4241,7 +4358,7 @@ export function diagnoseEnvironment(
     readiness: "unverifiable",
     remediation: [
       `omh setup --profile ${status.profileId} --agents ${
-        status.selectedAgents.join(",")
+        selectedAgentsArgument(status.selectedAgents)
       } --root ${JSON.stringify(status.stateRoot)}`,
     ],
     v2ParityReady: status.v2ParityReady && issues.length === 0,

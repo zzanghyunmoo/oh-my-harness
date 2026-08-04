@@ -164,6 +164,8 @@
           "required": [
             "kind",
             "packageName",
+            "snapshotArchivePath",
+            "snapshotArchiveSha256",
             "spec",
             "tarballUrl",
             "integrity"
@@ -174,6 +176,13 @@
             },
             "packageName": {
               "const": "oh-my-openagent"
+            },
+            "snapshotArchivePath": {
+              "const": "harness/vendor/oh-my-openagent-4.19.2.tgz"
+            },
+            "snapshotArchiveSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
             },
             "spec": {
               "pattern": "^oh-my-openagent@[0-9]+\\.[0-9]+\\.[0-9]+$",
@@ -237,6 +246,8 @@
             "pluginContentSha256",
             "marketplaceName",
             "selector",
+            "snapshotArchivePath",
+            "snapshotArchiveSha256",
             "snapshotContentSha256"
           ],
           "properties": {
@@ -283,6 +294,13 @@
             },
             "selector": {
               "const": "omo@sisyphuslabs"
+            },
+            "snapshotArchivePath": {
+              "const": "harness/vendor/lazycodex-omo-4.19.2.tgz"
+            },
+            "snapshotArchiveSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
             },
             "snapshotContentSha256": {
               "pattern": "^[0-9a-f]{64}$",

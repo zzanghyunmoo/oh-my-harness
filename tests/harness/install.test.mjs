@@ -46,7 +46,7 @@ function createRuntimeStatusFixture(installRoot, id, version) {
 
 function expectedRegistrationPaths(installRoot) {
   return {
-    harness: join(installRoot, "packages", "oh-my-harness", "0.2.0", "a".repeat(64)),
+    harness: join(installRoot, "packages", "oh-my-harness", "0.3.0", "a".repeat(64)),
     compoundEngineering: join(
       installRoot,
       "packages",
@@ -188,7 +188,7 @@ test("installer refuses to place managed payloads inside the source repository",
 });
 
 test("Claude registration installs exact local marketplaces and plugins idempotently", () => {
-  const harnessRoot = "/managed/packages/oh-my-harness/0.2.0/digest";
+  const harnessRoot = "/managed/packages/oh-my-harness/0.3.0/digest";
   const ceRoot = "/managed/packages/compound-engineering/3.19.0/commit/plugins/compound-engineering";
   const marketplaces = new Map();
   const plugins = new Map();
@@ -216,7 +216,7 @@ test("Claude registration installs exact local marketplaces and plugins idempote
       }
       if (args[0] === "plugin" && args[1] === "install") {
         const selector = args[2];
-        plugins.set(selector, selector.startsWith("oh-my-harness@") ? "0.2.0" : "3.19.0");
+        plugins.set(selector, selector.startsWith("oh-my-harness@") ? "0.3.0" : "3.19.0");
         disabledPlugins.delete(selector);
         return "";
       }
@@ -231,7 +231,7 @@ test("Claude registration installs exact local marketplaces and plugins idempote
   const input = {
     runtimeId: "claude-code",
     binaryPath: "/managed/claude-code",
-    harnessPayload: { path: harnessRoot, version: "0.2.0" },
+    harnessPayload: { path: harnessRoot, version: "0.3.0" },
     cePayload: { pluginPath: ceRoot, version: "3.19.0" },
     managedRoot: "/managed",
     runner,
@@ -241,7 +241,7 @@ test("Claude registration installs exact local marketplaces and plugins idempote
   registerRuntimePackages(input);
   assert.equal(calls.filter((args) => ["add", "install"].includes(args[2] ?? args[1])).length, mutations);
   assert.deepEqual([...plugins], [
-    ["oh-my-harness@oh-my-harness", "0.2.0"],
+    ["oh-my-harness@oh-my-harness", "0.3.0"],
     ["compound-engineering@compound-engineering-plugin", "3.19.0"],
   ]);
 
@@ -250,11 +250,11 @@ test("Claude registration installs exact local marketplaces and plugins idempote
   assert.equal(repaired.harnessPlugin, "updated");
   assert.equal(disabledPlugins.has("oh-my-harness@oh-my-harness"), false);
 
-  const nextRoot = "/managed/packages/oh-my-harness/0.2.0/next-digest";
-  const updated = registerRuntimePackages({ ...input, harnessPayload: { path: nextRoot, version: "0.2.0" } });
+  const nextRoot = "/managed/packages/oh-my-harness/0.3.0/next-digest";
+  const updated = registerRuntimePackages({ ...input, harnessPayload: { path: nextRoot, version: "0.3.0" } });
   assert.equal(updated.harnessMarketplace, "updated");
   assert.equal(marketplaces.get("oh-my-harness"), nextRoot);
-  assert.equal(plugins.get("oh-my-harness@oh-my-harness"), "0.2.0");
+  assert.equal(plugins.get("oh-my-harness@oh-my-harness"), "0.3.0");
 });
 
 test("installer arguments are preview-first and reject ambiguous mutations", () => {
@@ -279,7 +279,7 @@ test("installer rejects combining all with an explicit runtime", async () => {
     /cannot be combined/i,
   );
   await assert.rejects(
-    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-unsupported-root"), os: "darwin", architecture: "arm64", runtimeIds: ["pi"] }),
+    buildInstallPlan({ installRoot: join(tmpdir(), "oh-my-harness-unsupported-root"), os: "darwin", architecture: "arm64", runtimeIds: ["unknown-runtime"] }),
     /runtime selection must contain only/i,
   );
 });
@@ -553,7 +553,7 @@ test("Claude status isolates each marketplace and plugin drift cause", async () 
       { name: "compound-engineering-plugin", path: expected.compoundEngineering },
     ];
     const healthyPlugins = [
-      { id: "oh-my-harness@oh-my-harness", version: "0.2.0", scope: "user", enabled: true },
+      { id: "oh-my-harness@oh-my-harness", version: "0.3.0", scope: "user", enabled: true },
       { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: true },
     ];
     const cases = [
@@ -698,7 +698,7 @@ test("Claude and OpenCode status report healthy native registration details", as
             { name: "compound-engineering-plugin", path: expected.compoundEngineering },
           ]);
           if (args.join(" ") === "plugin list --json") return JSON.stringify([
-            { id: "oh-my-harness@oh-my-harness", version: "0.2.0", scope: "user", enabled: true },
+            { id: "oh-my-harness@oh-my-harness", version: "0.3.0", scope: "user", enabled: true },
             { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: true },
           ]);
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
@@ -733,7 +733,7 @@ test("Claude status rejects registrations whose payload directories were deleted
             { name: "compound-engineering-plugin", path: expected.compoundEngineering },
           ]);
           if (args.join(" ") === "plugin list --json") return JSON.stringify([
-            { id: "oh-my-harness@oh-my-harness", version: "0.2.0", scope: "user", enabled: true },
+            { id: "oh-my-harness@oh-my-harness", version: "0.3.0", scope: "user", enabled: true },
             { id: "compound-engineering@compound-engineering-plugin", version: "3.19.0", scope: "user", enabled: true },
           ]);
           throw new Error(`unexpected command: ${binary} ${args.join(" ")}`);
@@ -897,7 +897,7 @@ test("OpenCode preserves stale registrations when replacements do not converge",
   const root = mkdtempSync(join(tmpdir(), "oh-my-harness-registration-prepare-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const managedRoot = join(root, "managed");
-  const harnessRoot = join(managedRoot, "packages", "oh-my-harness", "0.2.0", "new-digest");
+  const harnessRoot = join(managedRoot, "packages", "oh-my-harness", "0.3.0", "new-digest");
   const cePluginRoot = join(managedRoot, "packages", "compound-engineering", "3.19.0", "commit", "plugins", "compound-engineering");
   mkdirSync(harnessRoot, { recursive: true });
   mkdirSync(cePluginRoot, { recursive: true });
@@ -969,9 +969,15 @@ test("one plugin package shares skills and CLI tools across three maintained run
   const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.json"), "utf8"));
   const claudeMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.claude.json"), "utf8"));
   const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
-  const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
+  const retiredNamespacePath = join(
+    REPO_ROOT,
+    "plugins",
+    "oh-my-harness",
+    "skills",
+    String.fromCodePoint(111, 109, 112),
+  );
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
-  assert.equal(Object.hasOwn(packageJson, "pi"), false);
+  assert.deepEqual(Object.keys(packageJson.bin).sort(), ["oh-my-harness", "omh"]);
   assert.equal(packageJson.files.some((path) => path.startsWith("extensions")), false);
   assert.equal(marketplace.name, "oh-my-harness");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/oh-my-harness");
@@ -996,5 +1002,5 @@ test("one plugin package shares skills and CLI tools across three maintained run
     { runtimeId: "codex", profileId: "personal" },
     { runtimeId: "opencode", profileId: "company" },
   ]);
-  assert.equal(existsSync(skillPath), true);
+  assert.equal(existsSync(retiredNamespacePath), false);
 });

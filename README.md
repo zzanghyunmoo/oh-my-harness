@@ -5,8 +5,8 @@ Oh My Harness v2는 Claude Code, OpenCode, Codex 환경을 하나의 프로필�
 Node.js ESM + strict TypeScript이며, 모든 변경은 preview와 exact digest
 승인을 거칩니다.
 
-Pi, 전체 Compound Engineering 배포, connector/proxy/provider 확장은 v1
-역사와 migration 진단에만 남아 있고 v2 제품 surface에는 포함되지 않습니다.
+지원 런타임은 Claude Code, OpenCode, Codex의 정확한 세 집합이며 unknown agent ID는
+preview 전에 거부됩니다.
 
 ## 요구사항
 
@@ -83,6 +83,11 @@ profile, agent 선택, platform, observed pre-image로 plan을 다시 만들고 
 - `company`: Jira, Confluence, GitLab CLI가 required이고 Linear, Notion,
   GitHub CLI는 optional입니다. 기본 agent는 Claude Code이며 필요하면
   `--agents`로 OpenCode/Codex를 명시합니다.
+- `mds-host`: my-desk-setup이 호스트 기본 설치에 합성하는 package-free
+  Composition Profile입니다. 에이전트를 고르지 않으면 안정적인 no-op이고,
+  고르면 MDS 소유 executable은 exact digest로 검증만 합니다. Oh My Harness는
+  선택된 에이전트에 고정된 workflow, plugin과 OMO/LazyCodex add-on을 native
+  surface에 합성하지만 agent executable, CLI 패키지 또는 인증은 소유하지 않습니다.
 - custom: `create → validate → preview → publish`로 로컬 repository diff를
   만든 뒤 review/merge/release된 프로필만 trusted selection이 됩니다.
 
@@ -266,10 +271,7 @@ docs/plans/                  current and historical implementation plans
 docs/solutions/              durable implementation learnings
 ```
 
-Canonical 방향은
-[`docs/plans/2026-07-24-001-feat-claude-first-harness-v2-plan.md`](docs/plans/2026-07-24-001-feat-claude-first-harness-v2-plan.md)와
-[`CONCEPTS.md`](CONCEPTS.md)에 있습니다. v1 자료는 역사적 문서이며 현재
-명령 계약을 정의하지 않습니다.
+Canonical 제품 용어와 ownership 경계는 [`CONCEPTS.md`](CONCEPTS.md)에 있습니다.
 
 ## 개발과 릴리스 검증
 

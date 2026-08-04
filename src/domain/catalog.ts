@@ -42,11 +42,17 @@ export const CAPABILITY_IDS = [
 ] as const;
 
 export const BUILT_IN_PROFILE_IDS = ["personal", "company"] as const;
+export const COMPOSITION_PROFILE_IDS = ["mds-host"] as const;
+export const RELEASED_PROFILE_IDS = [
+  ...BUILT_IN_PROFILE_IDS,
+  ...COMPOSITION_PROFILE_IDS,
+] as const;
 
 export type AgentId = (typeof SUPPORTED_AGENT_IDS)[number];
 export type PackageId = (typeof PACKAGE_IDS)[number];
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 export type BuiltInProfileId = (typeof BUILT_IN_PROFILE_IDS)[number];
+export type CompositionProfileId = (typeof COMPOSITION_PROFILE_IDS)[number];
 
 export function isAgentId(value: string): value is AgentId {
   return (SUPPORTED_AGENT_IDS as readonly string[]).includes(value);
@@ -58,4 +64,10 @@ export function isPackageId(value: string): value is PackageId {
 
 export function isCapabilityId(value: string): value is CapabilityId {
   return (CAPABILITY_IDS as readonly string[]).includes(value);
+}
+
+export function isCompositionProfileId(
+  value: string,
+): value is CompositionProfileId {
+  return (COMPOSITION_PROFILE_IDS as readonly string[]).includes(value);
 }

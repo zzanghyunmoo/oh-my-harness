@@ -1,0 +1,33 @@
+{
+  "$schema": "../contracts/environment-profile.schema.json",
+  "schemaVersion": "2.0.0",
+  "kind": "environment-profile",
+  "id": "mds-host",
+  "displayName": "My Desk Setup Host",
+  "compositionOnly": true,
+  "selectedAgents": [],
+  "packages": {
+    "required": [],
+    "optional": []
+  },
+  "capabilities": [
+    "goal",
+    "deep-research",
+    "ideation",
+    "brainstorm",
+    "plan",
+    "code-review",
+    "doc-review",
+    "skill-creator",
+    "ralph-loop",
+    "security-guidance"
+  ],
+  "platformConditions": [],
+  "startupSync": {
+    "mode": "approved-additive",
+    "repairPinned": true,
+    "addReviewedContent": true,
+    "allowUpgrades": false,
+    "allowRemovals": false
+  }
+}

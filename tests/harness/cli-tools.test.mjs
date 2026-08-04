@@ -341,6 +341,20 @@ test("MCP server exposes only the selected runtime profile and rejects hidden to
     assert.deepEqual(claude[1].result.tools.map(({ name }) => name), [
       "workspace_cli_status", "workspace_cli_setup", "issue_tracker_jira_cli", "wiki_confluence_cli", "git_repository_gitlab_cli",
     ]);
+
+    writeApprovedReceipt(root, "mds-host");
+    const composition = await runMcp(
+      messages.slice(0, 2),
+      { ...process.env, PATH: "", OH_MY_HARNESS_HOME: home },
+      "codex",
+    );
+    assert.match(
+      composition[0].result.instructions,
+      /profile mds-host: no workspace CLI backends \(composition-only\)/,
+    );
+    assert.deepEqual(composition[1].result.tools.map(({ name }) => name), [
+      "workspace_cli_status", "workspace_cli_setup",
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

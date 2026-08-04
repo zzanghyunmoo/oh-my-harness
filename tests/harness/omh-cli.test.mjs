@@ -32,8 +32,12 @@ test("legacy omh parser coverage follows the Claude-first v2 selection contract"
     ["claude-code", "codex", "opencode"],
   );
   assert.throws(
-    () => parseOmhArguments(["setup", "--agents", "pi"]),
+    () => parseOmhArguments(["setup", "--agents", "unknown-agent"]),
     /must contain ids/,
+  );
+  assert.deepEqual(
+    parseOmhArguments(["setup", "--profile", "mds-host"]).agents,
+    [],
   );
 });
 
@@ -72,7 +76,7 @@ test("root launcher and package bin metadata expose omh", () => {
         { cwd: REPOSITORY_ROOT, encoding: "utf8" },
       );
   assert.equal(launched.status, 0, launched.stderr);
-  assert.match(launched.stdout, /^omh 0\.2\.0/m);
+  assert.match(launched.stdout, /^omh 0\.3\.0/m);
   if (process.platform !== "win32") {
     assert.notEqual(statSync(join(REPOSITORY_ROOT, "omh")).mode & 0o111, 0);
   }

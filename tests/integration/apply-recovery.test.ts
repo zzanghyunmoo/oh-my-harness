@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { validateContractDocument } from "../../dist/catalog/load.js";
 import {
   applyExactPlan,
+  recoverPendingApply,
   StalePreviewError,
 } from "../../dist/planning/apply.js";
 import { createApplyPlan } from "../../dist/planning/preview.js";
@@ -84,6 +85,41 @@ class MemoryState implements StatePort {
     this.receipt = structuredClone(receipt);
   }
 }
+
+test("U3 recovery-only phase restores pending state under the apply lock", async () => {
+  const exact = plan();
+  const state = new MemoryState();
+  const recovery: ApplyRecoveryRecord = {
+    actionId: "one",
+    kind: "fixture",
+    payload: { backup: "/managed/backup" },
+  };
+  state.journal = {
+    catalogRevision: exact.catalogRevision,
+    completedActionIds: ["one"],
+    kind: "apply-journal",
+    pendingRecoveries: [recovery],
+    planDigest: exact.digest,
+    schemaVersion: "2.0.0",
+    status: "partial-unready",
+  };
+  let recoveries = 0;
+
+  const result = await recoverPendingApply({
+    state,
+    recover: async (candidate) => {
+      assert.deepEqual(candidate, recovery);
+      recoveries += 1;
+    },
+  });
+
+  assert.equal(result.recovered, true);
+  assert.equal(result.failure, undefined);
+  assert.equal(recoveries, 1);
+  assert.equal(state.lockCount, 1);
+  assert.deepEqual(state.journal?.pendingRecoveries, []);
+  assert.deepEqual(state.journal?.completedActionIds, []);
+});
 
 test("U3 stale apply rejects before lock acquisition or action execution", async () => {
   const exact = plan();

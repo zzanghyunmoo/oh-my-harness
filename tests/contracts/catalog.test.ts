@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   CAPABILITY_IDS,
   PACKAGE_IDS,
+  RELEASED_PROFILE_IDS,
   SUPPORTED_AGENT_IDS,
 } from "../../dist/domain/catalog.js";
 import {
@@ -33,9 +34,9 @@ test("U2 catalog contains the exact agents, packages, and requested capabilities
   assert.deepEqual(catalog.agents.agents.map(({ id }) => id).sort(), [...SUPPORTED_AGENT_IDS].sort());
   assert.deepEqual(catalog.packages.packages.map(({ id }) => id).sort(), [...PACKAGE_IDS].sort());
   assert.deepEqual(catalog.capabilities.capabilities.map(({ id }) => id).sort(), [...CAPABILITY_IDS].sort());
+  assert.deepEqual(catalog.profiles.map(({ id }) => id).sort(), [...RELEASED_PROFILE_IDS].sort());
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "lsp").length, 7);
   assert.equal(catalog.capabilities.capabilities.filter(({ kind }) => kind === "workflow").length, 10);
-  assert.equal(JSON.stringify(catalog).includes('"pi"'), false);
   assert.deepEqual(agents.get("claude-code")?.defaultAddons, []);
   assert.equal(
     agents.get("opencode")?.defaultAddons[0]?.registration.kind,
@@ -76,7 +77,7 @@ test("Catalog Revision is deterministic and changes for semantic or provenance c
   assert.notEqual(computeCatalogRevision(addonChange), catalog.revision);
 });
 
-test("catalog validation fails closed on unknown fields, duplicates, Pi, secrets, and provenance gaps", () => {
+test("catalog validation fails closed on unknown fields, agents, duplicates, secrets, and provenance gaps", () => {
   const extra = mutableSource();
   Object.assign(extra.agents, { unexpected: true });
   assert.throws(() => validateCatalogSource(extra, REPO_ROOT), /additional field/i);
@@ -85,9 +86,12 @@ test("catalog validation fails closed on unknown fields, duplicates, Pi, secrets
   itemAt(duplicate.packages.packages, 1).id = itemAt(duplicate.packages.packages, 0).id;
   assert.throws(() => validateCatalogSource(duplicate, REPO_ROOT), /duplicate package id/i);
 
-  const pi = mutableSource();
-  (itemAt(pi.agents.agents, 0) as unknown as { id: string }).id = "pi";
-  assert.throws(() => validateCatalogSource(pi, REPO_ROOT), /schema enum|Pi runtime/i);
+  const unknownAgent = mutableSource();
+  (itemAt(unknownAgent.agents.agents, 0) as unknown as { id: string }).id = "unknown-agent";
+  assert.throws(
+    () => validateCatalogSource(unknownAgent, REPO_ROOT),
+    /schema enum|must contain exactly/i,
+  );
 
   const secret = mutableSource();
   Object.assign(secret.channel, { apiToken: "not-allowed" });

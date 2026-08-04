@@ -121,6 +121,19 @@ test("U7 approved personal and company receipts select exact role backends for e
   }
 });
 
+test("U7 composition profile exposes runtime status without CLI backends", () => {
+  for (const runtimeId of AGENTS) {
+    const derived = policy(runtimeId, "mds-host");
+    assert.equal(derived.mode, "ready");
+    assert.equal(derived.reason, null);
+    assert.equal(derived.bindings, null);
+    assert.deepEqual(derived.toolRoutes, []);
+    assert.deepEqual(derived.toolNames, []);
+    assert.deepEqual(derived.serviceIds, []);
+    assert.deepEqual(cliToolDefinitionsForPolicy(derived), []);
+  }
+});
+
 test("U7 a released custom profile derives role bindings from required packages", () => {
   const personal = CATALOG.profiles.find(({ id }) => id === "personal");
   assert.ok(personal);

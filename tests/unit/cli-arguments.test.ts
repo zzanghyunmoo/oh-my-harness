@@ -53,6 +53,67 @@ test("compiled CLI rejects contradictory options with stable errors", () => {
     () => parseOmhArguments(["setup", "--digest", "a".repeat(64)]),
     /--digest requires --apply/,
   );
+  assert.throws(
+    () => parseOmhArguments(["setup", "--agents", "none"]),
+    /only valid with --profile mds-host/,
+  );
+});
+
+test("compiled CLI preserves caller-owned mds-host agent selection", () => {
+  const empty = parseOmhArguments(["setup", "--profile", "mds-host"]);
+  assert.deepEqual(empty.agents, []);
+  assert.deepEqual(empty.tools, []);
+
+  const explicit = parseOmhArguments([
+    "setup",
+    "--profile",
+    "mds-host",
+    "--agents",
+    "codex,opencode",
+  ]);
+  assert.deepEqual(explicit.agents, ["codex", "opencode"]);
+  assert.deepEqual(
+    parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--agents",
+      "none",
+    ]).agents,
+    [],
+  );
+  assert.deepEqual(
+    parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--target",
+      "windows-native",
+    ]).tools,
+    [],
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--tools",
+      "github",
+    ]),
+    /--tools is not valid with --profile mds-host/,
+  );
+  assert.throws(
+    () => parseOmhArguments([
+      "setup",
+      "--profile",
+      "mds-host",
+      "--target",
+      "windows-native",
+      "--tool-route",
+      "wsl-ubuntu",
+    ]),
+    /--tool-route is not valid with --profile mds-host/,
+  );
 });
 
 test("compiled CLI parses receipt-bound startup and managed runtime launch", () => {

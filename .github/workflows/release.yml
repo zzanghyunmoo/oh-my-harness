@@ -1,0 +1,101 @@
+name: Immutable release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: immutable-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify immutable artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Prove tag, package, main, and merged-PR identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main
+          associated_pr="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq 'first(.[] | select(.merged_at != null and .base.ref == "main")) | [.merge_commit_sha, .base.sha] | @tsv')"
+          IFS=$'\t' read -r associated_merge associated_base <<<"${associated_pr}"
+          test "${associated_merge}" = "${GITHUB_SHA}"
+          test -n "${associated_base}"
+          git diff --check "${associated_base}" "${GITHUB_SHA}"
+      - name: Install exact shrinkwrap without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Verify source, catalogs, and package contract
+        run: |
+          npm run typecheck
+          npm run build
+          npm run catalog:verify
+          npm run test:unit
+          npm run test:contracts
+          npm run test:integration
+          npm run test:runtime:claude
+          npm run test:runtime:opencode
+          npm run test:runtime:codex
+          npm run test:harness
+          npm run package:verify
+      - name: Reject tracked checkout drift before packaging
+        run: git diff --exit-code "${GITHUB_SHA}" -- .
+      - name: Build immutable archive and provenance sidecar
+        run: npm run release:build -- release-dist
+      - name: Verify generated release assets again
+        run: npm run release:verify -- "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz" "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: oh-my-harness-${{ github.sha }}
+          path: |
+            release-dist/
+            dist/
+            scripts/release.mjs
+            package.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+  publish:
+    name: Publish verified GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: oh-my-harness-${{ github.sha }}
+          path: .
+      - name: Stage, verify, and atomically publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release.mjs publish \
+            "${GITHUB_REPOSITORY}" \
+            "${GITHUB_REF_NAME}" \
+            "${GITHUB_SHA}" \
+            "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz" \
+            "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json"

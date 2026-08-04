@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { runOmh } from "../../dist/cli/main.js";
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
 import type { TargetPort } from "../../dist/environment/target.js";
+import { createTrustedWindowsToolPath } from "../support/trusted-windows-tools.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -126,6 +127,7 @@ test("U8 fake transport preserves ordered target lifecycles and route identity",
   };
 
   try {
+    const trustedTools = createTrustedWindowsToolPath(root);
     mkdirSync(windowsRoot, { recursive: true });
     const wslArgs = [
       "setup",
@@ -183,7 +185,7 @@ test("U8 fake transport preserves ordered target lifecycles and route identity",
       },
       {
         arch: "x64",
-        env: { PATH: "", XDG_CONFIG_HOME: configRoot },
+        env: { PATH: trustedTools, XDG_CONFIG_HOME: configRoot },
         os: "win32",
         repositoryRoot: REPOSITORY_ROOT,
       },

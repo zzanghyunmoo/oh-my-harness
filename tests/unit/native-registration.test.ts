@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import {
   claudeOfficialMarketplaceReady,
   codexMarketplaceAddonReady,
+  inspectOpenCodeManagedRuntimeRegistration,
   inspectOpenCodePackageAddon,
   openCodeConfigPath,
   openCodePackageAddonResolved,
@@ -52,6 +53,86 @@ test("OpenCode defaults to its cross-platform user config directory on Windows",
     openCodeConfigPath({ USERPROFILE: userRoot }, "win32"),
     join(userRoot, ".config", "opencode", "opencode.json"),
   );
+});
+
+test("OpenCode managed runtime inspection distinguishes current, prior, and collisions", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-native-inspection-"));
+  try {
+    const configRoot = join(root, "config");
+    const configPath = join(configRoot, "opencode", "opencode.json");
+    const activeRoot = join(root, "active");
+    const previousActiveRoot = join(root, "previous");
+    const registration = {
+      activeRoot,
+      previousActiveRoot,
+      receiptPath: join(root, "receipt.json"),
+    };
+    const env = { XDG_CONFIG_HOME: configRoot };
+    const currentPlugin = pathToFileURL(
+      join(activeRoot, ".opencode", "plugins", "oh-my-harness.js"),
+    ).href;
+    const previousPlugin = pathToFileURL(
+      join(previousActiveRoot, ".opencode", "plugins", "oh-my-harness.js"),
+    ).href;
+    const foreignPlugin = pathToFileURL(
+      join(root, "foreign", ".opencode", "plugins", "oh-my-harness.js"),
+    ).href;
+    const writePlugins = (plugins: readonly unknown[]) => {
+      mkdirSync(join(configRoot, "opencode"), { recursive: true });
+      writeFileSync(
+        configPath,
+        `${JSON.stringify({ plugin: plugins }, null, 2)}\n`,
+      );
+    };
+
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "missing",
+    );
+    writePlugins(["user-plugin", currentPlugin]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "ready",
+    );
+    writePlugins(["user-plugin", previousPlugin]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "previous",
+    );
+    writePlugins([foreignPlugin]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "collision",
+    );
+    const foreignConfig = readFileSync(configPath, "utf8");
+    assert.throws(
+      () => registerOpenCodeRuntime(registration, env, "linux"),
+      /collides with an existing OpenCode plugin registration/u,
+    );
+    assert.equal(readFileSync(configPath, "utf8"), foreignConfig);
+    writePlugins([".opencode/plugins/oh-my-harness.js"]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "collision",
+    );
+    writePlugins([currentPlugin, currentPlugin]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "collision",
+    );
+    writePlugins([currentPlugin, previousPlugin]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "collision",
+    );
+    writePlugins([currentPlugin, { source: "user-owned" }]);
+    assert.equal(
+      inspectOpenCodeManagedRuntimeRegistration(registration, env, "linux"),
+      "collision",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("native registration rejects Claude and Codex collisions without removal", () => {
@@ -194,7 +275,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
                 id: "oh-my-harness@oh-my-harness",
                 installPath: installedRoot,
                 scope: "user",
-                version: "0.2.0",
+                version: "0.3.0",
               }],
         );
       }

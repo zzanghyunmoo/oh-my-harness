@@ -36,6 +36,8 @@
           "registration": {
             "kind": "opencode-package",
             "packageName": "oh-my-openagent",
+            "snapshotArchivePath": "harness/vendor/oh-my-openagent-4.19.2.tgz",
+            "snapshotArchiveSha256": "436376b1a0c754930b3f2c07e6aeba99cbfcae8d631292ab33d54e563bb3b4f2",
             "spec": "oh-my-openagent@4.19.2",
             "tarballUrl": "https://registry.npmjs.org/oh-my-openagent/-/oh-my-openagent-4.19.2.tgz",
             "integrity": "sha512-pHAbd6/6xsrPPxNDSufZ+sVXl7kfeEjB73g1gy8s5ZfiSjr+pssaK6fI4P8E4jcc2xC/MseqOWnLbrSqnwTI+w=="
@@ -77,6 +79,8 @@
             "pluginContentSha256": "3754747204c5e40fc5ea074e4256808f52b421d12e22c4db078a43e1ac839bea",
             "marketplaceName": "sisyphuslabs",
             "selector": "omo@sisyphuslabs",
+            "snapshotArchivePath": "harness/vendor/lazycodex-omo-4.19.2.tgz",
+            "snapshotArchiveSha256": "a2d2ba8cf883cedaf36ab143548f73afe1ebdf9e5cfeaba73a176716ebe2933b",
             "snapshotContentSha256": "383a91d8826fc05bd83e2d2c3ef90eddb2331edb408198c2214a32026c7c4423"
           }
         }

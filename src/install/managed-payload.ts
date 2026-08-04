@@ -38,6 +38,7 @@ const PAYLOAD_PATHS = [
   "harness/catalog",
   "harness/contracts",
   "harness/profiles",
+  "harness/vendor",
   "package.json",
   "plugins/oh-my-harness",
   "scripts/harness/acquisition.mjs",

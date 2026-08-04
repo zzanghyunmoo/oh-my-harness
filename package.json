@@ -1,6 +1,6 @@
 {
   "name": "oh-my-harness",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Cross-runtime coding-agent harness with a preview-first management CLI.",
   "keywords": [
@@ -30,12 +30,12 @@
     "harness/inventory/",
     "harness/locks/",
     "harness/profiles/",
+    "harness/vendor/",
     "npm-shrinkwrap.json",
     "omh",
     "omh.cmd",
     "plugins/",
     "scripts/harness/",
-    "scripts/profile-pack.mjs",
     "scripts/validate-dual-environment.ps1",
     "scripts/tools/"
   ],
@@ -47,9 +47,6 @@
     "typecheck": "tsc -p tsconfig.json",
     "prepack": "npm run build",
     "catalog:verify": "npm run build --silent && node --test \"tests/contracts/*.test.ts\"",
-    "profile:verify": "node scripts/profile-pack.mjs verify",
-    "profile:lock": "node scripts/profile-pack.mjs lock --write",
-    "profile:apply": "node scripts/profile-pack.mjs apply",
     "omh": "npm run build --silent && node dist/cli/main.js",
     "test:unit": "npm run build --silent && node --test \"tests/unit/*.test.ts\"",
     "test:contracts": "npm run build --silent && node --test \"tests/contracts/*.test.ts\"",
@@ -58,6 +55,8 @@
     "test:runtime:opencode": "npm run build --silent && node --test tests/runtime/opencode.test.ts",
     "test:runtime:codex": "npm run build --silent && node --test tests/runtime/codex.test.ts",
     "package:verify": "npm run build --silent && node --test \"tests/release/*.test.ts\"",
+    "release:build": "npm run build --silent && node scripts/release.mjs build",
+    "release:verify": "npm run build --silent && node scripts/release.mjs verify",
     "test:harness": "npm run build --silent && node --test \"tests/harness/*.test.mjs\"",
     "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
     "harness:install": "node scripts/harness/install.mjs",
@@ -67,7 +66,6 @@
     "harness:upstream:verify": "node scripts/harness/upstream.mjs verify"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "jsonc-parser": "3.3.1",
     "tar-stream": "3.2.0",
@@ -75,7 +73,16 @@
     "yauzl": "3.4.0",
     "zod": "4.1.8"
   },
+  "bundleDependencies": [
+    "@modelcontextprotocol/sdk",
+    "jsonc-parser",
+    "tar-stream",
+    "typebox",
+    "yauzl",
+    "zod"
+  ],
   "devDependencies": {
+    "@opencode-ai/plugin": "1.18.0",
     "@types/node": "25.8.0",
     "typescript": "6.0.3"
   }

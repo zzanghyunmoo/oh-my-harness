@@ -9,18 +9,23 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type {
   CodexMarketplaceAddon,
   OpenCodePackageAddon,
 } from "../../dist/catalog/types.js";
+import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import { sha256File } from "../../dist/environment/filesystem.js";
 import { hashManagedDirectory } from "../../dist/install/managed-payload.js";
 import {
   inspectCodexAddonSnapshot,
+  materializeCodexAddonSnapshotFromArchive,
   materializeCodexAddonSnapshotFromDirectory,
   verifyOpenCodeAddonPackageMetadata,
 } from "../../dist/install/runtime-addon-acquisition.js";
+
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function openCodeAddon(): OpenCodePackageAddon {
   return {
@@ -30,6 +35,8 @@ function openCodeAddon(): OpenCodePackageAddon {
       integrity: "sha512-reviewed==",
       kind: "opencode-package",
       packageName: "oh-my-openagent",
+      snapshotArchivePath: "harness/vendor/oh-my-openagent-4.19.2.tgz",
+      snapshotArchiveSha256: "1".repeat(64),
       spec: "oh-my-openagent@4.19.2",
       tarballUrl:
         "https://registry.npmjs.org/oh-my-openagent/-/oh-my-openagent-4.19.2.tgz",
@@ -104,6 +111,8 @@ test("Codex OMO acquisition publishes only a verified content-addressed snapshot
         revision,
         rootTree,
         selector: "omo@sisyphuslabs",
+        snapshotArchivePath: "harness/vendor/lazycodex-omo-4.19.2.tgz",
+        snapshotArchiveSha256: "5".repeat(64),
         snapshotContentSha256: hashManagedDirectory(source),
       },
       required: true,
@@ -179,5 +188,30 @@ test("Codex OMO acquisition publishes only a verified content-addressed snapshot
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("released Codex OMO archive materializes the exact reviewed snapshot without Git", async () => {
+  const catalog = loadCatalogBundle(REPO_ROOT);
+  const entry = catalog.agents.agents.find(({ id }) => id === "codex");
+  const addon = entry?.defaultAddons[0];
+  assert.ok(addon?.registration.kind === "codex-marketplace");
+  const stateRoot = join(
+    mkdtempSync(join(tmpdir(), "omh-runtime-addon-archive-")),
+    "state",
+  );
+  try {
+    const snapshot = await materializeCodexAddonSnapshotFromArchive(
+      join(REPO_ROOT, addon.registration.snapshotArchivePath),
+      addon,
+      stateRoot,
+    );
+    assert.equal(inspectCodexAddonSnapshot(addon, stateRoot), true);
+    assert.equal(
+      sha256File(join(snapshot.root, addon.registration.manifestPath)),
+      addon.registration.manifestSha256,
+    );
+  } finally {
+    rmSync(join(stateRoot, ".."), { recursive: true, force: true });
   }
 });

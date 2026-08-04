@@ -27,6 +27,7 @@ import {
   type EnvironmentSelection,
 } from "./environment/orchestrator.js";
 import { readBoundedRegularFile } from "./environment/filesystem.js";
+import { HARNESS_VERSION } from "./package-version.js";
 import {
   isAgentId,
   type PackageId,
@@ -42,18 +43,9 @@ import type { TargetPort } from "./environment/target.js";
 import { WslTargetPort } from "./environment/wsl-target.js";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const manifest = JSON.parse(
-  readBoundedRegularFile(
-    fileURLToPath(new URL("../package.json", import.meta.url)),
-    1024 * 1024,
-  ).toString("utf8"),
-) as { readonly version?: unknown };
-if (typeof manifest.version !== "string" || manifest.version.length === 0) {
-  throw new Error("package.json must declare a non-empty version");
-}
 
 export const formatOmhResult = createResultRenderer({
-  version: manifest.version,
+  version: HARNESS_VERSION,
 });
 export { parseOmhArguments };
 
