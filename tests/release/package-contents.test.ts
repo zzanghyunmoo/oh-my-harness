@@ -115,6 +115,10 @@ test("release workflow publishes one verified draft atomically", () => {
     "utf8",
   );
   assert.match(workflow, /^permissions: \{\}$/mu);
+  assert.match(
+    workflow,
+    /^concurrency:\n\s+group: immutable-release-\$\{\{ github\.ref \}\}\n\s+cancel-in-progress: false$/mu,
+  );
   assert.match(workflow, /build:[\s\S]*?permissions:\n\s+contents: read/u);
   assert.match(workflow, /build:[\s\S]*?permissions:[\s\S]*?pull-requests: read/u);
   assert.match(workflow, /publish:[\s\S]*?permissions:\n\s+contents: write/u);
@@ -141,28 +145,19 @@ test("release workflow publishes one verified draft atomically", () => {
   ]) {
     assert.match(workflow, new RegExp(`npm run ${gate.replaceAll(":", "\\:")}`));
   }
-  assert.match(workflow, /downloaded release assets do not match their sidecar/u);
-  assert.match(workflow, /already published; refusing to overwrite or delete/u);
-  assert.match(workflow, /oh-my-harness-release-draft:v1/u);
-  assert.match(workflow, /stale draft does not carry the exact current-source marker/u);
-  assert.match(workflow, /trap cleanup_draft EXIT/u);
   assert.match(
     workflow,
-    /gh api -X POST "repos\/\$\{GITHUB_REPOSITORY\}\/releases"/u,
+    /path: \|\n\s+release-dist\/\n\s+dist\/\n\s+scripts\/release\.mjs/u,
   );
-  assert.match(workflow, /-F draft=true/u);
-  assert.match(workflow, /gh release upload "\$\{GITHUB_REF_NAME\}"/u);
   assert.match(
     workflow,
-    /uploaded release has [\s\S]*? assets, expected exactly 2/u,
+    /node scripts\/release\.mjs publish[\s\S]*?"\$\{GITHUB_REPOSITORY\}"[\s\S]*?"\$\{GITHUB_REF_NAME\}"[\s\S]*?"\$\{GITHUB_SHA\}"/u,
   );
-  assert.match(workflow, /Accept: application\/octet-stream/u);
-  assert.match(workflow, /downloaded archive bytes differ from the uploaded source/u);
-  assert.match(workflow, /sidecar\.archive\?\.sha256 !== archiveDigest/u);
-  assert.match(workflow, /release\.draft !== true/u);
-  assert.match(workflow, /publish_transition_started=true/u);
-  assert.equal((workflow.match(/-F draft=false/gu) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /node --input-type=module -e/u);
+  assert.doesNotMatch(workflow, /publish_transition_started/u);
+  assert.doesNotMatch(workflow, /-F draft=false/u);
   assert.doesNotMatch(workflow, /gh release create/u);
+  assert.doesNotMatch(workflow, /gh release upload/u);
 });
 
 test("packed artifact contains compiled entrypoints, runtime assets, and production closure only", () => {

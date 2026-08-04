@@ -266,6 +266,16 @@ function commandOperations(calls: string[]): ReleaseCommandOperations {
       calls.push(`load:${repositoryRoot}:${sidecarPath}`);
       return sidecar;
     },
+    async publishArtifact(input) {
+      calls.push(
+        `publish:${input.repository}:${input.tag}:${input.sourceSha}:${input.archivePath}:${input.sidecarPath}`,
+      );
+      return {
+        archiveAssetId: 101,
+        releaseId: 100,
+        sidecarAssetId: 102,
+      };
+    },
     resolvePath(base, path) {
       calls.push(`resolve:${base}:${path}`);
       return `${base}/${path}`;
@@ -330,12 +340,45 @@ test("release command dispatches verify through sidecar-bound source identity", 
   ]);
 });
 
+test("release command dispatches publication with explicit immutable identity", async () => {
+  const calls: string[] = [];
+  const sourceSha = "c".repeat(40);
+  const result = await runReleaseCommand(
+    "/repo",
+    "/cwd",
+    [
+      "publish",
+      "owner/repository",
+      "v0.3.0",
+      sourceSha,
+      "archive.tgz",
+      "release.json",
+    ],
+    commandOperations(calls),
+  );
+  assert.deepEqual(result, {
+    exitCode: 0,
+    stderr: "",
+    stdout: `${JSON.stringify({
+      archiveAssetId: 101,
+      releaseId: 100,
+      sidecarAssetId: 102,
+    })}\n`,
+  });
+  assert.deepEqual(calls, [
+    "resolve:/cwd:archive.tgz",
+    "resolve:/cwd:release.json",
+    `publish:owner/repository:v0.3.0:${sourceSha}:/cwd/archive.tgz:/cwd/release.json`,
+  ]);
+});
+
 test("release command rejects unknown commands and wrong arity without operations", async () => {
   for (const argv of [
     [] as const,
     ["build"] as const,
     ["build", "one", "two"] as const,
     ["verify", "archive"] as const,
+    ["publish", "owner/repository", "v0.3.0", "c".repeat(40), "archive.tgz"] as const,
     ["unknown"] as const,
   ]) {
     const calls: string[] = [];
