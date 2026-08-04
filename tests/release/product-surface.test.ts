@@ -21,6 +21,7 @@ const PACKAGE_INPUTS = [
   "harness/inventory/",
   "harness/locks/",
   "harness/profiles/",
+  "harness/vendor/",
   "npm-shrinkwrap.json",
   "omh",
   "omh.cmd",
@@ -174,7 +175,9 @@ test("the package input is an exact current-product allowlist", () => {
 
   const packedSourceFiles = [
     ...collectFiles(join(REPOSITORY_ROOT, "dist")),
-    ...collectFiles(join(REPOSITORY_ROOT, "harness")),
+    ...collectFiles(join(REPOSITORY_ROOT, "harness")).filter(
+      (path) => !path.startsWith(join(REPOSITORY_ROOT, "harness", "vendor")),
+    ),
     ...collectFiles(join(REPOSITORY_ROOT, "plugins")),
     ...collectFiles(join(REPOSITORY_ROOT, "scripts")),
     ...collectFiles(join(REPOSITORY_ROOT, "src")),

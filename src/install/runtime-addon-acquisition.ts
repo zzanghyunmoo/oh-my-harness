@@ -7,6 +7,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import {
   dirname,
@@ -14,6 +15,8 @@ import {
   join,
   sep,
 } from "node:path";
+import { gunzipSync } from "node:zlib";
+import tar from "tar-stream";
 
 import type {
   CodexMarketplaceAddon,
@@ -21,6 +24,7 @@ import type {
 } from "../catalog/types.js";
 import {
   assertSafeManagedRootPath,
+  readBoundedRegularFile,
   sha256File,
 } from "../environment/filesystem.js";
 import { hashManagedDirectory } from "./managed-payload.js";
@@ -57,6 +61,8 @@ const EXACT_GIT_CONFIG = [
 
 const MAX_COPY_ENTRIES = 8_192;
 const MAX_COPY_BYTES = 128 * 1024 * 1024;
+const MAX_ADDON_ARCHIVE_BYTES = 16 * 1024 * 1024;
+const MAX_ADDON_FILE_BYTES = 32 * 1024 * 1024;
 
 function isolatedGitEnvironment(
   gitExecutable: string,
@@ -223,6 +229,103 @@ export function inspectCodexAddonSnapshot(
   } catch {
     return false;
   }
+}
+
+export function inspectRuntimeAddonArchive(
+  archivePath: string,
+  expectedSha256: string,
+): boolean {
+  try {
+    const stat = lstatSync(archivePath);
+    return !stat.isSymbolicLink()
+      && stat.isFile()
+      && stat.size <= MAX_ADDON_ARCHIVE_BYTES
+      && sha256File(archivePath) === expectedSha256;
+  } catch {
+    return false;
+  }
+}
+
+function safeSnapshotArchivePath(value: string): boolean {
+  if (value.includes("\\") || value.startsWith("/")) return false;
+  const segments = value.split("/");
+  if (segments.some((segment) =>
+    segment === "" || segment === "." || segment === ".."
+  )) {
+    return false;
+  }
+  return value === ".agents/plugins/marketplace.json"
+    || value.startsWith("plugins/omo/");
+}
+
+async function extractCodexAddonArchive(
+  archivePath: string,
+  destination: string,
+): Promise<void> {
+  const compressed = readBoundedRegularFile(
+    archivePath,
+    MAX_ADDON_ARCHIVE_BYTES,
+  );
+  const unpacked = gunzipSync(compressed, {
+    maxOutputLength: MAX_COPY_BYTES,
+  });
+  const extract = tar.extract();
+  const names = new Set<string>();
+  let entries = 0;
+  let totalBytes = 0;
+  const completed = new Promise<void>((resolvePromise, reject) => {
+    extract.on("entry", (header, stream, next) => {
+      try {
+        entries += 1;
+        if (entries > MAX_COPY_ENTRIES) {
+          throw new Error("Codex OMO archive has too many entries");
+        }
+        if (header.type !== "file" || !safeSnapshotArchivePath(header.name)) {
+          throw new Error(`Codex OMO archive contains an unsafe entry: ${header.name}`);
+        }
+        const folded = header.name.normalize("NFC").toLowerCase();
+        if (names.has(folded)) {
+          throw new Error(`Codex OMO archive contains a duplicate entry: ${header.name}`);
+        }
+        names.add(folded);
+        const chunks: Buffer[] = [];
+        let size = 0;
+        stream.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MAX_ADDON_FILE_BYTES) {
+            stream.destroy(new Error(`Codex OMO archive entry is oversized: ${header.name}`));
+          } else {
+            chunks.push(chunk);
+          }
+        });
+        stream.once("error", reject);
+        stream.once("end", () => {
+          try {
+            totalBytes += size;
+            if (totalBytes > MAX_COPY_BYTES) {
+              throw new Error("Codex OMO archive exceeds the byte limit");
+            }
+            const target = join(destination, ...header.name.split("/"));
+            mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+            writeFileSync(target, Buffer.concat(chunks), {
+              flag: "wx",
+              mode: (header.mode ?? 0) & 0o111 ? 0o755 : 0o644,
+            });
+            next();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      } catch (error) {
+        stream.resume();
+        reject(error);
+      }
+    });
+    extract.once("finish", resolvePromise);
+    extract.once("error", reject);
+  });
+  extract.end(unpacked);
+  await completed;
 }
 
 function assertRevision(
@@ -420,5 +523,47 @@ export function materializeCodexAddonSnapshot(
     return publishCodexAddonSnapshot(checkout, addon, snapshot);
   } finally {
     rmSync(checkout, { force: true, recursive: true });
+  }
+}
+
+export async function materializeCodexAddonSnapshotFromArchive(
+  archivePath: string,
+  addon: CodexMarketplaceAddon,
+  stateRoot: string,
+): Promise<CodexAddonSnapshot> {
+  if (!inspectRuntimeAddonArchive(
+    archivePath,
+    addon.registration.snapshotArchiveSha256,
+  )) {
+    throw new Error("Codex OMO embedded archive does not match the reviewed digest");
+  }
+  const snapshot = codexAddonSnapshot(addon, stateRoot);
+  if (inspectCodexAddonSnapshot(addon, stateRoot)) return snapshot;
+  if (existsSync(snapshot.root)) {
+    throw new Error("Codex OMO snapshot collides with drifted managed content");
+  }
+  const parent = assertSafeManagedRootPath(
+    dirname(snapshot.root),
+    "Codex OMO snapshot store",
+  );
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const staging = temporarySibling(snapshot.root);
+  try {
+    mkdirSync(staging, { mode: 0o700 });
+    await extractCodexAddonArchive(archivePath, staging);
+    if (
+      sha256File(join(staging, addon.registration.manifestPath))
+        !== addon.registration.manifestSha256
+      || hashManagedDirectory(join(staging, addon.registration.pluginPath))
+        !== addon.registration.pluginContentSha256
+      || hashManagedDirectory(staging)
+        !== addon.registration.snapshotContentSha256
+    ) {
+      throw new Error("Codex OMO embedded content does not match the reviewed pin");
+    }
+    renameSync(staging, snapshot.root);
+    return snapshot;
+  } finally {
+    rmSync(staging, { force: true, recursive: true });
   }
 }

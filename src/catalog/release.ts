@@ -593,6 +593,23 @@ export async function verifyReleaseArtifact(
     if (/^package\/(?:src|tests)(?:\/|$)/u.test(path)) throw new Error(`release archive contains development source: ${path}`);
     if (/^package\/node_modules\/(?:typescript|@types)(?:\/|$)/u.test(path)) throw new Error(`release archive contains a development dependency: ${path}`);
   }
+  const archiveFiles = new Map(files.map((entry) => [entry.path, entry]));
+  const bundle = loadCatalogBundle(repositoryRoot);
+  for (const agent of bundle.agents.agents) {
+    for (const addon of agent.defaultAddons) {
+      const registration = addon.registration;
+      const packagedPath = `package/${registration.snapshotArchivePath}`;
+      const packaged = archiveFiles.get(packagedPath);
+      if (
+        packaged === undefined
+        || packaged.sha256 !== registration.snapshotArchiveSha256
+      ) {
+        throw new Error(
+          `release archive is missing reviewed runtime add-on source: ${packagedPath}`,
+        );
+      }
+    }
+  }
   const shrinkwrap = readJson(join(repositoryRoot, "npm-shrinkwrap.json")) as {
     packages?: Record<string, {
       bundleDependencies?: string[];

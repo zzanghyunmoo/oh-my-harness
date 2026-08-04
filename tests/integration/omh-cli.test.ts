@@ -495,7 +495,16 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     const hostAgentAction = hostPreview.preview?.plan?.actions.find(
       ({ id }) => id === "agent:claude-code",
     );
-    assert.equal(hostAgentAction?.target, realpathSync(claudePath));
+    assert.equal(
+      hostAgentAction?.target,
+      join(
+        realpathSync(root),
+        "host-state",
+        "external",
+        "agents",
+        "claude-code",
+      ),
+    );
     assert.equal(hostAgentAction?.payload?.operation, "verify-agent");
     assert.equal(
       hostPreview.preview?.plan?.actions.some(
@@ -540,6 +549,65 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
             false,
           );
         }
+      },
+    );
+
+    await t.test(
+      "mds-host add-ons stay previewable without ambient package managers and bind agent bytes rather than paths",
+      async () => {
+        const isolatedEnvironment = {
+          ...env,
+          PATH: binaryRoot,
+        };
+        for (const agentId of ["opencode", "codex"] as const) {
+          const preview = previewEnvironment(
+            {
+              profileId: "mds-host",
+              selectedAgents: [agentId],
+              selectedPackages: [],
+              stateRoot: join(root, `isolated-${agentId}-state`),
+            },
+            { ...commonOptions, env: isolatedEnvironment },
+          );
+          assert.equal(
+            preview.readiness,
+            "preview",
+            JSON.stringify(preview, null, 2),
+          );
+          assert.equal(preview.addons[0]?.state, "installable");
+        }
+
+        const alternateBinaryRoot = join(root, "alternate-bin");
+        mkdirSync(alternateBinaryRoot);
+        const alternateCodexPath = join(alternateBinaryRoot, "codex");
+        copyFileSync(canonicalCodexPath, alternateCodexPath);
+        chmodSync(alternateCodexPath, 0o755);
+        const stateRoot = join(root, "path-independent-codex-state");
+        const selection = {
+          profileId: "mds-host",
+          selectedAgents: ["codex"],
+          selectedPackages: [],
+          stateRoot,
+        } as const;
+        const first = previewEnvironment(selection, {
+          ...commonOptions,
+          env: { ...isolatedEnvironment, PATH: binaryRoot },
+        });
+        const second = previewEnvironment(selection, {
+          ...commonOptions,
+          env: { ...isolatedEnvironment, PATH: alternateBinaryRoot },
+          runCommand(command, args) {
+            return commonOptions.runCommand(
+              command === realpathSync(alternateCodexPath)
+                ? canonicalCodexPath
+                : command,
+              args,
+            );
+          },
+        });
+        assert.equal(first.readiness, "preview");
+        assert.equal(second.readiness, "preview");
+        assert.equal(first.digest, second.digest);
       },
     );
 

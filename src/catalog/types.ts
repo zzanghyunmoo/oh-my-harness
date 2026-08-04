@@ -29,6 +29,8 @@ export interface OpenCodePackageAddon extends DefaultRuntimeAddonBase {
     kind: "opencode-package";
     integrity: string;
     packageName: "oh-my-openagent";
+    snapshotArchivePath: "harness/vendor/oh-my-openagent-4.19.2.tgz";
+    snapshotArchiveSha256: string;
     spec: string;
     tarballUrl: string;
   };
@@ -48,6 +50,8 @@ export interface CodexMarketplaceAddon extends DefaultRuntimeAddonBase {
     revision: string;
     rootTree: string;
     selector: "omo@sisyphuslabs";
+    snapshotArchivePath: "harness/vendor/lazycodex-omo-4.19.2.tgz";
+    snapshotArchiveSha256: string;
     snapshotContentSha256: string;
   };
 }

@@ -2,7 +2,7 @@
   "$schema": "../contracts/release-catalog.schema.json",
   "artifacts": [
     {
-      "digest": "e8568e26d8762c49c16c9da8372a2e38f746dbaed8c8d29e6e6a7303eedf97f8",
+      "digest": "d96606bd060d6b38e0e8918eb6c3143adff63540168eb7398106ee31ac3971f6",
       "id": "capability-catalog",
       "kind": "catalog",
       "sourceId": "oh-my-harness-managed"
@@ -20,7 +20,7 @@
       "sourceId": "oh-my-harness-managed"
     }
   ],
-  "catalogRevision": "e8568e26d8762c49c16c9da8372a2e38f746dbaed8c8d29e6e6a7303eedf97f8",
+  "catalogRevision": "d96606bd060d6b38e0e8918eb6c3143adff63540168eb7398106ee31ac3971f6",
   "channel": "stable",
   "compatibility": {
     "maximumCliVersion": "0.3.0",

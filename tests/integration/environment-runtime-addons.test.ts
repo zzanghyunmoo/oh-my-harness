@@ -80,7 +80,7 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
       [
         {
           id: "addon:opencode:omo:source",
-          operation: "verify-opencode-addon-metadata",
+          operation: "verify-opencode-addon-source",
         },
         {
           id: "addon:opencode:omo",

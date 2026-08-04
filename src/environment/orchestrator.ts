@@ -83,9 +83,9 @@ import {
   codexAddonSnapshot,
   createRuntimeAddonGitOperations,
   inspectCodexAddonSnapshot,
-  materializeCodexAddonSnapshot,
+  inspectRuntimeAddonArchive,
+  materializeCodexAddonSnapshotFromArchive,
   verifyCodexAddonGitMarketplace,
-  verifyOpenCodeAddonPackageMetadata,
   type CodexAddonSnapshot,
   type RuntimeAddonGitOperations,
 } from "../install/runtime-addon-acquisition.js";
@@ -323,8 +323,8 @@ interface OpenCodeRuntimeAddonModel extends RuntimeAddonModelBase {
   readonly addon: OpenCodePackageAddon;
   readonly agentId: "opencode";
   readonly kind: "opencode-package";
-  readonly metadataInvocation: TrustedInvocation | null;
   readonly nativeState: "collision" | "missing" | "ready";
+  readonly sourceArchivePath: string | null;
 }
 
 interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
@@ -338,6 +338,7 @@ interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
     readonly plugin: "collision" | "missing" | "ready";
   };
   readonly snapshot: CodexAddonSnapshot;
+  readonly sourceArchivePath: string | null;
 }
 
 type RuntimeAddonModel =
@@ -572,39 +573,14 @@ function runtimeAddonFingerprint(addon: DefaultRuntimeAddon): string {
   return sha256Bytes(stableJson(addon));
 }
 
-function resolveNpmMetadataInvocation(
-  options: ReturnType<typeof normalizedOptions>,
-): TrustedInvocation | null {
-  const ambient = resolveTrustedInvocation(["npm"], {
-    env: options.env,
-    platform: options.os,
-    workspace: options.cwd,
-  });
-  if (ambient !== undefined) return ambient;
-  const npmCli = join(
-    dirname(process.execPath),
-    "node_modules",
-    "npm",
-    "bin",
-    "npm-cli.js",
-  );
-  try {
-    const stat = lstatSync(npmCli);
-    if (
-      !stat.isSymbolicLink()
-      && stat.isFile()
-      && isPathStrictlyWithin(dirname(process.execPath), npmCli)
-    ) {
-      return {
-        argsPrefix: [npmCli],
-        command: process.execPath,
-        executablePath: process.execPath,
-      };
-    }
-  } catch {
-    // The target must provide a trusted npm executable when Node does not bundle it.
-  }
-  return null;
+function runtimeAddonArchive(
+  repositoryRoot: string,
+  relativePath: string,
+  expectedSha256: string,
+): string | null {
+  const path = resolve(repositoryRoot, relativePath);
+  if (!isPathStrictlyWithin(repositoryRoot, path)) return null;
+  return inspectRuntimeAddonArchive(path, expectedSha256) ? path : null;
 }
 
 function isOpenCodePackageAddon(
@@ -663,7 +639,11 @@ function buildRuntimeAddonModels(
     return entry.defaultAddons.map((addon): RuntimeAddonModel => {
       const fingerprint = runtimeAddonFingerprint(addon);
       if (isOpenCodePackageAddon(addon)) {
-        const metadataInvocation = resolveNpmMetadataInvocation(options);
+        const sourceArchivePath = runtimeAddonArchive(
+          options.repositoryRoot,
+          addon.registration.snapshotArchivePath,
+          addon.registration.snapshotArchiveSha256,
+        );
         const nativeState = inspectOpenCodePackageAddon(
           {
             packageName: addon.registration.packageName,
@@ -674,7 +654,7 @@ function buildRuntimeAddonModels(
         );
         const state = nativeState === "collision"
           ? "conflict" as const
-          : metadataInvocation === null
+          : sourceArchivePath === null
             ? "unverifiable" as const
             : nativeState === "ready"
               ? "ready" as const
@@ -684,14 +664,14 @@ function buildRuntimeAddonModels(
           agentId: "opencode",
           fingerprint,
           kind: "opencode-package",
-          metadataInvocation,
           nativeState,
+          sourceArchivePath,
           status: {
             agentId: "opencode",
             detail: nativeState === "collision"
               ? "OpenCode contains a legacy, duplicate, or differently pinned OMO package"
-              : metadataInvocation === null
-                ? "trusted npm is unavailable for exact OMO metadata verification"
+              : sourceArchivePath === null
+                ? "the reviewed OpenCode OMO archive is unavailable"
                 : nativeState === "ready"
                   ? `${addon.registration.spec} is registered exactly`
                   : `${addon.registration.spec} can be registered additively`,
@@ -706,6 +686,11 @@ function buildRuntimeAddonModels(
         throw new Error("unsupported default add-on registration");
       }
       const snapshot = codexAddonSnapshot(addon, stateRoot);
+      const sourceArchivePath = runtimeAddonArchive(
+        options.repositoryRoot,
+        addon.registration.snapshotArchivePath,
+        addon.registration.snapshotArchiveSha256,
+      );
       const gitPath = findTrustedExecutable("git", {
         cwd: options.cwd,
         env: options.env,
@@ -757,7 +742,7 @@ function buildRuntimeAddonModels(
         || partial;
       const sourceAvailable =
         inspectCodexAddonSnapshot(addon, stateRoot)
-        || gitOperations !== null;
+        || sourceArchivePath !== null;
       const ready =
         nativeState.marketplace === "ready"
         && nativeState.plugin === "ready";
@@ -777,6 +762,7 @@ function buildRuntimeAddonModels(
         kind: "codex-marketplace",
         nativeState,
         snapshot,
+        sourceArchivePath,
         status: {
           agentId: "codex",
           detail: conflict
@@ -785,7 +771,7 @@ function buildRuntimeAddonModels(
               ? `${addon.registration.selector} ${addon.version} is registered exactly`
               : sourceAvailable
                 ? `${addon.registration.selector} ${addon.version} can be acquired and registered`
-                : "trusted Git or an exact managed OMO snapshot is required",
+                : "the reviewed embedded or managed Codex OMO snapshot is required",
           fingerprint,
           id: addon.id,
           state,
@@ -1175,6 +1161,17 @@ function runtimeMarkerPath(stateRoot: string, id: AgentId): string {
   return join(stateRoot, "markers", "runtimes", `${id}.json`);
 }
 
+function compositionAgentTarget(
+  stateRoot: string,
+  id: AgentId,
+): string {
+  return join(stateRoot, "external", "agents", id);
+}
+
+function compositionNodeTarget(stateRoot: string): string {
+  return join(stateRoot, "external", "runtime", "node");
+}
+
 function previousManagedPayloadRoot(
   model: EnvironmentModel,
   runtimeId: AgentId,
@@ -1487,8 +1484,8 @@ function planActions(
   const actions: PlanAction[] = [];
   for (const addon of model.runtimeAddons) {
     if (addon.kind === "opencode-package") {
-      if (addon.metadataInvocation === null) {
-        throw new Error("trusted npm is unavailable for OpenCode OMO");
+      if (addon.sourceArchivePath === null) {
+        throw new Error("reviewed OpenCode OMO archive is unavailable");
       }
       const target = runtimeAddonMarkerPath(
         model.stateRoot,
@@ -1505,15 +1502,16 @@ function planActions(
         id: "addon:opencode:omo:source",
         kind: "acquire",
         payload: {
-          argsPrefix: addon.metadataInvocation.argsPrefix,
-          command: addon.metadataInvocation.command,
           content,
           contentDigest: sha256Bytes(content),
           fingerprint: addon.fingerprint,
-          operation: "verify-opencode-addon-metadata",
+          operation: "verify-opencode-addon-source",
           ownershipKind: "file",
           ownershipScope: "managed",
           packageName: addon.addon.registration.packageName,
+          snapshotArchivePath: addon.addon.registration.snapshotArchivePath,
+          snapshotArchiveSha256:
+            addon.addon.registration.snapshotArchiveSha256,
           version: addon.addon.version,
         },
         preimage: observeRegularFile(target),
@@ -1528,10 +1526,12 @@ function planActions(
       payload: {
         contentDigest: addon.snapshot.digest,
         fingerprint: addon.fingerprint,
-        ...(addon.gitPath === null ? {} : { gitPath: addon.gitPath }),
         operation: "acquire-codex-addon-snapshot",
         ownershipKind: "directory",
         ownershipScope: "managed",
+        snapshotArchivePath: addon.addon.registration.snapshotArchivePath,
+        snapshotArchiveSha256:
+          addon.addon.registration.snapshotArchiveSha256,
       },
       preimage: observeManagedPath(addon.snapshot.root),
       required: true,
@@ -1550,7 +1550,7 @@ function planActions(
       },
       preimage: observeRegularFile(process.execPath),
       required: true,
-      target: process.execPath,
+      target: compositionNodeTarget(model.stateRoot),
     },
     {
       id: "plugin:runtime-package",
@@ -1580,9 +1580,12 @@ function planActions(
     const artifact = adapter?.platforms.find(({ platformId }) =>
       platformId === model.platformId);
     if (!adapter || !artifact) continue;
-    const target = agent.state === "ready" && agent.executablePath !== null
-      ? agent.executablePath
-      : managedRuntimePath(model.stateRoot, adapter, model.platformId);
+    const target = model.profile.compositionOnly === true
+        && agent.ownership === "external"
+      ? compositionAgentTarget(model.stateRoot, agent.id)
+      : agent.state === "ready" && agent.executablePath !== null
+        ? agent.executablePath
+        : managedRuntimePath(model.stateRoot, adapter, model.platformId);
     actions.push({
       id: `agent:${agent.id}`,
       kind: "acquire",
@@ -1781,7 +1784,7 @@ function planActions(
       payload: {
         content,
         contentDigest: sha256Bytes(content),
-        nodePath: process.execPath,
+        nodePath: compositionNodeTarget(model.stateRoot),
         observedTarget,
         operation: "register-runtime",
         ownershipKind: "registration",
@@ -1887,7 +1890,19 @@ function observedState(
 ): Readonly<Record<string, unknown>> {
   return {
     addons: model.runtimeAddons.map(({ status }) => status),
-    agents: model.agents,
+    agents: model.profile.compositionOnly === true
+      ? model.agents.map((agent) => ({
+          ...agent,
+          ...(agent.executablePath === null
+            ? {}
+            : {
+                executablePath: compositionAgentTarget(
+                  model.stateRoot,
+                  agent.id,
+                ),
+              }),
+        }))
+      : model.agents,
     packages: model.packages,
     native: Object.fromEntries(
       model.selectedAgents.map((runtimeId) => {
@@ -2034,17 +2049,6 @@ function payloadString(action: PlanAction, key: string): string {
     throw new Error(`${action.id} is missing payload.${key}`);
   }
   return value;
-}
-
-function payloadStringArray(action: PlanAction, key: string): readonly string[] {
-  const value = action.payload?.[key];
-  if (
-    !Array.isArray(value)
-    || value.some((entry) => typeof entry !== "string")
-  ) {
-    throw new Error(`${action.id} is missing payload.${key}`);
-  }
-  return value as readonly string[];
 }
 
 function runCommand(
@@ -2205,8 +2209,9 @@ async function executeAction(
 ): Promise<{ readonly verified: boolean; readonly detail?: string }> {
   const operation = payloadString(action, "operation");
   if (operation === "verify-file") {
+    const target = action.id === "omh-node" ? process.execPath : action.target;
     return {
-      verified: sha256File(action.target) === payloadString(action, "contentDigest"),
+      verified: sha256File(target) === payloadString(action, "contentDigest"),
     };
   }
   if (operation === "materialize-runtime-package") {
@@ -2217,37 +2222,29 @@ async function executeAction(
         === payloadString(action, "contentDigest"),
     };
   }
-  if (operation === "verify-opencode-addon-metadata") {
+  if (operation === "verify-opencode-addon-source") {
     const addon = model.runtimeAddons.find(
       (candidate): candidate is OpenCodeRuntimeAddonModel =>
         candidate.kind === "opencode-package",
     );
     if (
       addon === undefined
-      || addon.metadataInvocation === null
+      || addon.sourceArchivePath === null
       || addon.fingerprint !== payloadString(action, "fingerprint")
       || addon.addon.registration.packageName
         !== payloadString(action, "packageName")
       || addon.addon.version !== payloadString(action, "version")
-      || addon.metadataInvocation.command !== payloadString(action, "command")
-      || stableJson(addon.metadataInvocation.argsPrefix)
-        !== stableJson(payloadStringArray(action, "argsPrefix"))
+      || addon.addon.registration.snapshotArchivePath
+        !== payloadString(action, "snapshotArchivePath")
+      || addon.addon.registration.snapshotArchiveSha256
+        !== payloadString(action, "snapshotArchiveSha256")
+      || !inspectRuntimeAddonArchive(
+        addon.sourceArchivePath,
+        addon.addon.registration.snapshotArchiveSha256,
+      )
     ) {
-      throw new Error("OpenCode OMO metadata preflight changed after preview");
+      throw new Error("OpenCode OMO source changed after preview");
     }
-    const output = runCommand(
-      addon.metadataInvocation.command,
-      [
-        ...addon.metadataInvocation.argsPrefix,
-        "view",
-        `${addon.addon.registration.packageName}@${addon.addon.version}`,
-        "version",
-        "dist",
-        "--json",
-      ],
-      options,
-    );
-    verifyOpenCodeAddonPackageMetadata(addon.addon, output);
     atomicWriteFile(action.target, payloadString(action, "content"));
     return {
       verified:
@@ -2268,27 +2265,19 @@ async function executeAction(
       throw new Error("Codex OMO snapshot identity changed after preview");
     }
     if (!inspectCodexAddonSnapshot(addon.addon, model.stateRoot)) {
-      const plannedGit = payloadString(action, "gitPath");
-      const currentGit = findTrustedExecutable("git", {
-        cwd: options.cwd,
-        env: options.env,
-        platform: options.os,
-      });
       if (
-        currentGit === null
-        || resolve(currentGit) !== resolve(plannedGit)
+        addon.sourceArchivePath === null
+        || addon.addon.registration.snapshotArchivePath
+          !== payloadString(action, "snapshotArchivePath")
+        || addon.addon.registration.snapshotArchiveSha256
+          !== payloadString(action, "snapshotArchiveSha256")
       ) {
-        throw new Error("trusted Git changed after Codex OMO preview");
+        throw new Error("Codex OMO source changed after preview");
       }
-      materializeCodexAddonSnapshot(
+      await materializeCodexAddonSnapshotFromArchive(
+        addon.sourceArchivePath,
         addon.addon,
         model.stateRoot,
-        createRuntimeAddonGitOperations(
-          currentGit,
-          (command, args, environment) =>
-            runCommand(command, args, { ...options, env: environment }),
-          options.env,
-        ),
       );
     }
     return {
@@ -2387,8 +2376,14 @@ async function executeAction(
     };
   }
   if (operation === "verify-agent") {
+    const agentId = payloadString(action, "agentId");
+    if (!isAgentId(agentId)) {
+      throw new Error(`${action.id}: unknown caller-owned agent`);
+    }
+    const executable = runtimeExecutable(agentId, model, options);
     return {
-      verified: sha256File(action.target) === payloadString(action, "sourceDigest"),
+      verified:
+        sha256File(executable) === payloadString(action, "sourceDigest"),
     };
   }
   if (operation === "install-package") {
@@ -2839,7 +2834,7 @@ function recoveryPayload(
       "register-opencode-skill",
       "register-runtime",
       "remove-owned",
-      "verify-opencode-addon-metadata",
+      "verify-opencode-addon-source",
     ].includes(value.operation)
     || !Array.isArray(value.snapshots)
     || value.snapshots.length < 1
@@ -3729,7 +3724,10 @@ function environmentApplyDependencies(
     state,
     commitRecovery: async (recovery) =>
       commitEnvironmentRecovery(recovery, model, normalized),
-    observe: async (action) => actionPreimage(action),
+    observe: async (action) =>
+      action.id === "omh-node"
+        ? observeRegularFile(process.execPath)
+        : actionPreimage(action),
     prepare: async (action) => prepareActionRollback(
       action,
       model,
