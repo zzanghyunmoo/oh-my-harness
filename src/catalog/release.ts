@@ -216,11 +216,13 @@ function gitResult(
   repositoryRoot: string,
   args: readonly string[],
   encoding: BufferEncoding | null = "utf8",
+  input?: Buffer,
 ) {
   const executable = trustedGit(repositoryRoot);
   return spawnSync(executable, ["-C", repositoryRoot, ...args], {
     encoding,
     env: isolatedGitEnvironment(executable),
+    input,
     maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
     timeout: GIT_COMMAND_TIMEOUT_MS,
     windowsHide: true,
@@ -241,8 +243,12 @@ function git(repositoryRoot: string, args: readonly string[]): string {
   return String(result.stdout).trim();
 }
 
-function gitBytes(repositoryRoot: string, args: readonly string[]): Buffer {
-  const result = gitResult(repositoryRoot, args, null);
+function gitBytes(
+  repositoryRoot: string,
+  args: readonly string[],
+  input?: Buffer,
+): Buffer {
+  const result = gitResult(repositoryRoot, args, null, input);
   if (result.error) {
     throw new Error(`git ${args.join(" ")} failed to execute: ${result.error.message}`);
   }
@@ -322,21 +328,123 @@ export function resolveReleaseSourceIdentity(
   return { commit, tree };
 }
 
-function safeGitArchiveSegments(path: string): readonly string[] {
-  const normalized = path.replaceAll("\\", "/");
-  const segments = normalized.endsWith("/")
-    ? normalized.slice(0, -1).split("/")
-    : normalized.split("/");
+function safeGitTreeSegments(path: string): readonly string[] {
+  if (path.includes("\\")) {
+    throw new Error(`unsafe Git tree member: ${path}`);
+  }
+  const segments = path.split("/");
   if (
-    normalized.startsWith("/")
+    path.startsWith("/")
     || segments.length === 0
     || segments.some((segment) =>
       segment === "" || segment === "." || segment === ".."
     )
   ) {
-    throw new Error(`unsafe Git archive member: ${path}`);
+    throw new Error(`unsafe Git tree member: ${path}`);
   }
   return segments;
+}
+
+interface GitTreeFile {
+  readonly mode: 0o644 | 0o755;
+  readonly object: string;
+  readonly path: string;
+  readonly segments: readonly string[];
+}
+
+function parseGitTreeFiles(
+  repositoryRoot: string,
+  commit: string,
+): readonly GitTreeFile[] {
+  const listing = gitBytes(repositoryRoot, [
+    "ls-tree",
+    "-rz",
+    "--full-tree",
+    commit,
+  ]);
+  if (listing.length === 0) return [];
+  if (listing.at(-1) !== 0) {
+    throw new Error("Git tree listing is not NUL terminated");
+  }
+  const decode = new TextDecoder("utf-8", { fatal: true });
+  const files: GitTreeFile[] = [];
+  const names = new Set<string>();
+  let offset = 0;
+  while (offset < listing.length) {
+    const end = listing.indexOf(0, offset);
+    if (end < 0) throw new Error("Git tree listing is truncated");
+    if (end === offset) break;
+    const separator = listing.indexOf(9, offset);
+    if (separator < 0 || separator >= end) {
+      throw new Error("Git tree entry is malformed");
+    }
+    const metadata = decode.decode(listing.subarray(offset, separator));
+    const matched = /^(100644|100755) blob ([0-9a-f]{40})$/u.exec(metadata);
+    if (matched === null) {
+      throw new Error(`unsupported Git tree entry: ${metadata}`);
+    }
+    const path = decode.decode(listing.subarray(separator + 1, end));
+    const segments = safeGitTreeSegments(path);
+    const folded = path.normalize("NFC").toLowerCase();
+    if (names.has(folded)) {
+      throw new Error(`duplicate Git tree member: ${path}`);
+    }
+    names.add(folded);
+    files.push({
+      mode: matched[1] === "100755" ? 0o755 : 0o644,
+      object: matched[2]!,
+      path,
+      segments,
+    });
+    if (files.length > MAX_ARTIFACT_ENTRIES) {
+      throw new Error("Git release tree has too many entries");
+    }
+    offset = end + 1;
+  }
+  return files;
+}
+
+function readGitTreeBlobs(
+  repositoryRoot: string,
+  files: readonly GitTreeFile[],
+): readonly Buffer[] {
+  if (files.length === 0) return [];
+  const request = Buffer.from(
+    `${files.map(({ object }) => object).join("\n")}\n`,
+    "ascii",
+  );
+  const response = gitBytes(repositoryRoot, ["cat-file", "--batch"], request);
+  const blobs: Buffer[] = [];
+  let offset = 0;
+  let totalBytes = 0;
+  for (const file of files) {
+    const headerEnd = response.indexOf(10, offset);
+    if (headerEnd < 0) throw new Error("Git blob response is truncated");
+    const header = response.subarray(offset, headerEnd).toString("ascii");
+    const matched = /^([0-9a-f]{40}) blob ([0-9]+)$/u.exec(header);
+    if (matched === null || matched[1] !== file.object) {
+      throw new Error(`Git blob identity mismatch for ${file.path}`);
+    }
+    const size = Number.parseInt(matched[2]!, 10);
+    if (!Number.isSafeInteger(size) || size > MAX_ARTIFACT_FILE_BYTES) {
+      throw new Error(`oversized Git tree member: ${file.path}`);
+    }
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+    if (contentEnd >= response.length || response[contentEnd] !== 10) {
+      throw new Error(`Git blob response is truncated for ${file.path}`);
+    }
+    totalBytes += size;
+    if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
+      throw new Error("Git release tree exceeds the total byte limit");
+    }
+    blobs.push(response.subarray(contentStart, contentEnd));
+    offset = contentEnd + 1;
+  }
+  if (offset !== response.length) {
+    throw new Error("Git blob response contains unexpected trailing bytes");
+  }
+  return blobs;
 }
 
 export async function materializeReleaseSource(
@@ -351,75 +459,15 @@ export async function materializeReleaseSource(
   ) {
     throw new Error("release source identity does not match the checked-out HEAD");
   }
-  const archive = gitBytes(repositoryRoot, [
-    "archive",
-    "--format=tar",
-    identity.commit,
-  ]);
-  mkdirSync(destination, { recursive: true, mode: 0o700 });
-  const extract = tar.extract();
-  const names = new Set<string>();
-  let entries = 0;
-  let totalBytes = 0;
-  const completed = new Promise<void>((resolvePromise, reject) => {
-    extract.on("entry", (header, stream, next) => {
-      try {
-        entries += 1;
-        if (entries > MAX_ARTIFACT_ENTRIES) {
-          throw new Error("Git release archive has too many entries");
-        }
-        const segments = safeGitArchiveSegments(header.name);
-        const folded = segments.join("/").normalize("NFC").toLowerCase();
-        if (names.has(folded)) {
-          throw new Error(`duplicate Git archive member: ${header.name}`);
-        }
-        names.add(folded);
-        const target = join(destination, ...segments);
-        if (header.type === "directory") {
-          mkdirSync(target, { recursive: true, mode: header.mode ?? 0o755 });
-          stream.resume();
-          stream.once("end", next);
-          return;
-        }
-        if (header.type !== "file") {
-          throw new Error(`unsupported Git archive member: ${header.name}`);
-        }
-        const chunks: Buffer[] = [];
-        let size = 0;
-        stream.on("data", (chunk: Buffer) => {
-          size += chunk.length;
-          if (size > MAX_ARTIFACT_FILE_BYTES) {
-            stream.destroy(
-              new Error(`oversized Git archive member: ${header.name}`),
-            );
-          } else {
-            chunks.push(chunk);
-          }
-        });
-        stream.once("error", reject);
-        stream.once("end", () => {
-          totalBytes += size;
-          if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-            reject(new Error("Git release archive exceeds the total byte limit"));
-            return;
-          }
-          mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-          writeFileSync(target, Buffer.concat(chunks), {
-            mode: header.mode ?? 0o644,
-          });
-          chmodSync(target, header.mode ?? 0o644);
-          next();
-        });
-      } catch (error) {
-        stream.resume();
-        reject(error);
-      }
-    });
-    extract.once("finish", resolvePromise);
-    extract.once("error", reject);
-  });
-  extract.end(archive);
-  await completed;
+  const files = parseGitTreeFiles(repositoryRoot, identity.commit);
+  const blobs = readGitTreeBlobs(repositoryRoot, files);
+  mkdirSync(destination, { mode: 0o700 });
+  for (const [index, file] of files.entries()) {
+    const target = join(destination, ...file.segments);
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    writeFileSync(target, blobs[index]!, { flag: "wx", mode: file.mode });
+    chmodSync(target, file.mode);
+  }
 }
 
 function assertSafeArchivePath(path: string): void {

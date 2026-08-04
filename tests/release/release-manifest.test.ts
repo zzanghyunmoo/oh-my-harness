@@ -130,7 +130,7 @@ test("release source identity requires the exact local tag commit", () => {
   }
 });
 
-test("release source materialization excludes dirty and ignored checkout bytes", async () => {
+test("release source materialization uses only committed blobs", async () => {
   const root = mkdtempSync(join(tmpdir(), "omh-release-materialize-"));
   const materialized = join(root, "materialized");
   try {
@@ -144,6 +144,14 @@ test("release source materialization excludes dirty and ignored checkout bytes",
     git(root, ["tag", "v0.3.0"]);
     const identity = resolveReleaseSourceIdentity(root, "v0.3.0");
 
+    writeFileSync(
+      join(root, ".git", "info", "attributes"),
+      "source.txt export-ignore\n",
+    );
+    const externalAttributes = join(root, "external-attributes");
+    writeFileSync(externalAttributes, ".gitignore export-ignore\n");
+    git(root, ["config", "core.attributesFile", externalAttributes]);
+
     writeFileSync(join(root, "source.txt"), "dirty\n");
     writeFileSync(join(root, "untracked.txt"), "untracked\n");
     mkdirSync(join(root, "dist"));
@@ -151,7 +159,9 @@ test("release source materialization excludes dirty and ignored checkout bytes",
 
     await materializeReleaseSource(root, identity, materialized);
     assert.equal(readFileSync(join(materialized, "source.txt"), "utf8"), "committed\n");
+    assert.equal(readFileSync(join(materialized, ".gitignore"), "utf8"), "dist/\n");
     assert.equal(existsSync(join(materialized, "untracked.txt")), false);
+    assert.equal(existsSync(join(materialized, "external-attributes")), false);
     assert.equal(existsSync(join(materialized, "dist")), false);
   } finally {
     rmSync(root, { force: true, recursive: true });
