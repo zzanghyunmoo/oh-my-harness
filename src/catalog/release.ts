@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  existsSync,
+  constants,
+  copyFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -22,7 +22,10 @@ import {
 import { gunzipSync } from "node:zlib";
 import tar from "tar-stream";
 
-import { readBoundedRegularFile } from "../environment/filesystem.js";
+import {
+  readBoundedRegularFile,
+  sha256Bytes,
+} from "../environment/filesystem.js";
 import { loadCapabilityProvenance } from "../install/capabilities.js";
 import { loadCatalogBundle } from "./load.js";
 import { validateJsonSchema, type JsonSchema } from "./schema.js";
@@ -94,10 +97,6 @@ export interface ReleaseSourceIdentity {
   readonly tree: string;
 }
 
-function sha256(value: Buffer): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function readJson(path: string): unknown {
   return JSON.parse(readBoundedRegularFile(path, MAX_ARTIFACT_FILE_BYTES).toString("utf8")) as unknown;
 }
@@ -125,7 +124,7 @@ function hashDirectory(directory: string): string {
       totalBytes += stat.size;
       if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) throw new Error("release artifact exceeds the total byte limit");
       files.push({
-        digest: sha256(readBoundedRegularFile(path, MAX_ARTIFACT_FILE_BYTES)),
+        digest: sha256Bytes(readBoundedRegularFile(path, MAX_ARTIFACT_FILE_BYTES)),
         path: relative(root, path).split(sep).join("/"),
       });
     }
@@ -237,7 +236,7 @@ export async function inspectReleaseArchive(archivePath: string): Promise<readon
             return;
           }
           const content = Buffer.concat(chunks);
-          files.push({ mode: (header.mode ?? 0) & 0o777, path: header.name, sha256: sha256(content), size });
+          files.push({ mode: (header.mode ?? 0) & 0o777, path: header.name, sha256: sha256Bytes(content), size });
           next();
         });
       } catch (error) {
@@ -284,7 +283,7 @@ export async function verifyReleaseArtifact(
   }
   if (basename(archivePath) !== sidecar.archive.filename) throw new Error("release archive filename mismatch");
   const bytes = readBoundedRegularFile(archivePath, MAX_ARTIFACT_TOTAL_BYTES);
-  if (bytes.length !== sidecar.archive.size || sha256(bytes) !== sidecar.archive.sha256) {
+  if (bytes.length !== sidecar.archive.size || sha256Bytes(bytes) !== sidecar.archive.sha256) {
     throw new Error("release archive checksum or size mismatch");
   }
   const files = await inspectReleaseArchive(archivePath);
@@ -339,9 +338,10 @@ export async function buildReleaseArtifact(
   mkdirSync(outputDirectory, { recursive: true });
   const archivePath = join(outputDirectory, expected.distribution.archiveFilename);
   const sidecarPath = join(outputDirectory, expected.distribution.sidecarFilename);
-  if (existsSync(archivePath) || existsSync(sidecarPath)) throw new Error("release output already exists; refusing to overwrite");
 
   const staging = mkdtempSync(join(tmpdir(), "omh-release-pack-"));
+  let archiveCreated = false;
+  let sidecarCreated = false;
   try {
     const npmEntrypoint = process.env.npm_execpath;
     const command = npmEntrypoint ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
@@ -369,12 +369,20 @@ export async function buildReleaseArtifact(
     if (report.length !== 1 || item?.name !== expected.distribution.packageName || item.version !== expected.distribution.version || typeof item.filename !== "string") {
       throw new Error("npm pack returned an unexpected package identity");
     }
-    renameSync(join(staging, item.filename), archivePath);
+    try {
+      copyFileSync(join(staging, item.filename), archivePath, constants.COPYFILE_EXCL);
+      archiveCreated = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("release output already exists; refusing to overwrite");
+      }
+      throw error;
+    }
     const bytes = readBoundedRegularFile(archivePath, MAX_ARTIFACT_TOTAL_BYTES);
     const files = await inspectReleaseArchive(archivePath);
     const sidecar: ReleaseSidecar = {
       $schema: "harness/contracts/release-catalog.schema.json#/$defs/releaseSidecar",
-      archive: { filename: basename(archivePath), files, sha256: sha256(bytes), size: statSync(archivePath).size },
+      archive: { filename: basename(archivePath), files, sha256: sha256Bytes(bytes), size: statSync(archivePath).size },
       catalogRevision: expected.catalogRevision,
       kind: "release-sidecar",
       package: { name: "oh-my-harness", tag: expected.distribution.tag, version: expected.distribution.version },
@@ -382,11 +390,21 @@ export async function buildReleaseArtifact(
       source: identity,
     };
     await verifyReleaseArtifact(repositoryRoot, archivePath, sidecar, identity);
-    writeFileSync(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o644 });
+    const stagedSidecarPath = join(staging, expected.distribution.sidecarFilename);
+    writeFileSync(stagedSidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, { encoding: "utf8", mode: 0o644 });
+    try {
+      copyFileSync(stagedSidecarPath, sidecarPath, constants.COPYFILE_EXCL);
+      sidecarCreated = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("release output already exists; refusing to overwrite");
+      }
+      throw error;
+    }
     return { archivePath, sidecar, sidecarPath };
   } catch (error) {
-    rmSync(archivePath, { force: true });
-    rmSync(sidecarPath, { force: true });
+    if (archiveCreated) rmSync(archivePath, { force: true });
+    if (sidecarCreated) rmSync(sidecarPath, { force: true });
     throw error;
   } finally {
     rmSync(staging, { force: true, recursive: true });

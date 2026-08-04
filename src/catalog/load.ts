@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   BUILT_IN_PROFILE_IDS,
   CAPABILITY_IDS,
+  isCompositionProfileId,
   PACKAGE_IDS,
   RELEASED_PROFILE_IDS,
   SUPPORTED_AGENT_IDS,
@@ -347,7 +348,7 @@ function validateProfileReferences(
   packageIds: ReadonlySet<string>,
   capabilities: ReadonlyMap<string, CapabilityCatalogEntry>,
 ): void {
-  const compositionOnly = profile.id === "mds-host";
+  const compositionOnly = isCompositionProfileId(profile.id);
   if (compositionOnly !== (profile.compositionOnly === true)) {
     throw new Error(
       `${profile.id}: compositionOnly is reserved for the mds-host profile`,

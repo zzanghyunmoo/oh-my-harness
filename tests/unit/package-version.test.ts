@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +9,7 @@ import { HARNESS_VERSION } from "../../dist/package-version.js";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function readJson(path: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(`${REPOSITORY_ROOT}/${path}`, "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(join(REPOSITORY_ROOT, path), "utf8")) as Record<string, unknown>;
 }
 
 test("0.3.0 package identity is coherent across distributed surfaces", () => {
@@ -36,7 +37,7 @@ test("0.3.0 package identity is coherent across distributed surfaces", () => {
     "plugins/oh-my-harness/mcp/cli-tools-server.mjs",
   ]) {
     assert.match(
-      readFileSync(`${REPOSITORY_ROOT}/${path}`, "utf8"),
+      readFileSync(join(REPOSITORY_ROOT, path), "utf8"),
       new RegExp(`version: ["']${HARNESS_VERSION.replaceAll(".", "\\.")}["']`),
     );
   }

@@ -2,6 +2,7 @@ import { isAbsolute, win32 } from "node:path";
 
 import {
   CAPABILITY_IDS,
+  isCompositionProfileId,
   PACKAGE_IDS,
   SUPPORTED_AGENT_IDS,
 } from "../domain/catalog.js";
@@ -301,7 +302,7 @@ function parseSelection(
     fail("--apply requires the exact --digest printed by preview");
   }
   if (!apply && digest !== undefined) fail("--digest requires --apply");
-  if (profile === "mds-host") {
+  if (isCompositionProfileId(profile)) {
     if (!agentsExplicit) agents = [];
   } else if (agents.length === 0) {
     fail("--agents none is only valid with --profile mds-host");
