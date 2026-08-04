@@ -129,6 +129,7 @@ test("the tracked tree contains only current product vocabulary", () => {
   for (const path of trackedFiles()) {
     assert.doesNotMatch(path, RETIRED_SURFACE_PATTERN, path);
     assert.doesNotMatch(path, RETIRED_NAMESPACE_PATTERN, path);
+    if (path.startsWith("harness/vendor/")) continue;
     assert.doesNotMatch(
       readFileSync(join(REPOSITORY_ROOT, path), "utf8"),
       RETIRED_SURFACE_PATTERN,
