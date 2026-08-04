@@ -18,6 +18,7 @@ import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import { inspectCodexManagedRuntimeRegistration } from "../../dist/environment/native-registration.js";
 import {
   hashManagedDirectory,
   inspectManagedRuntimePayload,
@@ -153,6 +154,63 @@ function createOfficialMarketplaceFixture(
   return installPaths;
 }
 
+function writePreviousManagedReceipt(
+  stateRoot: string,
+  payloadRoot: string,
+  agentId: "claude-code" | "codex",
+  catalogRevision: string,
+): string {
+  const receiptPath = join(stateRoot, "receipts", "environment.json");
+  mkdirSync(join(receiptPath, ".."), { recursive: true });
+  writeFileSync(
+    receiptPath,
+    `${JSON.stringify({
+      $schema: "../contracts/managed-state-receipt.schema.json",
+      appliedAt: "2026-08-04T00:00:00.000Z",
+      catalogRevision,
+      completedActionIds: [],
+      desiredState: {
+        profileId: "mds-host",
+        selectedAgents: [agentId],
+      },
+      kind: "managed-state-receipt",
+      ownership: [
+        {
+          digest: hashManagedDirectory(payloadRoot),
+          id: "plugin:runtime-package",
+          kind: "directory",
+          scope: "managed",
+          target: payloadRoot,
+        },
+        {
+          digest: "b".repeat(64),
+          id: `runtime:${agentId}:native`,
+          kind: "registration",
+          scope: "managed",
+          target: join(
+            stateRoot,
+            "markers",
+            "runtimes",
+            `${agentId}.json`,
+          ),
+        },
+      ],
+      planDigest: "c".repeat(64),
+      runtimeReadiness: [{ agentId, state: "ready" }],
+      schemaVersion: "2.0.0",
+      startupConsent: {
+        addReviewedContent: true,
+        artifactClasses: ["managed-skill"],
+        channelId: "stable",
+        permissionScopes: ["workspace:read"],
+        profileId: "mds-host",
+        repairPinned: true,
+      },
+    }, null, 2)}\n`,
+  );
+  return receiptPath;
+}
+
 test("U13 CLI closes preview, exact apply, receipt, status, and startup context end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "omh-v2-cli-"));
   const repositoryRoot = join(root, "repository");
@@ -164,6 +222,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   let managedPluginVersion = "0.3.0";
   let managedMarketplaceRoot: string | null = null;
   let codexManagedMarketplaceRoot: string | null = null;
+  let codexPluginInstalled = false;
   const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
 
@@ -227,6 +286,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     const claudePath = createExecutable(binaryRoot, "claude");
     const openCodePath = createExecutable(binaryRoot, "opencode");
     const codexPath = createExecutable(binaryRoot, "codex");
+    const canonicalCodexPath = realpathSync(codexPath);
     for (const command of [
       "linear",
       "ntn",
@@ -296,7 +356,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       runCommand(command: string, args: readonly string[]) {
         calls.push({ command, args: [...args] });
         const invocation = args.join(" ");
-        if (command === codexPath) {
+        if (command === canonicalCodexPath) {
           if (invocation === "plugin marketplace list --json") {
             return JSON.stringify({
               marketplaces: codexManagedMarketplaceRoot === null
@@ -308,7 +368,25 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
             });
           }
           if (invocation === "plugin list --json") {
-            return JSON.stringify({ installed: [] });
+            return JSON.stringify({
+              installed: codexPluginInstalled
+                && codexManagedMarketplaceRoot !== null
+                ? [{
+                    enabled: true,
+                    installed: true,
+                    marketplaceName: "oh-my-harness",
+                    pluginId: "oh-my-harness@oh-my-harness",
+                    source: {
+                      path: join(
+                        codexManagedMarketplaceRoot,
+                        "plugins",
+                        "oh-my-harness",
+                      ),
+                      source: "local",
+                    },
+                  }]
+                : [],
+            });
           }
           throw new Error(`unexpected Codex mutation: ${invocation}`);
         }
@@ -376,7 +454,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     };
     const mutationCount = () =>
       calls.filter(({ args }) =>
-        /^(?:plugin marketplace add|plugin install|plugin uninstall) /u.test(
+        /^(?:plugin marketplace (?:add|remove)|plugin (?:add|install|remove|uninstall)) /u.test(
           args.join(" "),
         )
       ).length;
@@ -413,6 +491,79 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
       false,
     );
     assert.equal(existsSync(join(root, "host-state")), false);
+    const hostCatalogRevision = hostPreview.preview?.catalogRevision;
+    assert.ok(hostCatalogRevision);
+    const verifyPreviousNativePreview = (
+      agentId: "claude-code" | "codex",
+      activate: (payloadRoot: string, receiptPath: string) => void,
+      deactivate: () => void,
+      verifyNative?: (payloadRoot: string, receiptPath: string) => void,
+    ): void => {
+      const stateRoot = join(root, `previous-${agentId}-clean-state`);
+      const payloadRoot = join(
+        stateRoot,
+        "payloads",
+        "generations",
+        "previous",
+      );
+      mkdirSync(join(payloadRoot, "plugins"), { recursive: true });
+      cpSync(
+        join(repositoryRoot, "plugins", "oh-my-harness"),
+        join(payloadRoot, "plugins", "oh-my-harness"),
+        { recursive: true },
+      );
+      const receiptPath = writePreviousManagedReceipt(
+        stateRoot,
+        payloadRoot,
+        agentId,
+        hostCatalogRevision,
+      );
+      const receiptBytes = readFileSync(receiptPath, "utf8");
+      const input = {
+        clean: true,
+        profileId: "mds-host" as const,
+        selectedAgents: [agentId],
+        selectedPackages: [],
+        stateRoot,
+      };
+
+      activate(payloadRoot, receiptPath);
+      try {
+        verifyNative?.(payloadRoot, receiptPath);
+        const preview = previewEnvironment(input, commonOptions);
+        const repeated = previewEnvironment(input, commonOptions);
+        assert.equal(
+          preview.readiness,
+          "preview",
+          JSON.stringify(preview, null, 2),
+        );
+        assert.ok(preview.plan);
+        assert.equal(preview.digest, repeated.digest);
+        assert.equal(
+          preview.plan.actions.find(
+            ({ id }) => id === `runtime:${agentId}:native`,
+          )?.payload?.previousActiveRoot,
+          payloadRoot,
+        );
+        assert.equal(mutationCount(), 0);
+        assert.equal(readFileSync(receiptPath, "utf8"), receiptBytes);
+
+        rmSync(join(payloadRoot, "plugins", "oh-my-harness"), {
+          recursive: true,
+        });
+        const partial = previewEnvironment(input, commonOptions);
+        assert.equal(partial.readiness, "blocked");
+        assert.equal(partial.plan, null);
+        assert.equal(
+          partial.blockers.includes(`native-registration:${agentId}`),
+          true,
+        );
+        assert.equal(mutationCount(), 0);
+        assert.equal(readFileSync(receiptPath, "utf8"), receiptBytes);
+      } finally {
+        deactivate();
+      }
+    };
 
     const currentOnlyStateRoot = join(root, "current-only-clean-state");
     const previousPayloadRoot = join(
@@ -504,6 +655,42 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     pluginInstalled = false;
     managedMarketplaceRoot = null;
     marketplaces.delete("oh-my-harness");
+
+    verifyPreviousNativePreview(
+      "claude-code",
+      (payloadRoot) => {
+        managedMarketplaceRoot = payloadRoot;
+        marketplaces.set("oh-my-harness", payloadRoot);
+        pluginInstalled = true;
+      },
+      () => {
+        pluginInstalled = false;
+        managedMarketplaceRoot = null;
+        marketplaces.delete("oh-my-harness");
+      },
+    );
+
+    verifyPreviousNativePreview(
+      "codex",
+      (payloadRoot) => {
+        codexManagedMarketplaceRoot = payloadRoot;
+        codexPluginInstalled = true;
+      },
+      () => {
+        codexPluginInstalled = false;
+        codexManagedMarketplaceRoot = null;
+      },
+      (payloadRoot, receiptPath) => {
+        assert.deepEqual(
+          inspectCodexManagedRuntimeRegistration(
+            canonicalCodexPath,
+            { activeRoot: payloadRoot, receiptPath },
+            commonOptions.runCommand,
+          ),
+          { marketplace: "ready", plugin: "ready" },
+        );
+      },
+    );
 
     const openCodeConfigPath = join(
       env.XDG_CONFIG_HOME,
