@@ -99,7 +99,9 @@ import type {
 } from "../ports/state.js";
 import {
   applyExactPlan,
+  recoverPendingApply,
   StalePreviewError,
+  type ApplyDependencies,
   type ApplyResult,
 } from "../planning/apply.js";
 import type {
@@ -1923,8 +1925,12 @@ function optionalGapIds(preflight: readonly PlanPreflight[]): string[] {
 
 function previewCommand(model: EnvironmentModel): string {
   return `omh setup --profile ${model.profile.id} --agents ${
-    model.selectedAgents.join(",") || "none"
+    selectedAgentsArgument(model.selectedAgents)
   } --root ${JSON.stringify(model.stateRoot)}`;
+}
+
+function selectedAgentsArgument(selectedAgents: readonly AgentId[]): string {
+  return selectedAgents.join(",") || "none";
 }
 
 function normalizedOptions(
@@ -3714,33 +3720,13 @@ function completedActionReady(action: PlanAction): boolean {
     : sha256File(action.target) === expected;
 }
 
-export async function applyEnvironment(
-  selection: EnvironmentSelection,
-  expectedDigest: string,
-  options: EnvironmentOrchestratorOptions,
-): Promise<{
-  readonly preview: EnvironmentPreview;
-  readonly result: ApplyResult;
-}> {
-  const normalized = normalizedOptions(options);
-  const { model, preview } = buildEnvironmentPreview(selection, normalized);
-  if (preview.plan === null || preview.digest === null) {
-    throw new Error(`environment preview is blocked: ${preview.blockers.join(", ")}`);
-  }
-  if (preview.digest !== expectedDigest) {
-    throw new StalePreviewError("environment preview digest is stale");
-  }
-  const result = await applyExactPlan(preview.plan, expectedDigest, {
-    state: new FileStateStore(model.stateRoot, {
-      validateReceipt(value) {
-        validateContractDocument(
-          "managed-state-receipt",
-          value,
-          normalized.repositoryRoot,
-        );
-        return value as ManagedStateReceipt;
-      },
-    }),
+function environmentApplyDependencies(
+  model: EnvironmentModel,
+  normalized: ReturnType<typeof normalizedOptions>,
+  state: FileStateStore,
+): ApplyDependencies {
+  return {
+    state,
     commitRecovery: async (recovery) =>
       commitEnvironmentRecovery(recovery, model, normalized),
     observe: async (action) => actionPreimage(action),
@@ -3754,7 +3740,66 @@ export async function applyEnvironment(
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
+  };
+}
+
+export async function applyEnvironment(
+  selection: EnvironmentSelection,
+  expectedDigest: string,
+  options: EnvironmentOrchestratorOptions,
+): Promise<{
+  readonly preview: EnvironmentPreview;
+  readonly result: ApplyResult;
+}> {
+  const normalized = normalizedOptions(options);
+  let current = buildEnvironmentPreview(selection, normalized);
+  let state: FileStateStore | null = null;
+  const journalPath = join(current.model.stateRoot, "journal", "apply.json");
+  if (existsSync(journalPath)) {
+    state = new FileStateStore(current.model.stateRoot, {
+      validateReceipt(value) {
+        validateContractDocument(
+          "managed-state-receipt",
+          value,
+          normalized.repositoryRoot,
+        );
+        return value as ManagedStateReceipt;
+      },
+    });
+    const recovery = await recoverPendingApply(
+      environmentApplyDependencies(current.model, normalized, state),
+    );
+    if (recovery.failure !== undefined) {
+      throw new Error(
+        `environment interrupted apply recovery failed: ${recovery.failure}`,
+      );
+    }
+    if (recovery.recovered) {
+      current = buildEnvironmentPreview(selection, normalized);
+    }
+  }
+  const { model, preview } = current;
+  if (preview.plan === null || preview.digest === null) {
+    throw new Error(`environment preview is blocked: ${preview.blockers.join(", ")}`);
+  }
+  if (preview.digest !== expectedDigest) {
+    throw new StalePreviewError("environment preview digest is stale");
+  }
+  state ??= new FileStateStore(model.stateRoot, {
+    validateReceipt(value) {
+      validateContractDocument(
+        "managed-state-receipt",
+        value,
+        normalized.repositoryRoot,
+      );
+      return value as ManagedStateReceipt;
+    },
   });
+  const result = await applyExactPlan(
+    preview.plan,
+    expectedDigest,
+    environmentApplyDependencies(model, normalized, state),
+  );
   return { preview, result };
 }
 
@@ -4156,7 +4201,7 @@ export function inspectEnvironment(
       ? []
       : [
           `omh setup --profile ${receipt.desiredState.profileId} --agents ${
-            receipt.desiredState.selectedAgents.join(",")
+            selectedAgentsArgument(receipt.desiredState.selectedAgents)
           } --root ${JSON.stringify(stateRoot)}`,
         ],
     schemaVersion: "2.0.0",
@@ -4315,7 +4360,7 @@ export function diagnoseEnvironment(
     readiness: "unverifiable",
     remediation: [
       `omh setup --profile ${status.profileId} --agents ${
-        status.selectedAgents.join(",")
+        selectedAgentsArgument(status.selectedAgents)
       } --root ${JSON.stringify(status.stateRoot)}`,
     ],
     v2ParityReady: status.v2ParityReady && issues.length === 0,

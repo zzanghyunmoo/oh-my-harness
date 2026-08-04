@@ -17,13 +17,17 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
-import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import {
+  applyEnvironment,
+  previewEnvironment,
+} from "../../dist/environment/orchestrator.js";
 import { inspectCodexManagedRuntimeRegistration } from "../../dist/environment/native-registration.js";
 import {
   hashManagedDirectory,
   inspectManagedRuntimePayload,
 } from "../../dist/install/managed-payload.js";
 import { gitTreeSha1 } from "../../dist/install/official-marketplace.js";
+import { StalePreviewError } from "../../dist/planning/apply.js";
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -211,7 +215,7 @@ function writePreviousManagedReceipt(
   return receiptPath;
 }
 
-test("U13 CLI closes preview, exact apply, receipt, status, and startup context end to end", async () => {
+test("U13 CLI closes preview, exact apply, receipt, status, and startup context end to end", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "omh-v2-cli-"));
   const repositoryRoot = join(root, "repository");
   const workspace = join(root, "workspace");
@@ -388,6 +392,10 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
                 : [],
             });
           }
+          if (invocation.startsWith("plugin marketplace remove ")) {
+            codexManagedMarketplaceRoot = null;
+            return "{}";
+          }
           throw new Error(`unexpected Codex mutation: ${invocation}`);
         }
         if (invocation === "plugin marketplace list --json") {
@@ -432,6 +440,11 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           if (manifest.name === "oh-my-harness") {
             managedMarketplaceRoot = marketplaceRoot;
           }
+        }
+        if (invocation.startsWith("plugin marketplace remove ")) {
+          const name = args[3];
+          if (name !== undefined) marketplaces.delete(name);
+          if (name === "oh-my-harness") managedMarketplaceRoot = null;
         }
         if (invocation.startsWith("plugin install ")) {
           const selector = args[2];
@@ -493,6 +506,256 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     assert.equal(existsSync(join(root, "host-state")), false);
     const hostCatalogRevision = hostPreview.preview?.catalogRevision;
     assert.ok(hostCatalogRevision);
+
+    await t.test(
+      "mds-host selected caller-owned runtimes share verify-agent planning",
+      async () => {
+        for (const agentId of ["claude-code", "opencode", "codex"] as const) {
+          const selected = await runOmh(
+            [
+              "setup",
+              "--profile",
+              "mds-host",
+              "--agents",
+              agentId,
+              "--root",
+              join(root, `host-${agentId}-preview-state`),
+            ],
+            commonOptions,
+          );
+          assert.equal(
+            selected.state,
+            "preview",
+            JSON.stringify(selected.preview, null, 2),
+          );
+          const verifyAgent = selected.preview?.plan?.actions.find(
+            ({ id }) => id === `agent:${agentId}`,
+          );
+          assert.equal(verifyAgent?.payload?.operation, "verify-agent");
+          assert.equal(verifyAgent?.payload?.ownershipScope, "external");
+          assert.equal(
+            selected.preview?.plan?.actions.some(
+              ({ payload }) => payload?.operation === "acquire-agent",
+            ),
+            false,
+          );
+        }
+      },
+    );
+
+    await t.test(
+      "mds-host selected Claude apply reaches native registration and converges idempotently",
+      async () => {
+        const selectedCallsStart = calls.length;
+        const selectedStateRoot = join(root, "host-claude-apply-state");
+        const selectedArgs = [
+          "setup",
+          "--profile",
+          "mds-host",
+          "--agents",
+          "claude-code",
+          "--root",
+          selectedStateRoot,
+        ] as const;
+        const selectedPreview = await runOmh(selectedArgs, commonOptions);
+        assert.ok(selectedPreview.preview?.digest);
+        const mutationsBefore = mutationCount();
+        const selectedApplied = await runOmh(
+          [
+            ...selectedArgs,
+            "--apply",
+            "--digest",
+            selectedPreview.preview.digest,
+          ],
+          commonOptions,
+        );
+        assert.equal(
+          selectedApplied.state,
+          "ready",
+          JSON.stringify(selectedApplied.apply, null, 2),
+        );
+        assert.equal(mutationCount() > mutationsBefore, true);
+        const selectedReceipt = JSON.parse(readFileSync(
+          join(selectedStateRoot, "receipts", "environment.json"),
+          "utf8",
+        )) as { ownership: Array<{ id: string; scope: string }> };
+        assert.equal(selectedReceipt.ownership.find(
+          ({ id }) => id === "agent:claude-code",
+        )?.scope, "external");
+        const selectedStatus = await runOmh(
+          ["status", "--root", selectedStateRoot],
+          commonOptions,
+        );
+        assert.equal(selectedStatus.state, "ready");
+
+        const repeatedPreview = await runOmh(selectedArgs, commonOptions);
+        assert.ok(repeatedPreview.preview?.digest);
+        const mutationsAfterApply = mutationCount();
+        const repeatedApply = await runOmh(
+          [
+            ...selectedArgs,
+            "--apply",
+            "--digest",
+            repeatedPreview.preview.digest,
+          ],
+          commonOptions,
+        );
+        assert.equal(repeatedApply.state, "ready");
+        assert.equal(mutationCount(), mutationsAfterApply);
+
+        pluginInstalled = false;
+        managedMarketplaceRoot = null;
+        marketplaces.clear();
+        officialInstalled.clear();
+        calls.splice(selectedCallsStart);
+      },
+    );
+
+    await t.test(
+      "mds-host apply rejects caller-owned executable drift before mutation",
+      async () => {
+        const driftArgs = [
+          "setup",
+          "--profile",
+          "mds-host",
+          "--agents",
+          "opencode",
+          "--root",
+          join(root, "host-opencode-drift-state"),
+        ] as const;
+        const driftPreview = await runOmh(driftArgs, commonOptions);
+        assert.ok(driftPreview.preview?.digest);
+        const executableBytes = readFileSync(openCodePath);
+        const mutationsBefore = mutationCount();
+        try {
+          writeFileSync(openCodePath, Buffer.concat([
+            executableBytes,
+            Buffer.from("\n# drift\n"),
+          ]));
+          chmodSync(openCodePath, 0o755);
+          await assert.rejects(
+            runOmh(
+              [
+                ...driftArgs,
+                "--apply",
+                "--digest",
+                driftPreview.preview.digest,
+              ],
+              commonOptions,
+            ),
+            /environment preview is blocked: agent:opencode/u,
+          );
+          assert.equal(mutationCount(), mutationsBefore);
+        } finally {
+          writeFileSync(openCodePath, executableBytes);
+          chmodSync(openCodePath, 0o755);
+        }
+      },
+    );
+
+    await t.test(
+      "Claude and Codex interrupted native registrations recover before preview validation",
+      async () => {
+        const recoveryCallsStart = calls.length;
+        for (const agentId of ["claude-code", "codex"] as const) {
+          const recoveryStateRoot = join(root, `host-${agentId}-recovery-state`);
+          const selection = {
+            profileId: "mds-host",
+            selectedAgents: [agentId],
+            selectedPackages: [],
+            stateRoot: recoveryStateRoot,
+          };
+          const preview = previewEnvironment(selection, commonOptions);
+          assert.ok(preview.plan);
+          assert.ok(preview.digest);
+          const runtimeAction = preview.plan.actions.find(
+            ({ id }) => id === `runtime:${agentId}:native`,
+          );
+          assert.ok(runtimeAction);
+          const activeRoot = inspectManagedRuntimePayload(
+            repositoryRoot,
+            recoveryStateRoot,
+          ).activeRoot;
+          const backupRoot = join(
+            recoveryStateRoot,
+            "journal",
+            "rollback",
+            `${agentId}-interrupted`,
+          );
+          mkdirSync(backupRoot, { recursive: true });
+          writeFileSync(
+            join(recoveryStateRoot, "journal", "apply.json"),
+            `${JSON.stringify({
+              catalogRevision: preview.catalogRevision,
+              completedActionIds: [],
+              kind: "apply-journal",
+              pendingRecoveries: [{
+                actionId: runtimeAction.id,
+                kind: "environment-action-v1",
+                payload: {
+                  backupRoot,
+                  native: {
+                    activeRoot,
+                    executablePath: agentId === "claude-code"
+                      ? realpathSync(claudePath)
+                      : canonicalCodexPath,
+                    kind: agentId === "claude-code"
+                      ? "claude-runtime-absent"
+                      : "codex-runtime-absent",
+                    receiptPath: preview.receiptPath,
+                  },
+                  operation: "register-runtime",
+                  schemaVersion: "2.0.0",
+                  snapshots: [{
+                    existed: false,
+                    expectedKind: "file",
+                    target: runtimeAction.target,
+                  }],
+                },
+              }],
+              planDigest: preview.digest,
+              schemaVersion: "2.0.0",
+              status: "partial-unready",
+            }, null, 2)}\n`,
+          );
+          if (agentId === "claude-code") {
+            marketplaces.set("oh-my-harness", activeRoot);
+            managedMarketplaceRoot = activeRoot;
+            pluginInstalled = false;
+          } else {
+            codexManagedMarketplaceRoot = activeRoot;
+            codexPluginInstalled = false;
+          }
+
+          await assert.rejects(
+            applyEnvironment(selection, "0".repeat(64), commonOptions),
+            StalePreviewError,
+          );
+
+          const recoveredJournal = JSON.parse(readFileSync(
+            join(recoveryStateRoot, "journal", "apply.json"),
+            "utf8",
+          )) as { pendingRecoveries: unknown[] };
+          assert.deepEqual(recoveredJournal.pendingRecoveries, []);
+          assert.equal(existsSync(backupRoot), false);
+          assert.equal(
+            agentId === "claude-code"
+              ? marketplaces.has("oh-my-harness")
+              : codexManagedMarketplaceRoot !== null,
+            false,
+          );
+          const recoveredPreview = previewEnvironment(selection, commonOptions);
+          assert.equal(
+            recoveredPreview.readiness,
+            "preview",
+            JSON.stringify(recoveredPreview, null, 2),
+          );
+          assert.equal(recoveredPreview.digest, preview.digest);
+          rmSync(recoveryStateRoot, { force: true, recursive: true });
+        }
+        calls.splice(recoveryCallsStart);
+      },
+    );
     const verifyPreviousNativePreview = (
       agentId: "claude-code" | "codex",
       activate: (payloadRoot: string, receiptPath: string) => void,

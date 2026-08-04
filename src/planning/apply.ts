@@ -85,9 +85,14 @@ function publishedReceiptMatchesJournal(
     );
 }
 
-async function recoverInterruptedApply(
+type ApplyRecoveryDependencies = Pick<
+  ApplyDependencies,
+  "commitRecovery" | "recover" | "state"
+>;
+
+async function recoverInterruptedJournal(
   journal: ApplyJournal,
-  dependencies: ApplyDependencies,
+  dependencies: ApplyRecoveryDependencies,
 ): Promise<{
   readonly failure?: string;
   readonly journal: ApplyJournal;
@@ -142,6 +147,27 @@ async function recoverInterruptedApply(
     }
   }
   return { journal: current };
+}
+
+export interface PendingApplyRecoveryResult {
+  readonly recovered: boolean;
+  readonly failure?: string;
+}
+
+export async function recoverPendingApply(
+  dependencies: ApplyRecoveryDependencies,
+): Promise<PendingApplyRecoveryResult> {
+  return dependencies.state.withApplyLock(async () => {
+    const journal = await dependencies.state.readJournal();
+    if (journal === null || (journal.pendingRecoveries?.length ?? 0) === 0) {
+      return { recovered: false };
+    }
+    const recovery = await recoverInterruptedJournal(journal, dependencies);
+    return {
+      recovered: recovery.failure === undefined,
+      ...(recovery.failure === undefined ? {} : { failure: recovery.failure }),
+    };
+  });
 }
 
 export interface ApplyResult {
@@ -344,7 +370,7 @@ export async function applyExactPlan(
   return dependencies.state.withApplyLock(async () => {
     const interrupted = await dependencies.state.readJournal();
     if (interrupted !== null) {
-      const recovery = await recoverInterruptedApply(interrupted, dependencies);
+      const recovery = await recoverInterruptedJournal(interrupted, dependencies);
       if (recovery.failure !== undefined) {
         return {
           status: "partial-unready",
