@@ -10,7 +10,22 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 A versioned declaration of the coding agents, required and optional machine-shared CLI packages, enabled capabilities, platform conditions, and startup synchronization policy that make up one desired environment.
 
-`personal` and `company` are built-in Environment Profiles. A custom Environment Profile is validated and previewed locally, then becomes reusable only after its repository change is reviewed, merged, and distributed.
+`personal` and `company` are built-in Environment Profiles. `mds-host` is the
+built-in Composition Profile. A custom Environment Profile is validated and
+previewed locally, then becomes reusable only after its repository change is
+reviewed, merged, and distributed.
+
+### Composition Profile
+
+A package-free Environment Profile intended for an owning installer to compose
+into a larger machine setup without transferring package or authentication
+ownership.
+
+The released `mds-host` Composition Profile permits an empty agent selection as
+a deterministic no-op. When agents are selected, Oh My Harness verifies their
+existing executables and native registrations but does not acquire them, expose
+profile CLI backends, or automate authentication. Only the reserved `mds-host`
+ID may declare `compositionOnly: true`.
 
 ### Environment Instance
 

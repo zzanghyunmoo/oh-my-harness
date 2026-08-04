@@ -276,6 +276,29 @@ export function deriveToolPolicy(
     return statusOnly(input.runtimeId, "runtime-not-ready", common);
   }
 
+  if (profile.compositionOnly === true) {
+    return Object.freeze({
+      mode: "ready",
+      runtimeId: input.runtimeId,
+      profileId: profile.id,
+      catalogRevision: receipt.catalogRevision,
+      receiptFingerprint: fingerprint,
+      selectedAgents: Object.freeze([
+        ...receipt.desiredState.selectedAgents,
+      ]),
+      bindings: null,
+      toolRoutes: Object.freeze([]),
+      toolNames: Object.freeze([]),
+      serviceIds: Object.freeze([]),
+      reason: null,
+      remediation: previewRemediation(
+        input.runtimeId,
+        profile.id,
+        receipt.desiredState.selectedAgents,
+      ),
+    });
+  }
+
   const bindings = deriveBindings(profile);
   if (!bindings) {
     return statusOnly(input.runtimeId, "invalid-profile-backends", common);

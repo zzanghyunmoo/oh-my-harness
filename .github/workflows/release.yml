@@ -33,11 +33,14 @@ jobs:
           test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
           git fetch --no-tags origin main:refs/remotes/origin/main
           git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main
-          associated_merges="$(gh api \
+          associated_pr="$(gh api \
             -H "Accept: application/vnd.github+json" \
             "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-            --jq '.[] | select(.merged_at != null and .base.ref == "main") | .merge_commit_sha')"
-          printf '%s\n' "${associated_merges}" | grep -Fqx "${GITHUB_SHA}"
+            --jq 'first(.[] | select(.merged_at != null and .base.ref == "main")) | [.merge_commit_sha, .base.sha] | @tsv')"
+          IFS=$'\t' read -r associated_merge associated_base <<<"${associated_pr}"
+          test "${associated_merge}" = "${GITHUB_SHA}"
+          test -n "${associated_base}"
+          git diff --check "${associated_base}" "${GITHUB_SHA}"
       - name: Install exact shrinkwrap without lifecycle scripts
         run: npm ci --ignore-scripts
       - name: Verify source, catalogs, and package contract
@@ -45,6 +48,13 @@ jobs:
           npm run typecheck
           npm run build
           npm run catalog:verify
+          npm run test:unit
+          npm run test:contracts
+          npm run test:integration
+          npm run test:runtime:claude
+          npm run test:runtime:opencode
+          npm run test:runtime:codex
+          npm run test:harness
           npm run package:verify
       - name: Reject tracked checkout drift before packaging
         run: git diff --exit-code "${GITHUB_SHA}" -- .
@@ -82,6 +92,21 @@ jobs:
           fi
           test -f "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz"
           test -f "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json"
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync } from "node:fs";
+            const tag = process.env.GITHUB_REF_NAME;
+            const archivePath = "release-dist/oh-my-harness-" + tag + ".tgz";
+            const sidecarPath = "release-dist/oh-my-harness-" + tag + ".release.json";
+            const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
+            const archive = readFileSync(archivePath);
+            const digest = createHash("sha256").update(archive).digest("hex");
+            if (sidecar.archive?.filename !== ("oh-my-harness-" + tag + ".tgz")
+              || sidecar.archive?.size !== archive.length
+              || sidecar.archive?.sha256 !== digest) {
+              throw new Error("downloaded release assets do not match their sidecar");
+            }
+          '
           gh release create "${GITHUB_REF_NAME}" \
             "release-dist/oh-my-harness-${GITHUB_REF_NAME}.tgz" \
             "release-dist/oh-my-harness-${GITHUB_REF_NAME}.release.json" \

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   buildReleaseArtifact,
+  loadReleaseSidecar,
   resolveReleaseSourceIdentity,
   verifyReleaseArtifact,
 } from "../dist/catalog/release.js";
@@ -22,7 +22,7 @@ if (command === "build" && args.length === 1) {
   })}\n`);
 } else if (command === "verify" && args.length === 2) {
   const archive = resolve(args[0]);
-  const sidecar = JSON.parse(readFileSync(resolve(args[1]), "utf8"));
+  const sidecar = loadReleaseSidecar(repositoryRoot, resolve(args[1]));
   const source = resolveReleaseSourceIdentity(repositoryRoot, sidecar.package.tag);
   await verifyReleaseArtifact(repositoryRoot, archive, sidecar, source);
   process.stdout.write(`${JSON.stringify({ archive, verified: true })}\n`);

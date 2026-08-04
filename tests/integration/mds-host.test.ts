@@ -53,3 +53,40 @@ test("mds-host empty composition is stable, mutation-free, and repeatable", asyn
     rmSync(root, { force: true, recursive: true });
   }
 });
+
+test("mds-host selected agent fails closed without acquiring a missing runtime", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-mds-host-missing-agent-"));
+  const commands: string[] = [];
+  const options = {
+    arch: process.arch,
+    env: {
+      PATH: "",
+      ...(process.platform === "win32" ? { PATHEXT: ".EXE" } : {}),
+    },
+    os: process.platform,
+    repositoryRoot: REPOSITORY_ROOT,
+    runCommand(command: string) {
+      commands.push(command);
+      throw new Error("composition preview must not acquire a runtime");
+    },
+  };
+  try {
+    const preview = previewEnvironment({
+      profileId: "mds-host",
+      selectedAgents: ["claude-code"],
+      selectedPackages: [],
+      stateRoot: root,
+    }, options);
+    assert.equal(preview.readiness, "blocked");
+    assert.equal(preview.plan, null);
+    assert.equal(
+      preview.blockers.some((blocker) =>
+        blocker.includes("agent:claude-code")
+      ),
+      true,
+    );
+    assert.deepEqual(commands, []);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});

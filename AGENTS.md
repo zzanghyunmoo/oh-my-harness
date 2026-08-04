@@ -7,7 +7,7 @@ Oh My Harness v2는 원하는 코딩 에이전트와 공유 CLI 패키지, 검�
 
 ## 제품 원칙
 
-- 사용자는 `personal`, `company`, 또는 검증된 `custom` Environment Profile과 하나 이상의 에이전트를 선택한다.
+- 사용자는 `personal`, `company`, 또는 검증된 `custom` Environment Profile과 하나 이상의 에이전트를 선택한다. 패키지와 capability를 소유하지 않는 `mds-host` Composition Profile만 선택 에이전트가 없는 안정적인 호스트 준비 계약을 허용한다.
 - Claude-first는 delivery 순서일 뿐 Claude manifest가 source of truth라는 뜻이 아니다.
 - Capability Catalog, Environment Profile, Catalog Revision, Managed-state Receipt가 desired state의 canonical contract다.
 - 공식·upstream 구현을 우선 사용한다. 적합한 upstream이 없을 때만 이 저장소에 portable semantic contract와 runtime-native 패키지를 만든다.
@@ -34,7 +34,7 @@ oh-my-harness/
 ├── dist/                         # TypeScript build output, 직접 편집 금지
 ├── harness/
 │   ├── catalog/                  # agents, packages, capabilities, provenance
-│   ├── profiles/                 # personal, company, published custom
+│   ├── profiles/                 # personal, company, mds-host, published custom
 │   ├── contracts/                # closed JSON Schemas
 │   └── adapters/                 # runtime acquisition/native capability data
 ├── plugins/oh-my-harness/        # repository-managed native plugin payload
@@ -75,6 +75,7 @@ oh-my-harness/
 - 각 패키지 항목은 최소한 ID, 설명, executable, upstream/source, 지원 OS/architecture, exact version 또는 provenance policy, 설치 방법, 인증 안내, built-in profile별 required/optional 분류를 가진다.
 - `personal` 기본 required는 Linear, Notion, `gh`; optional은 Jira, Confluence, `glab`이다.
 - `company` 기본 required는 Jira, Confluence, `glab`; optional은 Linear, Notion, `gh`다.
+- `mds-host`는 my-desk-setup이 호출하는 package-free Composition Profile이다. 빈 에이전트 선택은 안정적인 no-op이고, 명시된 에이전트는 기존 executable과 native 등록을 검증만 하며 설치·인증을 소유하지 않는다.
 - missing required는 profile을 unready로 만들고 missing optional은 `ready-with-optional-gaps`로 보고한다.
 - custom profile은 로컬에서 create → validate → preview → repository diff 생성 순서를 따른다. commit, push, PR 생성은 별도의 명시적 외부-write 의도가 있어야 한다.
 - merged/released profile만 다른 사용자의 trusted selectable profile이 된다.
@@ -149,7 +150,7 @@ oh-my-harness/
 - 최소 검증 범위:
   - catalog/profile/receipt closed-schema와 deterministic revision/digest
   - preview 무변경, stale-preview 거부, partial apply 재시도
-  - personal/company/custom required·optional 해석
+  - personal/company/custom required·optional 해석과 mds-host composition-only 무도구 계약
   - six-package platform/install/auth guidance
   - three-runtime capability parity와 unsupported honesty
   - profile-scoped tool exposure와 execution-time 재검사

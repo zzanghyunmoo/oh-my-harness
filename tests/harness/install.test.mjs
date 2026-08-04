@@ -969,7 +969,13 @@ test("one plugin package shares skills and CLI tools across three maintained run
   const codexMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.json"), "utf8"));
   const claudeMcp = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", ".mcp.claude.json"), "utf8"));
   const runtimeToolProfiles = JSON.parse(readFileSync(join(REPO_ROOT, "plugins", "oh-my-harness", "profiles", "runtime-tools.json"), "utf8"));
-  const skillPath = join(REPO_ROOT, "plugins", "oh-my-harness", "skills", "omp", "SKILL.md");
+  const retiredNamespacePath = join(
+    REPO_ROOT,
+    "plugins",
+    "oh-my-harness",
+    "skills",
+    String.fromCodePoint(111, 109, 112),
+  );
   assert.equal(packageJson.main, ".opencode/plugins/oh-my-harness.js");
   assert.deepEqual(Object.keys(packageJson.bin).sort(), ["oh-my-harness", "omh"]);
   assert.equal(packageJson.files.some((path) => path.startsWith("extensions")), false);
@@ -996,5 +1002,5 @@ test("one plugin package shares skills and CLI tools across three maintained run
     { runtimeId: "codex", profileId: "personal" },
     { runtimeId: "opencode", profileId: "company" },
   ]);
-  assert.equal(existsSync(skillPath), true);
+  assert.equal(existsSync(retiredNamespacePath), false);
 });

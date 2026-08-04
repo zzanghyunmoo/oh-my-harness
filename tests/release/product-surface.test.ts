@@ -31,6 +31,7 @@ const PACKAGE_INPUTS = [
   "scripts/tools/",
 ];
 const RETIRED_RUNTIME_ID = String.fromCodePoint(112, 105);
+const RETIRED_NAMESPACE_ID = String.fromCodePoint(111, 109, 112);
 const RETIRED_SURFACE_PATTERN = new RegExp(
   [
     `(^|[^a-z0-9_])${RETIRED_RUNTIME_ID}([^a-z0-9_]|$)`,
@@ -39,6 +40,14 @@ const RETIRED_SURFACE_PATTERN = new RegExp(
     `${RETIRED_RUNTIME_ID}[_-](agent|package|extension|plugin|runtime)`,
   ].join("|"),
   "iu",
+);
+const RETIRED_NAMESPACE_PATTERN = new RegExp(
+  [
+    `(^|/)${RETIRED_NAMESPACE_ID}(/|$)`,
+    `name:\\s*${RETIRED_NAMESPACE_ID}([^a-z0-9_-]|$)`,
+    `(^|[^a-z0-9_-])${RETIRED_NAMESPACE_ID}:`,
+  ].join("|"),
+  "imu",
 );
 
 function readJson(path: string): Record<string, unknown> {
@@ -118,9 +127,15 @@ test("the maintained product exposes exactly three runtime surfaces", () => {
 test("the tracked tree contains only current product vocabulary", () => {
   for (const path of trackedFiles()) {
     assert.doesNotMatch(path, RETIRED_SURFACE_PATTERN, path);
+    assert.doesNotMatch(path, RETIRED_NAMESPACE_PATTERN, path);
     assert.doesNotMatch(
       readFileSync(join(REPOSITORY_ROOT, path), "utf8"),
       RETIRED_SURFACE_PATTERN,
+      path,
+    );
+    assert.doesNotMatch(
+      readFileSync(join(REPOSITORY_ROOT, path), "utf8"),
+      RETIRED_NAMESPACE_PATTERN,
       path,
     );
   }
@@ -170,6 +185,11 @@ test("the package input is an exact current-product allowlist", () => {
     assert.doesNotMatch(
       readFileSync(path, "utf8"),
       RETIRED_SURFACE_PATTERN,
+      relative(REPOSITORY_ROOT, path),
+    );
+    assert.doesNotMatch(
+      readFileSync(path, "utf8"),
+      RETIRED_NAMESPACE_PATTERN,
       relative(REPOSITORY_ROOT, path),
     );
   }

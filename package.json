@@ -62,7 +62,7 @@
     "release:verify": "npm run build --silent && node scripts/release.mjs verify",
     "test:harness": "npm run build --silent && node --test \"tests/harness/*.test.mjs\"",
     "harness:descriptors:verify": "node scripts/harness/descriptors.mjs verify",
-    "harness:install": "node scripts/harness/install.mjs",
+    "harness:install": "npm run build --silent && node scripts/harness/install.mjs",
     "tools:install": "node scripts/tools/manage.mjs",
     "tools:doctor": "node scripts/tools/manage.mjs doctor",
     "harness:upstream:generate": "node scripts/harness/upstream.mjs generate",

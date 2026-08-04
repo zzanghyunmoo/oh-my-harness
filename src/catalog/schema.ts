@@ -19,6 +19,7 @@ export interface JsonSchema {
   maxItems?: number;
   uniqueItems?: boolean;
   minLength?: number;
+  not?: JsonSchema;
   pattern?: string;
   format?: "uri" | "date-time";
   minimum?: number;
@@ -66,6 +67,9 @@ export function validateJsonSchema(
 
   for (const child of schema.allOf ?? []) {
     validateJsonSchema(value, child, root, path);
+  }
+  if (schema.not !== undefined && matches(value, schema.not, root)) {
+    throw new Error(`${path}: schema not constraint matched`);
   }
   if (schema.if !== undefined) {
     const branch = matches(value, schema.if, root) ? schema.then : schema.else;

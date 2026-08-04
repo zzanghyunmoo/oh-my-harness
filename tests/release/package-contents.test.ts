@@ -107,7 +107,24 @@ test("release workflow pins actions, isolates write permission, and refuses over
   assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /merge-base --is-ancestor/u);
   assert.match(workflow, /commits\/\$\{GITHUB_SHA\}\/pulls/u);
+  assert.match(workflow, /git diff --check "\$\{associated_base\}" "\$\{GITHUB_SHA\}"/u);
   assert.match(workflow, /git diff --exit-code "\$\{GITHUB_SHA\}" -- \./u);
+  for (const gate of [
+    "typecheck",
+    "build",
+    "catalog:verify",
+    "test:unit",
+    "test:contracts",
+    "test:integration",
+    "test:runtime:claude",
+    "test:runtime:opencode",
+    "test:runtime:codex",
+    "test:harness",
+    "package:verify",
+  ]) {
+    assert.match(workflow, new RegExp(`npm run ${gate.replaceAll(":", "\\:")}`));
+  }
+  assert.match(workflow, /downloaded release assets do not match their sidecar/u);
   assert.match(workflow, /already exists; refusing to overwrite/u);
   assert.match(workflow, /gh release create/u);
 });
@@ -211,6 +228,25 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
     assert.deepEqual(manifestPaths, [...manifestPaths].sort((left, right) => left.localeCompare(right)));
     assert.equal(new Set(manifestPaths).size, manifestPaths.length);
     await verifyReleaseArtifact(REPO_ROOT, archive, built.sidecar, source);
+    await assert.rejects(
+      verifyReleaseArtifact(REPO_ROOT, archive, {
+        ...built.sidecar,
+        archive: { ...built.sidecar.archive, sha256: "0".repeat(64) },
+      }, source),
+      /checksum or size mismatch/i,
+    );
+    await assert.rejects(
+      verifyReleaseArtifact(REPO_ROOT, archive, {
+        ...built.sidecar,
+        archive: {
+          ...built.sidecar.archive,
+          files: built.sidecar.archive.files.map((entry, index) =>
+            index === 0 ? { ...entry, sha256: "0".repeat(64) } : entry
+          ),
+        },
+      }, source),
+      /full file manifest mismatch/i,
+    );
     await assert.rejects(
       buildReleaseArtifact(REPO_ROOT, root, source),
       /already exists; refusing to overwrite/i,

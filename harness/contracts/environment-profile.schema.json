@@ -21,6 +21,7 @@
       },
       "else": {
         "type": "object",
+        "not": { "type": "object", "required": ["compositionOnly"] },
         "properties": {
           "selectedAgents": { "type": "array", "minItems": 1 }
         }

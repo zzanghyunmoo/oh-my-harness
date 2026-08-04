@@ -33,6 +33,8 @@ import { validateJsonSchema, type JsonSchema } from "./schema.js";
 const MAX_ARTIFACT_ENTRIES = 16_384;
 const MAX_ARTIFACT_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_TOTAL_BYTES = 128 * 1024 * 1024;
+const MAX_RELEASE_SIDECAR_BYTES = 8 * 1024 * 1024;
+const NPM_PACK_TIMEOUT_MS = 5 * 60 * 1000;
 const GIT_OBJECT = /^[0-9a-f]{40}$/u;
 
 export interface ReleaseDistribution {
@@ -97,8 +99,8 @@ export interface ReleaseSourceIdentity {
   readonly tree: string;
 }
 
-function readJson(path: string): unknown {
-  return JSON.parse(readBoundedRegularFile(path, MAX_ARTIFACT_FILE_BYTES).toString("utf8")) as unknown;
+function readJson(path: string, maxBytes = MAX_ARTIFACT_FILE_BYTES): unknown {
+  return JSON.parse(readBoundedRegularFile(path, maxBytes).toString("utf8")) as unknown;
 }
 
 function hashDirectory(directory: string): string {
@@ -259,6 +261,18 @@ function validateSidecar(repositoryRoot: string, sidecar: ReleaseSidecar): void 
   validateJsonSchema(sidecar, sidecarSchema, schema);
 }
 
+export function loadReleaseSidecar(
+  repositoryRoot: string,
+  sidecarPath: string,
+): ReleaseSidecar {
+  const sidecar = readJson(
+    sidecarPath,
+    MAX_RELEASE_SIDECAR_BYTES,
+  ) as ReleaseSidecar;
+  validateSidecar(repositoryRoot, sidecar);
+  return sidecar;
+}
+
 export async function verifyReleaseArtifact(
   repositoryRoot: string,
   archivePath: string,
@@ -361,8 +375,15 @@ export async function buildReleaseArtifact(
         npm_config_update_notifier: "false",
       },
       maxBuffer: MAX_ARTIFACT_TOTAL_BYTES,
+      timeout: NPM_PACK_TIMEOUT_MS,
       windowsHide: true,
     });
+    if (packed.error) {
+      throw new Error(`npm pack failed to execute: ${packed.error.message}`);
+    }
+    if (packed.signal) {
+      throw new Error(`npm pack was terminated by signal ${packed.signal}`);
+    }
     if (packed.status !== 0) throw new Error(`npm pack failed: ${packed.stderr.trim()}`);
     const report = JSON.parse(packed.stdout) as Array<{ filename?: unknown; name?: unknown; version?: unknown }>;
     const item = report[0];
@@ -407,6 +428,12 @@ export async function buildReleaseArtifact(
     if (sidecarCreated) rmSync(sidecarPath, { force: true });
     throw error;
   } finally {
-    rmSync(staging, { force: true, recursive: true });
+    try {
+      rmSync(staging, { force: true, recursive: true });
+    } catch (error) {
+      process.emitWarning(
+        `unable to remove release staging directory ${staging}: ${String(error)}`,
+      );
+    }
   }
 }

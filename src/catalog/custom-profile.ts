@@ -21,7 +21,7 @@ import {
 } from "node:path";
 
 import {
-  BUILT_IN_PROFILE_IDS,
+  RELEASED_PROFILE_IDS,
   isAgentId,
   isCapabilityId,
   isPackageId,
@@ -192,8 +192,8 @@ export function previewCustomProfilePublication(input: {
 }): CustomProfilePublicationPreview {
   const repositoryRoot = assertRepositoryRoot(input.repositoryRoot);
   validateContractDocument("environment-profile", input.profile, repositoryRoot);
-  if ((BUILT_IN_PROFILE_IDS as readonly string[]).includes(input.profile.id)) {
-    throw new Error(`cannot overwrite built-in profile: ${input.profile.id}`);
+  if ((RELEASED_PROFILE_IDS as readonly string[]).includes(input.profile.id)) {
+    throw new Error(`cannot overwrite released profile: ${input.profile.id}`);
   }
 
   const current = loadCatalogBundle(repositoryRoot);

@@ -51,23 +51,14 @@ import {
   resolveGitExecutable,
 } from "./upstream.mjs";
 import { resolveTrustedFile, resolveTrustedInvocation } from "../../plugins/oh-my-harness/mcp/trusted-command.mjs";
+import { HARNESS_VERSION } from "../../dist/package-version.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_RUNTIME_IDS = Object.freeze(["claude-code", "codex", "opencode"]);
 export const RUNTIME_IDS = DEFAULT_RUNTIME_IDS;
-const ROOT_PACKAGE_MANIFEST = JSON.parse(
-  readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
-);
-if (
-  ROOT_PACKAGE_MANIFEST.name !== "oh-my-harness"
-  || typeof ROOT_PACKAGE_MANIFEST.version !== "string"
-  || !/^\d+\.\d+\.\d+$/.test(ROOT_PACKAGE_MANIFEST.version)
-) {
-  throw new Error("oh-my-harness root package identity is invalid");
-}
 const HARNESS_PACKAGE = Object.freeze({
-  name: ROOT_PACKAGE_MANIFEST.name,
-  version: ROOT_PACKAGE_MANIFEST.version,
+  name: "oh-my-harness",
+  version: HARNESS_VERSION,
 });
 const HARNESS_MARKETPLACE = "oh-my-harness";
 const CE_MARKETPLACE = "compound-engineering-plugin";
