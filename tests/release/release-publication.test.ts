@@ -413,8 +413,17 @@ test("production GitHub adapter uses exact shell-free API arguments", async () =
   });
   await operations.publishDraft(100, "published");
   assert.equal(calls.some((args) => args.includes("DELETE")), false);
+  const uploadCall = calls.find((args) =>
+    args.some((arg) => arg.includes("/assets?name="))
+  );
+  assert.ok(uploadCall);
+  assert.equal(uploadCall.includes("--hostname"), false);
   assert.equal(
-    calls.some((args) => args.includes("uploads.github.com")),
+    uploadCall.some((arg) =>
+      arg.startsWith(
+        "https://uploads.github.com/repos/owner/repository/releases/100/assets?name=",
+      )
+    ),
     true,
   );
   assert.equal(calls.every((args) => args[0] === "api"), true);

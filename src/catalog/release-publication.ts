@@ -539,8 +539,6 @@ export function githubReleaseOperations(
     },
     async uploadAsset(input) {
       return releaseAsset(api([
-        "--hostname",
-        "uploads.github.com",
         "-X",
         "POST",
         "-H",
@@ -549,7 +547,7 @@ export function githubReleaseOperations(
         `Content-Type: ${input.contentType}`,
         "--input",
         input.path,
-        `repos/${repository}/releases/${input.releaseId}/assets?name=${encodeURIComponent(input.name)}`,
+        `https://uploads.github.com/repos/${repository}/releases/${input.releaseId}/assets?name=${encodeURIComponent(input.name)}`,
       ]));
     },
   };
