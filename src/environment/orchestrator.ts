@@ -1992,6 +1992,9 @@ function buildEnvironmentPreview(
   const model = buildModel(selection, normalized);
   const checks = preflights(model, normalized);
   const blockers = blockingIds(checks);
+  const nativeRegistrationBlockers = blockers.filter((id) =>
+    id.startsWith("native-registration:")
+  );
   const actions = blockers.length === 0 ? planActions(model, normalized) : [];
   const plan = blockers.length === 0
     ? createApplyPlan({
@@ -2037,7 +2040,9 @@ function buildEnvironmentPreview(
       readiness: plan === null ? "blocked" : "preview",
       receiptPath: model.receiptPath,
       remediation: plan === null
-        ? `${previewCommand(model)} after resolving required blockers`
+        ? nativeRegistrationBlockers.length === 0
+          ? `${previewCommand(model)} after resolving required blockers`
+          : `inspect ${nativeRegistrationBlockers.join(", ")} and resolve only the reported collision manually while preserving unrelated user-owned configuration, then rerun ${previewCommand(model)}`
         : `${previewCommand(model)} --apply --digest ${plan.digest}`,
       schemaVersion: "2.0.0",
       selectedAgents: model.selectedAgents,

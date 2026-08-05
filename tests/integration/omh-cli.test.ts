@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
 
-import { runOmh } from "../../dist/cli/main.js";
+import { formatOmhResult, runOmh } from "../../dist/cli/main.js";
 import {
   applyEnvironment,
   previewEnvironment,
@@ -44,6 +44,20 @@ function assertCliNativeRegistrationBlocked(
     result.preview?.blockers.includes(`native-registration:${agentId}`),
     true,
   );
+  assert.match(
+    result.preview?.remediation ?? "",
+    new RegExp(`inspect native-registration:${agentId}`, "u"),
+  );
+  assert.match(
+    result.preview?.remediation ?? "",
+    /resolve only the reported collision manually while preserving unrelated user-owned configuration/u,
+  );
+  const rendered = formatOmhResult(result);
+  assert.match(
+    rendered,
+    new RegExp(`blocking: native-registration:${agentId}`, "u"),
+  );
+  assert.match(rendered, /next: inspect native-registration:/u);
 }
 
 function createExecutable(directory: string, command: string): string {
