@@ -620,6 +620,54 @@ test("OpenCode OMO registration is exact, additive, and natively resolved", () =
   }
 });
 
+test("OpenCode OMO registration replaces only the exact reviewed previous spec", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-omo-upgrade-"));
+  try {
+    const configRoot = join(root, "config");
+    const configPath = join(configRoot, "opencode.json");
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({
+        plugin: ["user-plugin", "oh-my-openagent@4.19.2"],
+      }, null, 2)}\n`,
+    );
+    const env = { OPENCODE_CONFIG_DIR: configRoot };
+    const registration = {
+      packageName: "oh-my-openagent" as const,
+      previousSpec: "oh-my-openagent@4.19.2",
+      spec:
+        "file:///state/addons/opencode/omo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/dist/index.js",
+    };
+
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "linux"),
+      "previous",
+    );
+    registerOpenCodePackageAddon(registration, env, "linux");
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "linux"),
+      "ready",
+    );
+    assert.deepEqual(
+      (JSON.parse(readFileSync(configPath, "utf8")) as { plugin: string[] })
+        .plugin,
+      ["user-plugin", registration.spec],
+    );
+
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ plugin: ["oh-my-opencode@3.0.0"] }, null, 2)}\n`,
+    );
+    assert.equal(
+      inspectOpenCodePackageAddon(registration, env, "linux"),
+      "collision",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenCode OMO registration rejects malformed or ambiguous config", () => {
   const root = mkdtempSync(join(tmpdir(), "omh-opencode-omo-malformed-"));
   try {

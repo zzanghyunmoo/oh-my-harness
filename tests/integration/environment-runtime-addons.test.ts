@@ -80,7 +80,7 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
       [
         {
           id: "addon:opencode:omo:source",
-          operation: "verify-opencode-addon-source",
+        operation: "acquire-opencode-addon-snapshot",
         },
         {
           id: "addon:opencode:omo",
@@ -109,6 +109,40 @@ test("selected OpenCode and Codex runtimes derive exact default OMO actions", ()
     assert.deepEqual(openCodeAddonAction?.preimage, { kind: "missing" });
     assert.equal(existsSync(openCodeState), false);
     assert.equal(existsSync(openCodeConfig), false);
+
+    mkdirSync(openCodeConfig, { recursive: true });
+    writeFileSync(
+      join(openCodeConfig, "opencode.json"),
+      `${JSON.stringify({
+        plugin: ["user-plugin", "oh-my-openagent@4.19.2"],
+      }, null, 2)}\n`,
+    );
+    const upgrade = previewEnvironment(
+      {
+        capabilitySet: "workflow-only",
+        profileId: "personal",
+        selectedAgents: ["opencode"],
+        selectedPackages: [],
+        stateRoot: openCodeState,
+        target: "windows-native",
+      },
+      {
+        arch: "x64",
+        env: {
+          OPENCODE_CONFIG_DIR: openCodeConfig,
+          PATH: trustedTools,
+        },
+        os: "win32",
+        repositoryRoot: REPOSITORY_ROOT,
+      },
+    );
+    assert.ok(upgrade.plan, upgrade.blockers.join(", "));
+    assert.equal(upgrade.addons[0]?.state, "installable");
+    assert.equal(
+      upgrade.plan.actions.find(({ id }) => id === "addon:opencode:omo")
+        ?.payload?.previousSpec,
+      "oh-my-openagent@4.19.2",
+    );
 
     const codex = previewEnvironment(
       {

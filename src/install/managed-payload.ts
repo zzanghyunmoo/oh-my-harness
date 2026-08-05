@@ -24,7 +24,7 @@ import {
 } from "../environment/filesystem.js";
 import { PLUGIN_RUNTIME_PATHS } from "./plugin-runtime-files.js";
 
-const MAX_ENTRIES = 4_096;
+const MAX_ENTRIES = 8_192;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 

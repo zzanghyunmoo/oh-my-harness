@@ -40,6 +40,7 @@ export interface ApplyDependencies {
   recover?(recovery: ApplyRecoveryRecord): Promise<void>;
   execute(action: PlanAction): Promise<{ readonly verified: boolean; readonly detail?: string }>;
   verifyCompleted?(action: PlanAction): Promise<boolean>;
+  receiptTarget?(action: PlanAction): string | undefined;
   now?: () => Date;
 }
 
@@ -216,6 +217,7 @@ function receiptFor(
   plan: ApplyPlan,
   completedActionIds: readonly string[],
   now: () => Date,
+  receiptTarget?: (action: PlanAction) => string | undefined,
 ): ManagedStateReceipt {
   const selectedAgents = plan.desiredState.selectedAgents.map((agentId) => {
     if (!isAgentId(agentId)) {
@@ -292,11 +294,15 @@ function receiptFor(
       const scope = action.payload?.ownershipScope === "external"
         ? "external" as const
         : "managed" as const;
+      const target = receiptTarget?.(action) ?? action.target;
+      if (!isAbsolute(target)) {
+        throw new Error(`${action.id} receipt target must be absolute`);
+      }
       ownership.push({
         id: action.id,
         kind,
         scope,
-        target: action.target,
+        target,
         digest,
         ...(typeof action.payload?.repairSource === "string"
           ? { repairSource: action.payload.repairSource }
@@ -473,7 +479,12 @@ export async function applyExactPlan(
     if (!isDeepStrictEqual(completedActionIds, plan.actions.map(({ id }) => id))) {
       throw new Error("apply did not verify every planned action");
     }
-    const receipt = receiptFor(plan, completedActionIds, dependencies.now ?? (() => new Date()));
+    const receipt = receiptFor(
+      plan,
+      completedActionIds,
+      dependencies.now ?? (() => new Date()),
+      dependencies.receiptTarget,
+    );
     try {
       await dependencies.state.publishReceipt(receipt);
     } catch (error) {

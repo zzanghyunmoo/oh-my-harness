@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
 
 import { runOmh } from "../../dist/cli/main.js";
@@ -722,7 +722,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     );
 
     await t.test(
-      "Claude and Codex interrupted native registrations recover before preview validation",
+      "interrupted native registrations recover from journal selection before a new selection",
       async () => {
         const recoveryCallsStart = calls.length;
         for (const agentId of ["claude-code", "codex"] as const) {
@@ -774,6 +774,12 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
                   },
                   operation: "register-runtime",
                   schemaVersion: "2.0.0",
+                  selection: {
+                    clean: false,
+                    profileId: "mds-host",
+                    selectedAgents: [agentId],
+                    stateRoot: dirname(dirname(preview.receiptPath)),
+                  },
                   snapshots: [{
                     existed: false,
                     expectedKind: "file",
@@ -796,7 +802,16 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           }
 
           await assert.rejects(
-            applyEnvironment(selection, "0".repeat(64), commonOptions),
+            applyEnvironment(
+              {
+                ...selection,
+                selectedAgents: [
+                  agentId === "claude-code" ? "opencode" : "claude-code",
+                ],
+              },
+              "0".repeat(64),
+              commonOptions,
+            ),
             StalePreviewError,
           );
 
@@ -822,6 +837,63 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           rmSync(recoveryStateRoot, { force: true, recursive: true });
         }
         calls.splice(recoveryCallsStart);
+      },
+    );
+    await t.test(
+      "selection-less legacy OpenCode recovery records remain readable",
+      async () => {
+        const stateRoot = join(root, "legacy-opencode-recovery-state");
+        const selection = {
+          profileId: "mds-host",
+          selectedAgents: [],
+          selectedPackages: [],
+          stateRoot,
+        };
+        const preview = previewEnvironment(selection, commonOptions);
+        assert.ok(preview.plan);
+        assert.ok(preview.digest);
+        const journalRoot = join(preview.stateRoot, "journal");
+        const backupRoot = join(journalRoot, "rollback", "legacy-opencode");
+        const legacyTarget = join(
+          preview.stateRoot,
+          "markers",
+          "legacy-opencode-source",
+        );
+        mkdirSync(journalRoot, { recursive: true });
+        writeFileSync(
+          join(journalRoot, "apply.json"),
+          `${JSON.stringify({
+            catalogRevision: preview.catalogRevision,
+            completedActionIds: [],
+            kind: "apply-journal",
+            pendingRecoveries: [{
+              actionId: "addon:opencode:omo:source",
+              kind: "environment-action-v1",
+              payload: {
+                backupRoot,
+                native: null,
+                operation: "verify-opencode-addon-source",
+                schemaVersion: "2.0.0",
+                snapshots: [{
+                  existed: false,
+                  expectedKind: "file",
+                  target: legacyTarget,
+                }],
+              },
+            }],
+            planDigest: preview.digest,
+            schemaVersion: "2.0.0",
+            status: "partial-unready",
+          }, null, 2)}\n`,
+        );
+
+        await applyEnvironment(selection, preview.digest, commonOptions);
+        const recovered = JSON.parse(readFileSync(
+          join(journalRoot, "apply.json"),
+          "utf8",
+        )) as { pendingRecoveries: unknown[] };
+        assert.deepEqual(recovered.pendingRecoveries, []);
+        assert.equal(existsSync(legacyTarget), false);
       },
     );
     const verifyPreviousNativePreview = (

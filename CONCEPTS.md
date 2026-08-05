@@ -61,12 +61,33 @@ set.
 
 A Default Runtime Add-on can contribute several native agents, hooks, skills,
 or MCP servers, so it is not modeled as one semantic capability. OpenCode uses
-the exact reviewed OMO package spec, Codex uses the exact reviewed LazyCodex
-marketplace snapshot, and Claude Code currently has no OMO default. The Exact
-Apply Plan adopts an exact registration, adds an absent one, and rejects a
-different version, source, tree, or duplicate as a collision. Version or source
+an exact reviewed OMO Offline Runtime Add-on Snapshot, Codex uses the exact
+reviewed LazyCodex marketplace snapshot, and Claude Code currently has no OMO
+default. The Exact Apply Plan adopts an exact registration, adds an absent one,
+upgrades only an exact reviewed predecessor, and rejects a different version,
+source, tree, malformed value, or duplicate as a collision. Version or source
 replacement requires a newly approved preview and never happens through
 Approved Startup Synchronization.
+
+### Offline Runtime Add-on Snapshot
+
+A content-addressed local tree containing an exact reviewed add-on entry point
+and its complete runtime dependency closure.
+
+OMH verifies the bounded source archive, closed package and dependency
+identities, entry point, and the full materialized tree digest before publishing
+the snapshot or touching native agent configuration. A raw package that needs an
+ambient registry, network, or package manager is not installable offline.
+
+### Preserved Release Draft
+
+A source-SHA-bound GitHub Release draft intentionally retained after a
+pre-publish failure for inspection and safe retry.
+
+The release command reports the exact draft identity and does not auto-delete
+it. A retry must revalidate draft ownership, tag/source identity, staged asset
+metadata, and downloaded bytes before one publish transition; published releases
+remain immutable.
 
 ### Claude-first Delivery
 

@@ -520,6 +520,25 @@ export function loadCatalogBundle(
     readCatalogSource(repositoryRoot),
     repositoryRoot,
   );
+  const openCodeAddon = source.agents.agents
+    .find(({ id }) => id === "opencode")
+    ?.defaultAddons.find(
+      ({ registration }) => registration.kind === "opencode-package",
+    );
+  if (
+    openCodeAddon?.registration.kind !== "opencode-package"
+    || !/^[0-9a-f]{64}$/u.test(
+      String(openCodeAddon.registration.snapshotContentSha256),
+    )
+    || openCodeAddon.registration.snapshotDependencyPackage !== "zod"
+    || openCodeAddon.registration.snapshotDependencyPath !== "node_modules/zod"
+    || openCodeAddon.registration.snapshotDependencyVersion !== "4.1.8"
+    || openCodeAddon.registration.snapshotEntryPoint !== "dist/index.js"
+  ) {
+    throw new Error(
+      "embedded OpenCode OMO catalog requires an exact snapshot content pin",
+    );
+  }
   return {
     ...source,
     revision: computeCatalogRevision(source),

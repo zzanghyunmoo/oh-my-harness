@@ -15,6 +15,7 @@ import {
   join,
   sep,
 } from "node:path";
+import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import tar from "tar-stream";
 
@@ -46,6 +47,22 @@ export interface CodexAddonSnapshot {
   readonly digest: string;
   readonly root: string;
   readonly stateRoot: string;
+}
+
+export interface OpenCodeAddonSnapshot {
+  readonly digest: string;
+  readonly entrypoint: string;
+  readonly root: string;
+  readonly spec: string;
+  readonly stateRoot: string;
+}
+
+interface OpenCodeSnapshotRegistration {
+  readonly contentDigest: string;
+  readonly dependencyPackage: "zod";
+  readonly dependencyPath: "node_modules/zod";
+  readonly dependencyVersion: "4.1.8";
+  readonly entryPoint: "dist/index.js";
 }
 
 const EXACT_GIT_CONFIG = [
@@ -139,56 +156,91 @@ export function createRuntimeAddonGitOperations(
   };
 }
 
-function openCodeMetadata(value: unknown): {
-  readonly integrity: string;
-  readonly tarball: string;
-  readonly version: string;
-} {
-  if (
-    typeof value !== "object"
-    || value === null
-    || Array.isArray(value)
-  ) {
-    throw new Error("OpenCode OMO package metadata is not an object");
-  }
-  const record = value as Record<string, unknown>;
-  const dist = record.dist;
-  if (
-    typeof record.version !== "string"
-    || typeof dist !== "object"
-    || dist === null
-    || Array.isArray(dist)
-    || typeof (dist as Record<string, unknown>).integrity !== "string"
-    || typeof (dist as Record<string, unknown>).tarball !== "string"
-  ) {
-    throw new Error("OpenCode OMO package metadata is incomplete");
-  }
+export function openCodeAddonSnapshot(
+  addon: OpenCodePackageAddon,
+  stateRoot: string,
+): OpenCodeAddonSnapshot {
+  const managedRoot = assertSafeManagedRootPath(
+    stateRoot,
+    "managed state root",
+  );
+  const registration = openCodeSnapshotRegistration(addon);
+  const digest = registration.contentDigest;
+  const root = join(managedRoot, "addons", "opencode", "omo", digest);
+  const entrypoint = join(root, registration.entryPoint);
   return {
-    integrity: String((dist as Record<string, unknown>).integrity),
-    tarball: String((dist as Record<string, unknown>).tarball),
-    version: record.version,
+    digest,
+    entrypoint,
+    root,
+    spec: pathToFileURL(entrypoint).href,
+    stateRoot: managedRoot,
   };
 }
 
-export function verifyOpenCodeAddonPackageMetadata(
+function openCodeSnapshotRegistration(
   addon: OpenCodePackageAddon,
-  output: string,
-): void {
-  let value: unknown;
-  try {
-    value = JSON.parse(output);
-  } catch {
-    throw new Error("OpenCode OMO package metadata did not return JSON");
-  }
-  const actual = openCodeMetadata(value);
+): OpenCodeSnapshotRegistration {
+  const registration = addon.registration;
   if (
-    actual.version !== addon.version
-    || actual.integrity !== addon.registration.integrity
-    || actual.tarball !== addon.registration.tarballUrl
+    typeof registration.snapshotContentSha256 !== "string"
+    || !/^[0-9a-f]{64}$/u.test(registration.snapshotContentSha256)
+    || registration.snapshotDependencyPackage !== "zod"
+    || registration.snapshotDependencyPath !== "node_modules/zod"
+    || registration.snapshotDependencyVersion !== "4.1.8"
+    || registration.snapshotEntryPoint !== "dist/index.js"
   ) {
-    throw new Error(
-      "OpenCode OMO package metadata does not match the reviewed catalog pin",
-    );
+    throw new Error("OpenCode OMO add-on requires an exact offline snapshot pin");
+  }
+  return {
+    contentDigest: registration.snapshotContentSha256,
+    dependencyPackage: registration.snapshotDependencyPackage,
+    dependencyPath: registration.snapshotDependencyPath,
+    dependencyVersion: registration.snapshotDependencyVersion,
+    entryPoint: registration.snapshotEntryPoint,
+  };
+}
+
+function packageManifest(
+  root: string,
+): Record<string, unknown> | null {
+  try {
+    return JSON.parse(
+      readBoundedRegularFile(join(root, "package.json"), 1024 * 1024)
+        .toString("utf8"),
+    ) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function openCodePackageMatches(
+  root: string,
+  addon: OpenCodePackageAddon,
+): boolean {
+  const registration = openCodeSnapshotRegistration(addon);
+  const manifest = packageManifest(root);
+  const dependency = packageManifest(join(root, registration.dependencyPath));
+  return manifest?.name === addon.registration.packageName
+    && manifest.version === addon.version
+    && manifest.main === `./${registration.entryPoint}`
+    && dependency?.name === registration.dependencyPackage
+    && dependency.version === registration.dependencyVersion;
+}
+
+export function inspectOpenCodeAddonSnapshot(
+  addon: OpenCodePackageAddon,
+  stateRoot: string,
+): boolean {
+  const snapshot = openCodeAddonSnapshot(addon, stateRoot);
+  if (!existsSync(snapshot.root)) return false;
+  try {
+    const stat = lstatSync(snapshot.root);
+    return !stat.isSymbolicLink()
+      && stat.isDirectory()
+      && openCodePackageMatches(snapshot.root, addon)
+      && hashManagedDirectory(snapshot.root) === snapshot.digest;
+  } catch {
+    return false;
   }
 }
 
@@ -258,9 +310,23 @@ function safeSnapshotArchivePath(value: string): boolean {
     || value.startsWith("plugins/omo/");
 }
 
-async function extractCodexAddonArchive(
+function safeOpenCodeArchivePath(value: string): string | null {
+  if (!value.startsWith("package/") || value.includes("\\")) return null;
+  const relative = value.slice("package/".length);
+  if (relative === "") return null;
+  const segments = relative.split("/");
+  return segments.some((segment) =>
+      segment === "" || segment === "." || segment === ".."
+    )
+    ? null
+    : relative;
+}
+
+async function extractAddonArchive(
   archivePath: string,
   destination: string,
+  label: "Codex OMO" | "OpenCode OMO",
+  entryPath: (value: string) => string | null,
 ): Promise<void> {
   const compressed = readBoundedRegularFile(
     archivePath,
@@ -277,15 +343,16 @@ async function extractCodexAddonArchive(
     extract.on("entry", (header, stream, next) => {
       try {
         entries += 1;
+        const relative = entryPath(header.name);
         if (entries > MAX_COPY_ENTRIES) {
-          throw new Error("Codex OMO archive has too many entries");
+          throw new Error(`${label} archive has too many entries`);
         }
-        if (header.type !== "file" || !safeSnapshotArchivePath(header.name)) {
-          throw new Error(`Codex OMO archive contains an unsafe entry: ${header.name}`);
+        if (header.type !== "file" || relative === null) {
+          throw new Error(`${label} archive contains an unsafe entry: ${header.name}`);
         }
-        const folded = header.name.normalize("NFC").toLowerCase();
+        const folded = relative.normalize("NFC").toLowerCase();
         if (names.has(folded)) {
-          throw new Error(`Codex OMO archive contains a duplicate entry: ${header.name}`);
+          throw new Error(`${label} archive contains a duplicate entry: ${header.name}`);
         }
         names.add(folded);
         const chunks: Buffer[] = [];
@@ -293,7 +360,7 @@ async function extractCodexAddonArchive(
         stream.on("data", (chunk: Buffer) => {
           size += chunk.length;
           if (size > MAX_ADDON_FILE_BYTES) {
-            stream.destroy(new Error(`Codex OMO archive entry is oversized: ${header.name}`));
+            stream.destroy(new Error(`${label} archive entry is oversized: ${header.name}`));
           } else {
             chunks.push(chunk);
           }
@@ -303,9 +370,9 @@ async function extractCodexAddonArchive(
           try {
             totalBytes += size;
             if (totalBytes > MAX_COPY_BYTES) {
-              throw new Error("Codex OMO archive exceeds the byte limit");
+              throw new Error(`${label} archive exceeds the byte limit`);
             }
-            const target = join(destination, ...header.name.split("/"));
+            const target = join(destination, ...relative.split("/"));
             mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
             writeFileSync(target, Buffer.concat(chunks), {
               flag: "wx",
@@ -326,6 +393,86 @@ async function extractCodexAddonArchive(
   });
   extract.end(unpacked);
   await completed;
+}
+
+function extractOpenCodeAddonArchive(
+  archivePath: string,
+  destination: string,
+): Promise<void> {
+  return extractAddonArchive(
+    archivePath,
+    destination,
+    "OpenCode OMO",
+    safeOpenCodeArchivePath,
+  );
+}
+
+export async function materializeOpenCodeAddonSnapshotFromArchive(
+  archivePath: string,
+  addon: OpenCodePackageAddon,
+  stateRoot: string,
+  dependencySource: string,
+): Promise<OpenCodeAddonSnapshot> {
+  if (!inspectRuntimeAddonArchive(
+    archivePath,
+    addon.registration.snapshotArchiveSha256,
+  )) {
+    throw new Error("OpenCode OMO archive does not match the reviewed digest");
+  }
+  const snapshot = openCodeAddonSnapshot(addon, stateRoot);
+  const registration = openCodeSnapshotRegistration(addon);
+  if (existsSync(snapshot.root)) {
+    if (inspectOpenCodeAddonSnapshot(addon, stateRoot)) return snapshot;
+    throw new Error("OpenCode OMO snapshot collides with drifted managed content");
+  }
+  const parent = assertSafeManagedRootPath(
+    dirname(snapshot.root),
+    "OpenCode OMO snapshot store",
+  );
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const staging = temporarySibling(snapshot.root);
+  try {
+    mkdirSync(staging, { mode: 0o700 });
+    await extractOpenCodeAddonArchive(archivePath, staging);
+    const dependencyManifest = packageManifest(dependencySource);
+    if (
+      dependencyManifest?.name !== registration.dependencyPackage
+      || dependencyManifest.version !== registration.dependencyVersion
+    ) {
+      throw new Error("OpenCode OMO bundled dependency does not match the reviewed pin");
+    }
+    copyReviewedEntry(
+      dependencySource,
+      join(staging, registration.dependencyPath),
+      { bytes: 0, entries: 0 },
+      "OpenCode OMO dependency",
+    );
+    if (
+      !existsSync(join(staging, registration.entryPoint))
+      || hashManagedDirectory(staging) !== snapshot.digest
+    ) {
+      throw new Error("OpenCode OMO snapshot content does not match the reviewed pin");
+    }
+    if (!openCodePackageMatches(staging, addon)) {
+      throw new Error("OpenCode OMO package manifest does not match the reviewed pin");
+    }
+    renameSync(staging, snapshot.root);
+    return snapshot;
+  } finally {
+    rmSync(staging, { force: true, recursive: true });
+  }
+}
+
+async function extractCodexAddonArchive(
+  archivePath: string,
+  destination: string,
+): Promise<void> {
+  return extractAddonArchive(
+    archivePath,
+    destination,
+    "Codex OMO",
+    (value) => safeSnapshotArchivePath(value) ? value : null,
+  );
 }
 
 function assertRevision(
@@ -372,19 +519,20 @@ function copyReviewedEntry(
   source: string,
   destination: string,
   budget: { bytes: number; entries: number },
+  label = "Codex OMO snapshot",
 ): void {
   const stat = lstatSync(source);
   if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
-    throw new Error(`Codex OMO snapshot contains an unsafe entry: ${source}`);
+    throw new Error(`${label} contains an unsafe entry: ${source}`);
   }
   budget.entries += 1;
   if (budget.entries > MAX_COPY_ENTRIES) {
-    throw new Error("Codex OMO snapshot has too many entries");
+    throw new Error(`${label} has too many entries`);
   }
   if (stat.isFile()) {
     budget.bytes += stat.size;
     if (budget.bytes > MAX_COPY_BYTES) {
-      throw new Error("Codex OMO snapshot exceeds the byte limit");
+      throw new Error(`${label} exceeds the byte limit`);
     }
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
     cpSync(source, destination, {
@@ -399,6 +547,7 @@ function copyReviewedEntry(
       join(source, entry.name),
       join(destination, entry.name),
       budget,
+      label,
     );
   }
 }

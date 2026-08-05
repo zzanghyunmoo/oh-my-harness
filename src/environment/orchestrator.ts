@@ -41,6 +41,8 @@ import {
 import { resolveDesiredState } from "../domain/desired-state.js";
 import type { RuntimeAddonPin } from "../domain/desired-state.js";
 import {
+  isCapabilitySet,
+  isEnvironmentInstanceId,
   type CapabilitySet,
   type EnvironmentInstance,
   type EnvironmentInstanceId,
@@ -83,10 +85,14 @@ import {
   codexAddonSnapshot,
   createRuntimeAddonGitOperations,
   inspectCodexAddonSnapshot,
+  inspectOpenCodeAddonSnapshot,
   inspectRuntimeAddonArchive,
   materializeCodexAddonSnapshotFromArchive,
+  materializeOpenCodeAddonSnapshotFromArchive,
+  openCodeAddonSnapshot,
   verifyCodexAddonGitMarketplace,
   type CodexAddonSnapshot,
+  type OpenCodeAddonSnapshot,
   type RuntimeAddonGitOperations,
 } from "../install/runtime-addon-acquisition.js";
 import {
@@ -323,7 +329,8 @@ interface OpenCodeRuntimeAddonModel extends RuntimeAddonModelBase {
   readonly addon: OpenCodePackageAddon;
   readonly agentId: "opencode";
   readonly kind: "opencode-package";
-  readonly nativeState: "collision" | "missing" | "ready";
+  readonly nativeState: "collision" | "missing" | "previous" | "ready";
+  readonly snapshot: OpenCodeAddonSnapshot;
   readonly sourceArchivePath: string | null;
 }
 
@@ -331,7 +338,6 @@ interface CodexRuntimeAddonModel extends RuntimeAddonModelBase {
   readonly addon: CodexMarketplaceAddon;
   readonly agentId: "codex";
   readonly gitOperations: RuntimeAddonGitOperations | null;
-  readonly gitPath: string | null;
   readonly kind: "codex-marketplace";
   readonly nativeState: {
     readonly marketplace: "collision" | "missing" | "ready";
@@ -639,6 +645,8 @@ function buildRuntimeAddonModels(
     return entry.defaultAddons.map((addon): RuntimeAddonModel => {
       const fingerprint = runtimeAddonFingerprint(addon);
       if (isOpenCodePackageAddon(addon)) {
+        const snapshot = openCodeAddonSnapshot(addon, stateRoot);
+        const snapshotReady = inspectOpenCodeAddonSnapshot(addon, stateRoot);
         const sourceArchivePath = runtimeAddonArchive(
           options.repositoryRoot,
           addon.registration.snapshotArchivePath,
@@ -647,34 +655,39 @@ function buildRuntimeAddonModels(
         const nativeState = inspectOpenCodePackageAddon(
           {
             packageName: addon.registration.packageName,
-            spec: addon.registration.spec,
+            previousSpec: addon.registration.spec,
+            spec: snapshot.spec,
           },
           options.env,
           options.os,
         );
-        const state = nativeState === "collision"
-          ? "conflict" as const
-          : sourceArchivePath === null
-            ? "unverifiable" as const
-            : nativeState === "ready"
-              ? "ready" as const
-              : "installable" as const;
+        let state: RuntimeAddonEnvironmentStatus["state"];
+        let detail: string;
+        if (nativeState === "collision") {
+          state = "conflict";
+          detail =
+            "OpenCode contains a legacy, duplicate, or differently pinned OMO package";
+        } else if (!snapshotReady && sourceArchivePath === null) {
+          state = "unverifiable";
+          detail = "the reviewed OpenCode OMO snapshot and archive are unavailable";
+        } else if (snapshotReady && nativeState === "ready") {
+          state = "ready";
+          detail = `${snapshot.spec} is registered exactly`;
+        } else {
+          state = "installable";
+          detail = `${snapshot.spec} can be registered additively`;
+        }
         return {
           addon,
           agentId: "opencode",
           fingerprint,
           kind: "opencode-package",
           nativeState,
+          snapshot,
           sourceArchivePath,
           status: {
             agentId: "opencode",
-            detail: nativeState === "collision"
-              ? "OpenCode contains a legacy, duplicate, or differently pinned OMO package"
-              : sourceArchivePath === null
-                ? "the reviewed OpenCode OMO archive is unavailable"
-                : nativeState === "ready"
-                  ? `${addon.registration.spec} is registered exactly`
-                  : `${addon.registration.spec} can be registered additively`,
+            detail,
             fingerprint,
             id: addon.id,
             state,
@@ -758,7 +771,6 @@ function buildRuntimeAddonModels(
         agentId: "codex",
         fingerprint,
         gitOperations,
-        gitPath,
         kind: "codex-marketplace",
         nativeState,
         snapshot,
@@ -1484,29 +1496,20 @@ function planActions(
   const actions: PlanAction[] = [];
   for (const addon of model.runtimeAddons) {
     if (addon.kind === "opencode-package") {
-      if (addon.sourceArchivePath === null) {
+      if (
+        !inspectOpenCodeAddonSnapshot(addon.addon, model.stateRoot)
+        && addon.sourceArchivePath === null
+      ) {
         throw new Error("reviewed OpenCode OMO archive is unavailable");
       }
-      const target = runtimeAddonMarkerPath(
-        model.stateRoot,
-        "opencode",
-        "omo-source",
-      );
-      const content = markerFor(
-        "addon:opencode:omo:source",
-        model.catalog.revision,
-        target,
-        addon.fingerprint,
-      );
       actions.push({
         id: "addon:opencode:omo:source",
         kind: "acquire",
         payload: {
-          content,
-          contentDigest: sha256Bytes(content),
+          contentDigest: addon.snapshot.digest,
           fingerprint: addon.fingerprint,
-          operation: "verify-opencode-addon-source",
-          ownershipKind: "file",
+          operation: "acquire-opencode-addon-snapshot",
+          ownershipKind: "directory",
           ownershipScope: "managed",
           packageName: addon.addon.registration.packageName,
           snapshotArchivePath: addon.addon.registration.snapshotArchivePath,
@@ -1514,9 +1517,9 @@ function planActions(
             addon.addon.registration.snapshotArchiveSha256,
           version: addon.addon.version,
         },
-        preimage: observeRegularFile(target),
+        preimage: observeManagedPath(addon.snapshot.root),
         required: true,
-        target,
+        target: addon.snapshot.root,
       });
       continue;
     }
@@ -1824,8 +1827,9 @@ function planActions(
           ownershipKind: "registration",
           ownershipScope: "managed",
           packageName: addon.addon.registration.packageName,
+          previousSpec: addon.addon.registration.spec,
           preimageTarget: target,
-          spec: addon.addon.registration.spec,
+          spec: addon.snapshot.spec,
         },
         preimage: observeRegularFile(target),
         required: true,
@@ -2222,15 +2226,16 @@ async function executeAction(
         === payloadString(action, "contentDigest"),
     };
   }
-  if (operation === "verify-opencode-addon-source") {
+  if (operation === "acquire-opencode-addon-snapshot") {
     const addon = model.runtimeAddons.find(
       (candidate): candidate is OpenCodeRuntimeAddonModel =>
         candidate.kind === "opencode-package",
     );
     if (
       addon === undefined
-      || addon.sourceArchivePath === null
       || addon.fingerprint !== payloadString(action, "fingerprint")
+      || action.target !== addon.snapshot.root
+      || addon.snapshot.digest !== payloadString(action, "contentDigest")
       || addon.addon.registration.packageName
         !== payloadString(action, "packageName")
       || addon.addon.version !== payloadString(action, "version")
@@ -2238,17 +2243,32 @@ async function executeAction(
         !== payloadString(action, "snapshotArchivePath")
       || addon.addon.registration.snapshotArchiveSha256
         !== payloadString(action, "snapshotArchiveSha256")
-      || !inspectRuntimeAddonArchive(
-        addon.sourceArchivePath,
-        addon.addon.registration.snapshotArchiveSha256,
-      )
     ) {
-      throw new Error("OpenCode OMO source changed after preview");
+      throw new Error("OpenCode OMO snapshot identity changed after preview");
     }
-    atomicWriteFile(action.target, payloadString(action, "content"));
+    if (!inspectOpenCodeAddonSnapshot(addon.addon, model.stateRoot)) {
+      if (
+        addon.sourceArchivePath === null
+        || !inspectRuntimeAddonArchive(
+          addon.sourceArchivePath,
+          addon.addon.registration.snapshotArchiveSha256,
+        )
+      ) {
+        throw new Error("OpenCode OMO source changed after preview");
+      }
+      await materializeOpenCodeAddonSnapshotFromArchive(
+        addon.sourceArchivePath,
+        addon.addon,
+        model.stateRoot,
+        join(
+          options.repositoryRoot,
+          "node_modules",
+          addon.addon.registration.snapshotDependencyPackage ?? "",
+        ),
+      );
+    }
     return {
-      verified:
-        sha256File(action.target) === payloadString(action, "contentDigest"),
+      verified: inspectOpenCodeAddonSnapshot(addon.addon, model.stateRoot),
     };
   }
   if (operation === "acquire-codex-addon-snapshot") {
@@ -2494,30 +2514,17 @@ async function executeAction(
       || addon.fingerprint !== payloadString(action, "fingerprint")
       || addon.addon.registration.packageName
         !== payloadString(action, "packageName")
-      || addon.addon.registration.spec !== payloadString(action, "spec")
+      || addon.addon.registration.spec
+        !== payloadString(action, "previousSpec")
+      || addon.snapshot.spec !== payloadString(action, "spec")
+      || !inspectOpenCodeAddonSnapshot(addon.addon, model.stateRoot)
     ) {
       throw new Error("OpenCode OMO registration changed after preview");
     }
-    const sourceTarget = runtimeAddonMarkerPath(
-      model.stateRoot,
-      "opencode",
-      "omo-source",
-    );
-    const sourceContent = markerFor(
-      "addon:opencode:omo:source",
-      model.catalog.revision,
-      sourceTarget,
-      addon.fingerprint,
-    );
-    if (
-      !existsSync(sourceTarget)
-      || sha256File(sourceTarget) !== sha256Bytes(sourceContent)
-    ) {
-      throw new Error("OpenCode OMO metadata preflight marker is unavailable");
-    }
     const registration = {
       packageName: addon.addon.registration.packageName,
-      spec: addon.addon.registration.spec,
+      previousSpec: addon.addon.registration.spec,
+      spec: addon.snapshot.spec,
     };
     registerOpenCodePackageAddon(
       registration,
@@ -2691,6 +2698,7 @@ interface EnvironmentRecoveryPayload {
   readonly native: EnvironmentNativeRecovery | null;
   readonly operation: string;
   readonly schemaVersion: "2.0.0";
+  readonly selection?: EnvironmentSelection;
   readonly snapshots: readonly EnvironmentRollbackSnapshot[];
 }
 
@@ -2699,6 +2707,102 @@ function recoveryKeysMatch(
   keys: readonly string[],
 ): boolean {
   return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+function recoverySelection(model: EnvironmentModel): EnvironmentSelection {
+  const instance = model.desired.instance;
+  return {
+    ...(model.desired.capabilitySet === undefined
+      ? {}
+      : { capabilitySet: model.desired.capabilitySet }),
+    clean: model.clean,
+    profileId: model.profile.id,
+    ...(model.desired.selectedCapabilities === undefined
+      ? {}
+      : { selectedCapabilities: model.desired.selectedCapabilities }),
+    selectedAgents: model.selectedAgents,
+    ...(model.desired.selectedPackages === undefined
+      ? {}
+      : { selectedPackages: model.desired.selectedPackages }),
+    stateRoot: model.stateRoot,
+    ...(instance === undefined ? {} : { target: instance.id }),
+    ...(instance?.id === "wsl-ubuntu"
+      ? { distribution: instance.distribution }
+      : {}),
+    ...(model.desired.toolRoutes === undefined
+      ? {}
+      : { toolRoutes: model.desired.toolRoutes }),
+  };
+}
+
+function validatedRecoverySelection(
+  value: unknown,
+  actionId: string,
+): EnvironmentSelection {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`invalid recovery selection: ${actionId}`);
+  }
+  const selection = value as Record<string, unknown>;
+  const allowed = new Set([
+    "capabilitySet",
+    "clean",
+    "distribution",
+    "profileId",
+    "selectedAgents",
+    "selectedCapabilities",
+    "selectedPackages",
+    "stateRoot",
+    "target",
+    "toolRoutes",
+  ]);
+  if (
+    Object.keys(selection).some((key) => !allowed.has(key))
+    || typeof selection.profileId !== "string"
+    || typeof selection.stateRoot !== "string"
+    || !isAbsolute(selection.stateRoot)
+    || typeof selection.clean !== "boolean"
+    || !Array.isArray(selection.selectedAgents)
+    || selection.selectedAgents.some((id) => typeof id !== "string")
+    || (
+      selection.selectedCapabilities !== undefined
+      && (
+        !Array.isArray(selection.selectedCapabilities)
+        || selection.selectedCapabilities.some((id) => typeof id !== "string")
+      )
+    )
+    || (
+      selection.selectedPackages !== undefined
+      && (
+        !Array.isArray(selection.selectedPackages)
+        || selection.selectedPackages.some((id) => typeof id !== "string")
+      )
+    )
+    || (
+      selection.capabilitySet !== undefined
+      && (
+        typeof selection.capabilitySet !== "string"
+        || !isCapabilitySet(selection.capabilitySet)
+      )
+    )
+    || (
+      selection.target !== undefined
+      && (
+        typeof selection.target !== "string"
+        || !isEnvironmentInstanceId(selection.target)
+      )
+    )
+    || (
+      selection.distribution !== undefined
+      && selection.distribution !== "Ubuntu"
+    )
+    || (
+      selection.toolRoutes !== undefined
+      && !Array.isArray(selection.toolRoutes)
+    )
+  ) {
+    throw new Error(`invalid recovery selection: ${actionId}`);
+  }
+  return structuredClone(value) as EnvironmentSelection;
 }
 
 function validatedNativeRecovery(
@@ -2812,9 +2916,22 @@ function recoveryPayload(
   const value = recovery.payload;
   if (
     recovery.kind !== "environment-action-v1"
-    || !recoveryKeysMatch(
-      value as Record<string, unknown>,
-      ["backupRoot", "native", "operation", "schemaVersion", "snapshots"],
+    || !(
+      recoveryKeysMatch(
+        value as Record<string, unknown>,
+        ["backupRoot", "native", "operation", "schemaVersion", "snapshots"],
+      )
+      || recoveryKeysMatch(
+        value as Record<string, unknown>,
+        [
+          "backupRoot",
+          "native",
+          "operation",
+          "schemaVersion",
+          "selection",
+          "snapshots",
+        ],
+      )
     )
     || value.schemaVersion !== "2.0.0"
     || typeof value.backupRoot !== "string"
@@ -2835,6 +2952,7 @@ function recoveryPayload(
       "register-runtime",
       "remove-owned",
       "verify-opencode-addon-source",
+      "acquire-opencode-addon-snapshot",
     ].includes(value.operation)
     || !Array.isArray(value.snapshots)
     || value.snapshots.length < 1
@@ -2843,6 +2961,9 @@ function recoveryPayload(
     throw new Error(`invalid environment recovery record: ${recovery.actionId}`);
   }
   const native = validatedNativeRecovery(value.native, recovery.actionId);
+  const selection = value.selection === undefined
+    ? undefined
+    : validatedRecoverySelection(value.selection, recovery.actionId);
   if (native !== null) {
     const expectedOperation =
       native.kind === "claude-marketplace-absent"
@@ -2905,6 +3026,7 @@ function recoveryPayload(
     native,
     operation: value.operation,
     schemaVersion: "2.0.0",
+    ...(selection === undefined ? {} : { selection }),
     snapshots: snapshots as readonly EnvironmentRollbackSnapshot[],
   };
 }
@@ -3680,6 +3802,7 @@ function prepareActionRollback(
       native,
       operation,
       schemaVersion: "2.0.0",
+      selection: recoverySelection(model),
       snapshots,
     },
   };
@@ -3735,6 +3858,20 @@ function environmentApplyDependencies(
     ),
     recover: async (recovery) =>
       recoverEnvironmentAction(recovery, model, normalized),
+    receiptTarget(action) {
+      if (action.id === "omh-node") return process.execPath;
+      if (
+        model.profile.compositionOnly === true
+        && action.id.startsWith("agent:")
+        && action.payload?.ownershipScope === "external"
+      ) {
+        const agentId = action.payload.agentId;
+        if (typeof agentId !== "string") return undefined;
+        return model.agents.find(({ id }) => id === agentId)?.executablePath
+          ?? undefined;
+      }
+      return undefined;
+    },
     execute: async (action) => executeAction(action, model, normalized),
     verifyCompleted: async (action) => completedActionReady(action),
     ...(normalized.now === undefined ? {} : { now: normalized.now }),
@@ -3764,8 +3901,32 @@ export async function applyEnvironment(
         return value as ManagedStateReceipt;
       },
     });
+    const journal = await state.readJournal();
+    const recoverySelections = (journal?.pendingRecoveries ?? []).map(
+      (recovery) => recoveryPayload(recovery).selection,
+    );
+    if (
+      recoverySelections.some(
+        (candidate) =>
+          stableJson(candidate ?? null)
+          !== stableJson(recoverySelections[0] ?? null),
+      )
+    ) {
+      throw new Error("environment recovery selections do not match");
+    }
+    const recoverySelectionValue = recoverySelections[0];
+    if (
+      recoverySelectionValue !== undefined
+      && resolve(recoverySelectionValue.stateRoot ?? "")
+        !== resolve(current.model.stateRoot)
+    ) {
+      throw new Error("environment recovery selection changed its state root");
+    }
+    const recoveryModel = recoverySelectionValue === undefined
+      ? current.model
+      : buildEnvironmentPreview(recoverySelectionValue, normalized).model;
     const recovery = await recoverPendingApply(
-      environmentApplyDependencies(current.model, normalized, state),
+      environmentApplyDependencies(recoveryModel, normalized, state),
     );
     if (recovery.failure !== undefined) {
       throw new Error(
@@ -3978,33 +4139,20 @@ export function inspectEnvironment(
     let nativeReady = false;
     try {
       if (addon.kind === "opencode-package") {
-        const sourceActionId = "addon:opencode:omo:source";
-        const sourceTarget = runtimeAddonMarkerPath(
-          stateRoot,
-          "opencode",
-          "omo-source",
-        );
-        const sourceContent = markerFor(
-          sourceActionId,
-          catalog.revision,
-          sourceTarget,
-          addon.fingerprint,
-        );
         sourceReady =
           receiptOwnershipMatches(
             receipt,
-            sourceActionId,
-            "file",
-            sourceTarget,
-            sha256Bytes(sourceContent),
+            "addon:opencode:omo:source",
+            "directory",
+            addon.snapshot.root,
+            addon.snapshot.digest,
           )
-          && existsSync(sourceTarget)
-          && sha256File(sourceTarget) === sha256Bytes(sourceContent);
+          && inspectOpenCodeAddonSnapshot(addon.addon, stateRoot);
         nativeReady = openCodePackageAddonResolved(
           runtimeExecutable("opencode", model, normalized),
           {
             packageName: addon.addon.registration.packageName,
-            spec: addon.addon.registration.spec,
+            spec: addon.snapshot.spec,
           },
           normalized.env,
           normalized.os,
@@ -4242,7 +4390,7 @@ function nativeDoctorIssues(
             runtimeExecutable("opencode", model, options),
             {
               packageName: addon.addon.registration.packageName,
-              spec: addon.addon.registration.spec,
+              spec: addon.snapshot.spec,
             },
             options.env,
             options.os,
