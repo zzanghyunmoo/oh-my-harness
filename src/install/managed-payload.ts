@@ -163,7 +163,7 @@ function payloadSources(repositoryRoot: string): readonly PayloadSource[] {
     ["text-decoder", "1.2.7"],
     ["typebox", "1.2.8"],
     ["yauzl", "3.4.0"],
-    ["zod", "4.1.8"],
+    ["zod", "4.4.3"],
   ] as const;
   return [
     ...PAYLOAD_PATHS.map((path) => ({

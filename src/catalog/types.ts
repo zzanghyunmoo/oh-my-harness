@@ -31,11 +31,11 @@ export interface OpenCodePackageAddon extends DefaultRuntimeAddonBase {
     packageName: "oh-my-openagent";
     snapshotArchivePath: "harness/vendor/oh-my-openagent-4.19.2.tgz";
     snapshotArchiveSha256: string;
-    snapshotContentSha256?: string;
-    snapshotDependencyPackage?: "zod";
-    snapshotDependencyPath?: "node_modules/zod";
-    snapshotDependencyVersion?: "4.1.8";
-    snapshotEntryPoint?: "dist/index.js";
+    snapshotContentSha256: string;
+    snapshotDependencyPackage: "zod";
+    snapshotDependencyPath: "node_modules/zod";
+    snapshotDependencyVersion: "4.4.3";
+    snapshotEntryPoint: "dist/index.js";
     spec: string;
     tarballUrl: string;
   };

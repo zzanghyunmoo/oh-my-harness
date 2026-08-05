@@ -66,7 +66,10 @@ oh-my-harness/
 - removal, pin 변경, source 변경, user-owned 충돌은 additive repair와 분리된 새 preview를 요구한다.
 - 같은 marketplace/plugin ID가 다른 source, version, tree, enabled state로 이미
   등록되어 있으면 이를 제거하거나 교체하지 않고 user-owned collision으로
-  실패한다. exact registration만 idempotent하게 재사용한다.
+  실패한다. exact registration만 idempotent하게 재사용한다. 단, 새 exact preview가
+  명시한 현재 reviewed OpenCode OMO predecessor는 같은 ID의 reviewed local snapshot으로
+  교체할 수 있다. 이 좁은 upgrade는 apply에서만 수행하며 startup synchronization은
+  source 또는 pin을 변경하지 않는다.
 
 ## 카탈로그와 프로필 규칙
 

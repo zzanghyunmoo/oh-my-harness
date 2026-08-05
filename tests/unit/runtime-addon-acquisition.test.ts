@@ -74,7 +74,7 @@ function openCodeAddonForArchive(archive: Buffer): OpenCodePackageAddon {
       snapshotContentSha256: "2".repeat(64),
       snapshotDependencyPackage: "zod",
       snapshotDependencyPath: "node_modules/zod",
-      snapshotDependencyVersion: "4.1.8",
+      snapshotDependencyVersion: "4.4.3",
       snapshotEntryPoint: "dist/index.js",
       spec: "oh-my-openagent@4.19.2",
       tarballUrl:
@@ -148,6 +148,36 @@ test("OpenCode OMO extraction rejects traversal, duplicate, and non-file entries
         message,
       );
     }
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("OpenCode OMO acquisition rejects an unreviewed dependency range", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-opencode-addon-range-"));
+  try {
+    const archivePath = join(root, "range.tgz");
+    const archive = await writeOpenCodeArchive(archivePath, [
+      {
+        name: "package/package.json",
+        value: JSON.stringify({
+          dependencies: { zod: "^4.5.0" },
+          main: "./dist/index.js",
+          name: "oh-my-openagent",
+          version: "4.19.2",
+        }),
+      },
+      { name: "package/dist/index.js", value: "export const reviewed = true;\n" },
+    ]);
+    await assert.rejects(
+      materializeOpenCodeAddonSnapshotFromArchive(
+        archivePath,
+        openCodeAddonForArchive(archive),
+        join(root, "state"),
+        join(REPO_ROOT, "node_modules", "zod"),
+      ),
+      /package manifest does not match the reviewed pin/u,
+    );
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

@@ -532,7 +532,7 @@ export function loadCatalogBundle(
     )
     || openCodeAddon.registration.snapshotDependencyPackage !== "zod"
     || openCodeAddon.registration.snapshotDependencyPath !== "node_modules/zod"
-    || openCodeAddon.registration.snapshotDependencyVersion !== "4.1.8"
+    || openCodeAddon.registration.snapshotDependencyVersion !== "4.4.3"
     || openCodeAddon.registration.snapshotEntryPoint !== "dist/index.js"
   ) {
     throw new Error(

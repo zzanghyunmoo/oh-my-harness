@@ -166,6 +166,11 @@
             "packageName",
             "snapshotArchivePath",
             "snapshotArchiveSha256",
+            "snapshotContentSha256",
+            "snapshotDependencyPackage",
+            "snapshotDependencyPath",
+            "snapshotDependencyVersion",
+            "snapshotEntryPoint",
             "spec",
             "tarballUrl",
             "integrity"
@@ -195,7 +200,7 @@
               "const": "node_modules/zod"
             },
             "snapshotDependencyVersion": {
-              "const": "4.1.8"
+              "const": "4.4.3"
             },
             "snapshotEntryPoint": {
               "const": "dist/index.js"

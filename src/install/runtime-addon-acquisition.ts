@@ -61,7 +61,8 @@ interface OpenCodeSnapshotRegistration {
   readonly contentDigest: string;
   readonly dependencyPackage: "zod";
   readonly dependencyPath: "node_modules/zod";
-  readonly dependencyVersion: "4.1.8";
+  readonly dependencyRange: "^4.4.3";
+  readonly dependencyVersion: "4.4.3";
   readonly entryPoint: "dist/index.js";
 }
 
@@ -186,7 +187,7 @@ function openCodeSnapshotRegistration(
     || !/^[0-9a-f]{64}$/u.test(registration.snapshotContentSha256)
     || registration.snapshotDependencyPackage !== "zod"
     || registration.snapshotDependencyPath !== "node_modules/zod"
-    || registration.snapshotDependencyVersion !== "4.1.8"
+    || registration.snapshotDependencyVersion !== "4.4.3"
     || registration.snapshotEntryPoint !== "dist/index.js"
   ) {
     throw new Error("OpenCode OMO add-on requires an exact offline snapshot pin");
@@ -195,6 +196,7 @@ function openCodeSnapshotRegistration(
     contentDigest: registration.snapshotContentSha256,
     dependencyPackage: registration.snapshotDependencyPackage,
     dependencyPath: registration.snapshotDependencyPath,
+    dependencyRange: "^4.4.3",
     dependencyVersion: registration.snapshotDependencyVersion,
     entryPoint: registration.snapshotEntryPoint,
   };
@@ -220,9 +222,15 @@ function openCodePackageMatches(
   const registration = openCodeSnapshotRegistration(addon);
   const manifest = packageManifest(root);
   const dependency = packageManifest(join(root, registration.dependencyPath));
+  const dependencies = manifest?.dependencies;
   return manifest?.name === addon.registration.packageName
     && manifest.version === addon.version
     && manifest.main === `./${registration.entryPoint}`
+    && typeof dependencies === "object"
+    && dependencies !== null
+    && !Array.isArray(dependencies)
+    && (dependencies as Record<string, unknown>)[registration.dependencyPackage]
+      === registration.dependencyRange
     && dependency?.name === registration.dependencyPackage
     && dependency.version === registration.dependencyVersion;
 }
@@ -449,12 +457,12 @@ export async function materializeOpenCodeAddonSnapshotFromArchive(
     );
     if (
       !existsSync(join(staging, registration.entryPoint))
-      || hashManagedDirectory(staging) !== snapshot.digest
+      || !openCodePackageMatches(staging, addon)
     ) {
-      throw new Error("OpenCode OMO snapshot content does not match the reviewed pin");
-    }
-    if (!openCodePackageMatches(staging, addon)) {
       throw new Error("OpenCode OMO package manifest does not match the reviewed pin");
+    }
+    if (hashManagedDirectory(staging) !== snapshot.digest) {
+      throw new Error("OpenCode OMO snapshot content does not match the reviewed pin");
     }
     renameSync(staging, snapshot.root);
     return snapshot;

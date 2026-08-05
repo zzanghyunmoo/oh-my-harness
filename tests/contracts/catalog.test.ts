@@ -138,7 +138,7 @@ test("catalog validation fails closed on unknown fields, agents, duplicates, sec
   );
 });
 
-test("v2 catalog schema remains compatible with pre-snapshot OpenCode add-ons", () => {
+test("v2 catalog schema requires complete offline OpenCode add-on identity", () => {
   const source = mutableSource();
   const addon = itemAt(
     itemAt(source.agents.agents, 1).defaultAddons,
@@ -151,7 +151,10 @@ test("v2 catalog schema remains compatible with pre-snapshot OpenCode add-ons", 
   delete registration.snapshotDependencyPath;
   delete registration.snapshotDependencyVersion;
   delete registration.snapshotEntryPoint;
-  assert.doesNotThrow(() => validateCatalogSource(source, REPO_ROOT));
+  assert.throws(
+    () => validateCatalogSource(source, REPO_ROOT),
+    /schema branch|schema required property|snapshotContentSha256/u,
+  );
 });
 
 test("Claude-ready with OpenCode and Codex pending is a valid staged catalog state", () => {
