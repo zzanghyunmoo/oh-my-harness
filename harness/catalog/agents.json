@@ -38,6 +38,11 @@
             "packageName": "oh-my-openagent",
             "snapshotArchivePath": "harness/vendor/oh-my-openagent-4.19.2.tgz",
             "snapshotArchiveSha256": "436376b1a0c754930b3f2c07e6aeba99cbfcae8d631292ab33d54e563bb3b4f2",
+            "snapshotContentSha256": "aa15a47319c3aa014fb874bc5da9371e77877bd7c263a8bff6c1961ba20c11ad",
+            "snapshotDependencyPackage": "zod",
+            "snapshotDependencyPath": "node_modules/zod",
+            "snapshotDependencyVersion": "4.4.3",
+            "snapshotEntryPoint": "dist/index.js",
             "spec": "oh-my-openagent@4.19.2",
             "tarballUrl": "https://registry.npmjs.org/oh-my-openagent/-/oh-my-openagent-4.19.2.tgz",
             "integrity": "sha512-pHAbd6/6xsrPPxNDSufZ+sVXl7kfeEjB73g1gy8s5ZfiSjr+pssaK6fI4P8E4jcc2xC/MseqOWnLbrSqnwTI+w=="

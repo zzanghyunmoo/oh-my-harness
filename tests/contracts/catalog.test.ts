@@ -138,6 +138,25 @@ test("catalog validation fails closed on unknown fields, agents, duplicates, sec
   );
 });
 
+test("v2 catalog schema requires complete offline OpenCode add-on identity", () => {
+  const source = mutableSource();
+  const addon = itemAt(
+    itemAt(source.agents.agents, 1).defaultAddons,
+    0,
+  );
+  assert.equal(addon.registration.kind, "opencode-package");
+  const registration = addon.registration as unknown as Record<string, unknown>;
+  delete registration.snapshotContentSha256;
+  delete registration.snapshotDependencyPackage;
+  delete registration.snapshotDependencyPath;
+  delete registration.snapshotDependencyVersion;
+  delete registration.snapshotEntryPoint;
+  assert.throws(
+    () => validateCatalogSource(source, REPO_ROOT),
+    /schema branch|schema required property|snapshotContentSha256/u,
+  );
+});
+
 test("Claude-ready with OpenCode and Codex pending is a valid staged catalog state", () => {
   const source = mutableSource();
   for (const capability of source.capabilities.capabilities) {

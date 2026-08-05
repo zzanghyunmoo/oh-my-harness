@@ -166,6 +166,11 @@
             "packageName",
             "snapshotArchivePath",
             "snapshotArchiveSha256",
+            "snapshotContentSha256",
+            "snapshotDependencyPackage",
+            "snapshotDependencyPath",
+            "snapshotDependencyVersion",
+            "snapshotEntryPoint",
             "spec",
             "tarballUrl",
             "integrity"
@@ -183,6 +188,22 @@
             "snapshotArchiveSha256": {
               "pattern": "^[0-9a-f]{64}$",
               "type": "string"
+            },
+            "snapshotContentSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDependencyPackage": {
+              "const": "zod"
+            },
+            "snapshotDependencyPath": {
+              "const": "node_modules/zod"
+            },
+            "snapshotDependencyVersion": {
+              "const": "4.4.3"
+            },
+            "snapshotEntryPoint": {
+              "const": "dist/index.js"
             },
             "spec": {
               "pattern": "^oh-my-openagent@[0-9]+\\.[0-9]+\\.[0-9]+$",

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  githubReleaseOperations,
   publishVerifiedRelease,
   releaseDraftMarker,
   releaseTitle,
@@ -72,12 +73,10 @@ function ownedDraft(id: number): GitHubReleaseRecord {
 }
 
 interface FakeOptions {
-  readonly cleanupFailure?: boolean;
   readonly createdDraft?: GitHubReleaseRecord;
   readonly downloadMismatch?: boolean;
   readonly existing?: readonly GitHubReleaseRecord[];
   readonly failUpload?: "archive" | "sidecar";
-  readonly getReleaseResult?: GitHubReleaseRecord;
   readonly publishFailure?: boolean;
   readonly publishResponse?: GitHubReleaseRecord;
   readonly reportedAssets?: readonly GitHubReleaseAsset[];
@@ -101,13 +100,6 @@ function fakeOperations(options: FakeOptions = {}): {
       releases.push(draft);
       return draft;
     },
-    async deleteRelease(releaseId) {
-      calls.push(`delete:${releaseId}`);
-      if (options.cleanupFailure === true && releaseId === 100) {
-        throw new Error("cleanup failed");
-      }
-      releases = releases.filter(({ id }) => id !== releaseId);
-    },
     async downloadAsset(assetId) {
       calls.push(`download:${assetId}`);
       const value = bytes.get(assetId);
@@ -115,15 +107,6 @@ function fakeOperations(options: FakeOptions = {}): {
       return options.downloadMismatch === true && assetId === 201
         ? Buffer.from("different archive bytes\n")
         : value;
-    },
-    async getRelease(releaseId) {
-      calls.push(`get:${releaseId}`);
-      if (options.getReleaseResult !== undefined) {
-        return options.getReleaseResult;
-      }
-      const release = releases.find(({ id }) => id === releaseId);
-      assert.ok(release);
-      return release;
     },
     async listAssets(releaseId) {
       calls.push(`assets:${releaseId}`);
@@ -197,43 +180,19 @@ test("publisher stages, verifies, redownloads, and publishes exactly once", asyn
   }
 });
 
-test("publisher recovers only the exact current-source owned draft", async () => {
+test("publisher preserves an exact owned draft for explicit remediation", async () => {
   const fixture = publicationFixture();
   try {
     const fake = fakeOperations({ existing: [ownedDraft(7)] });
-    await publishVerifiedRelease(fixture.input, fake.operations);
-    assert.deepEqual(fake.calls.slice(0, 4), [
-      "list",
-      "get:7",
-      "delete:7",
-      `create:${TAG}:${SOURCE_SHA}`,
-    ]);
+    await assert.rejects(
+      publishVerifiedRelease(fixture.input, fake.operations),
+      /already has the exact owned draft 7/u,
+    );
+    assert.deepEqual(fake.calls, ["list"]);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
-
-for (const [label, changed] of [
-  ["published", { draft: false }],
-  ["foreign", { body: "foreign draft" }],
-] as const) {
-  test(`publisher re-observes and preserves a stale draft that became ${label}`, async () => {
-    const fixture = publicationFixture();
-    try {
-      const fake = fakeOperations({
-        existing: [ownedDraft(7)],
-        getReleaseResult: { ...ownedDraft(7), ...changed },
-      });
-      await assert.rejects(
-        publishVerifiedRelease(fixture.input, fake.operations),
-        /refusing cleanup deletion/u,
-      );
-      assert.deepEqual(fake.calls, ["list", "get:7"]);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-}
 
 test("publisher preserves a mismatched created draft response", async () => {
   const fixture = publicationFixture();
@@ -246,21 +205,18 @@ test("publisher preserves a mismatched created draft response", async () => {
         assert.ok(error instanceof AggregateError);
         assert.deepEqual(
           error.errors.map((entry: unknown) => String(entry)),
-          [
-            "Error: created release draft does not match its exact source marker",
-            "Error: release 100 is not the exact owned draft; refusing cleanup deletion",
-          ],
+          ["Error: created release draft does not match its exact source marker"],
         );
         return true;
       },
     );
-    assert.equal(fake.calls.includes("delete:100"), false);
+    assert.deepEqual(fake.calls, ["list", `create:${TAG}:${SOURCE_SHA}`]);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-test("publisher rejects a mismatched upload response and cleans only its owned draft", async () => {
+test("publisher rejects a mismatched upload response and preserves its owned draft", async () => {
   const fixture = publicationFixture();
   try {
     const fake = fakeOperations({
@@ -275,31 +231,13 @@ test("publisher rejects a mismatched upload response and cleans only its owned d
     });
     await assert.rejects(
       publishVerifiedRelease(fixture.input, fake.operations),
-      /upload responses do not match/u,
-    );
-    assert.deepEqual(fake.calls.slice(-2), ["get:100", "delete:100"]);
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test("publisher refuses cleanup when the fetched release id does not match", async () => {
-  const fixture = publicationFixture();
-  try {
-    const fake = fakeOperations({
-      failUpload: "sidecar",
-      getReleaseResult: ownedDraft(999),
-    });
-    await assert.rejects(
-      publishVerifiedRelease(fixture.input, fake.operations),
       (error: unknown) => {
         assert.ok(error instanceof AggregateError);
-        assert.match(String(error.errors[0]), /sidecar upload failed/u);
-        assert.match(String(error.errors[1]), /refusing cleanup deletion/u);
+        assert.match(String(error.errors[0]), /upload responses do not match/u);
         return true;
       },
     );
-    assert.equal(fake.calls.includes("delete:100"), false);
+    assert.equal(fake.calls.some((call) => call.startsWith("publish:")), false);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -357,45 +295,25 @@ for (const [label, options, message] of [
     /expected exactly 2/u,
   ],
 ] as const) {
-  test(`publisher cleans its unpublished owned draft after ${label}`, async () => {
+  test(`publisher preserves its unpublished owned draft after ${label}`, async () => {
     const fixture = publicationFixture();
     try {
       const fake = fakeOperations(options);
       await assert.rejects(
         publishVerifiedRelease(fixture.input, fake.operations),
-        message,
+        (error: unknown) => {
+          assert.ok(error instanceof AggregateError);
+          assert.match(String(error.errors[0]), message);
+          assert.match(error.message, /preserved for explicit remediation/u);
+          return true;
+        },
       );
-      assert.deepEqual(fake.calls.slice(-2), ["get:100", "delete:100"]);
       assert.equal(fake.calls.some((call) => call.startsWith("publish:")), false);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 }
-
-test("publisher reports both publication and cleanup failure", async () => {
-  const fixture = publicationFixture();
-  try {
-    const fake = fakeOperations({
-      cleanupFailure: true,
-      failUpload: "sidecar",
-    });
-    await assert.rejects(
-      publishVerifiedRelease(fixture.input, fake.operations),
-      (error: unknown) => {
-        assert.ok(error instanceof AggregateError);
-        assert.match(error.message, /could not be cleaned/u);
-        assert.deepEqual(
-          error.errors.map((entry: unknown) => String(entry)),
-          ["Error: sidecar upload failed", "Error: cleanup failed"],
-        );
-        return true;
-      },
-    );
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
 
 test("publisher preserves the draft once the publish response becomes uncertain", async () => {
   const fixture = publicationFixture();
@@ -439,3 +357,65 @@ for (const [label, publishResponse] of [
     }
   });
 }
+
+test("production GitHub adapter uses exact shell-free API arguments", async () => {
+  const calls: string[][] = [];
+  const record = {
+    body: releaseDraftMarker(TAG, SOURCE_SHA),
+    draft: true,
+    id: 100,
+    name: releaseTitle(TAG),
+    prerelease: false,
+    tag_name: TAG,
+    target_commitish: SOURCE_SHA,
+  };
+  const asset = {
+    id: 201,
+    name: `oh-my-harness-${TAG}.tgz`,
+    size: 8,
+    state: "uploaded",
+  };
+  const operations = githubReleaseOperations("owner/repository", {
+    env: {},
+    executablePath: "/trusted/gh",
+    runCommand(executable, args, _env, encoding) {
+      assert.equal(executable, "/trusted/gh");
+      calls.push([...args]);
+      const joined = args.join(" ");
+      if (encoding === null) return Buffer.from("archive");
+      if (joined.includes("/assets?per_page=100")) {
+        return JSON.stringify([[asset]]);
+      }
+      if (joined.includes("/releases?per_page=100")) {
+        return JSON.stringify([[record]]);
+      }
+      if (joined.includes("/assets?name=")) return JSON.stringify(asset);
+      if (joined.includes(" PATCH ")) {
+        return JSON.stringify({ ...record, body: "published", draft: false });
+      }
+      return JSON.stringify(record);
+    },
+  });
+  await operations.createDraft({
+    body: record.body,
+    name: record.name,
+    sourceSha: SOURCE_SHA,
+    tag: TAG,
+  });
+  await operations.listReleases();
+  await operations.listAssets(100);
+  await operations.downloadAsset(201);
+  await operations.uploadAsset({
+    contentType: "application/gzip",
+    name: asset.name,
+    path: "/tmp/archive.tgz",
+    releaseId: 100,
+  });
+  await operations.publishDraft(100, "published");
+  assert.equal(calls.some((args) => args.includes("DELETE")), false);
+  assert.equal(
+    calls.some((args) => args.includes("uploads.github.com")),
+    true,
+  );
+  assert.equal(calls.every((args) => args[0] === "api"), true);
+});

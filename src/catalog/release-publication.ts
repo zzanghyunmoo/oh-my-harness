@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { basename } from "node:path";
+import { basename, isAbsolute } from "node:path";
 
 import {
   findTrustedExecutable,
@@ -50,11 +50,7 @@ export interface ReleasePublicationOperations {
   readonly createDraft: (
     input: CreateReleaseDraftInput,
   ) => Promise<GitHubReleaseRecord>;
-  readonly deleteRelease: (releaseId: number) => Promise<void>;
   readonly downloadAsset: (assetId: number) => Promise<Buffer>;
-  readonly getRelease: (
-    releaseId: number,
-  ) => Promise<GitHubReleaseRecord>;
   readonly listAssets: (
     releaseId: number,
   ) => Promise<readonly GitHubReleaseAsset[]>;
@@ -266,20 +262,6 @@ function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-async function cleanupOwnedDraft(
-  releaseId: number,
-  input: ReleasePublicationInput,
-  operations: ReleasePublicationOperations,
-): Promise<void> {
-  const observed = await operations.getRelease(releaseId);
-  if (observed.id !== releaseId || !ownedDraft(observed, input)) {
-    throw new Error(
-      `release ${releaseId} is not the exact owned draft; refusing cleanup deletion`,
-    );
-  }
-  await operations.deleteRelease(releaseId);
-}
-
 async function prepareVerifiedReleaseDraft(
   input: ReleasePublicationInput,
   expected: ExpectedReleaseAssets,
@@ -306,7 +288,9 @@ async function prepareVerifiedReleaseDraft(
           `release ${input.tag} stale draft does not carry the exact current-source marker; refusing to delete`,
         );
       }
-      await cleanupOwnedDraft(existing.id, input, operations);
+      throw new Error(
+        `release ${input.tag} already has the exact owned draft ${existing.id}; inspect it and remediate explicitly`,
+      );
     }
 
     const created = await operations.createDraft({
@@ -357,8 +341,10 @@ async function prepareVerifiedReleaseDraft(
       expected.sidecarName,
       expected.sidecar.length,
     );
-    const downloadedArchive = await operations.downloadAsset(archiveAsset.id);
-    const downloadedSidecar = await operations.downloadAsset(sidecarAsset.id);
+    const [downloadedArchive, downloadedSidecar] = await Promise.all([
+      operations.downloadAsset(archiveAsset.id),
+      operations.downloadAsset(sidecarAsset.id),
+    ]);
     if (!downloadedArchive.equals(expected.archive)) {
       throw new Error("downloaded archive bytes differ from the uploaded source");
     }
@@ -378,14 +364,10 @@ async function prepareVerifiedReleaseDraft(
     };
   } catch (error) {
     if (draftId !== null) {
-      try {
-        await cleanupOwnedDraft(draftId, input, operations);
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [asError(error), asError(cleanupError)],
-          "release publication failed and its owned draft could not be cleaned",
-        );
-      }
+      throw new AggregateError(
+        [asError(error)],
+        `release publication failed; owned draft ${draftId} was preserved for explicit remediation`,
+      );
     }
     throw error;
   }
@@ -444,12 +426,7 @@ function ghResult(
   return result.stdout;
 }
 
-function ghJson(
-  executable: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): unknown {
-  const output = ghResult(executable, args, env);
+function parseGhJson(output: string | Buffer): unknown {
   try {
     return JSON.parse(String(output)) as unknown;
   } catch {
@@ -469,21 +446,40 @@ export function githubReleaseOperations(
   options: {
     readonly cwd?: string;
     readonly env?: NodeJS.ProcessEnv;
+    readonly executablePath?: string;
+    readonly runCommand?: (
+      executable: string,
+      args: readonly string[],
+      env: NodeJS.ProcessEnv,
+      encoding: BufferEncoding | null,
+    ) => string | Buffer;
   } = {},
 ): ReleasePublicationOperations {
   if (!REPOSITORY.test(repository)) {
     throw new Error("GitHub repository must be OWNER/REPO");
   }
   const env = options.env ?? process.env;
-  const executable = findTrustedExecutable("gh", {
-    cwd: options.cwd ?? process.cwd(),
-    env,
-  });
+  if (
+    options.executablePath !== undefined
+    && !isAbsolute(options.executablePath)
+  ) {
+    throw new Error("release publication gh executable must be absolute");
+  }
+  const executable = options.executablePath
+    ?? findTrustedExecutable("gh", {
+      cwd: options.cwd ?? process.cwd(),
+      env,
+    });
   if (executable === null) {
     throw new Error("release publication requires a trusted gh executable");
   }
+  const run = options.runCommand ?? ghResult;
+  const command = (
+    args: readonly string[],
+    encoding: BufferEncoding | null = "utf8",
+  ) => run(executable, args, env, encoding);
   const api = (args: readonly string[]) =>
-    ghJson(executable, ["api", ...args], env);
+    parseGhJson(command(["api", ...args]));
   return {
     async createDraft(input) {
       return releaseRecord(api([
@@ -504,30 +500,17 @@ export function githubReleaseOperations(
         "prerelease=false",
       ]));
     },
-    async deleteRelease(releaseId) {
-      ghResult(executable, [
-        "api",
-        "-X",
-        "DELETE",
-        `repos/${repository}/releases/${releaseId}`,
-      ], env);
-    },
     async downloadAsset(assetId) {
-      const output = ghResult(executable, [
+      const output = command([
         "api",
         "-H",
         "Accept: application/octet-stream",
         `repos/${repository}/releases/assets/${assetId}`,
-      ], env, null);
+      ], null);
       if (!Buffer.isBuffer(output)) {
         throw new Error("gh asset download did not return bytes");
       }
       return output;
-    },
-    async getRelease(releaseId) {
-      return releaseRecord(api([
-        `repos/${repository}/releases/${releaseId}`,
-      ]));
     },
     async listAssets(releaseId) {
       return flatPages(api([

@@ -96,6 +96,7 @@ export function managedRuntimeRegistrationDisposition(
 
 export interface OpenCodePackageAddonRegistration {
   readonly packageName: "oh-my-openagent";
+  readonly previousSpec?: string;
   readonly spec: string;
 }
 
@@ -126,6 +127,10 @@ export type RuntimeAddonRegistrationState =
   | "missing"
   | "ready"
   | "collision";
+
+export type OpenCodePackageAddonRegistrationState =
+  | RuntimeAddonRegistrationState
+  | "previous";
 
 export interface CodexMarketplaceAddonState {
   readonly marketplace: RuntimeAddonRegistrationState;
@@ -1130,20 +1135,32 @@ export function inspectOpenCodeManagedRuntimeRegistration(
 }
 
 function isOpenCodeOmoSpec(value: string): boolean {
-  return /^(?:oh-my-openagent|oh-my-opencode)(?:@|$)/u.test(value);
+  if (/^(?:oh-my-openagent|oh-my-opencode)(?:@|$)/u.test(value)) return true;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "file:"
+      && /\/addons\/opencode\/omo\/[0-9a-f]{64}\/dist\/index\.js$/u.test(
+        parsed.pathname,
+      );
+  } catch {
+    return false;
+  }
 }
 
 export function inspectOpenCodePackageAddon(
   registration: OpenCodePackageAddonRegistration,
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
-): RuntimeAddonRegistrationState {
+): OpenCodePackageAddonRegistrationState {
   try {
     const { plugins } = openCodePluginEntries(env, platform);
     const matches = plugins.filter(isOpenCodeOmoSpec);
     if (matches.length === 0) return "missing";
-    return matches.length === 1 && matches[0] === registration.spec
-      ? "ready"
+    if (matches.length !== 1) return "collision";
+    if (matches[0] === registration.spec) return "ready";
+    return registration.previousSpec !== undefined
+        && matches[0] === registration.previousSpec
+      ? "previous"
       : "collision";
   } catch {
     return "collision";
@@ -1163,7 +1180,12 @@ export function registerOpenCodePackageAddon(
     );
   }
   const { configPath, current, plugins } = openCodePluginEntries(env, platform);
-  const edits = modify(current, ["plugin"], [...plugins, registration.spec], {
+  const nextPlugins = state === "previous"
+    ? plugins.map((plugin) =>
+        plugin === registration.previousSpec ? registration.spec : plugin
+      )
+    : [...plugins, registration.spec];
+  const edits = modify(current, ["plugin"], nextPlugins, {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   });
   atomicWriteFile(configPath, `${applyEdits(current, edits).trimEnd()}\n`);
