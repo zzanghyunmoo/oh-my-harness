@@ -17,6 +17,7 @@ export interface AgentEnvironmentStatus {
   readonly command: string;
   readonly expectedVersion: string;
   readonly executablePath: string | null;
+  readonly executableDigest?: string;
   readonly state: "ready" | "installable" | "unsupported" | "drift";
   readonly ownership: "external" | "managed" | "none";
   readonly detail: string;
@@ -112,7 +113,26 @@ export function inspectCompositionAgent(
       state: "unsupported",
     };
   }
-  const external = findTrustedExecutable(adapter.command, { cwd, env });
+	const external = findTrustedExecutable(adapter.command, { cwd, env });
+	const mdsIdentity = mdsRuntimeIdentity(env, adapter.id);
+	if (mdsIdentity !== null && external !== null) {
+		try {
+			if (sha256File(external) === mdsIdentity.executableSha256) {
+				return {
+					command: adapter.command,
+					detail: `MDS runtime ${mdsIdentity.version} matches its verified executable digest`,
+					executablePath: external,
+					executableDigest: mdsIdentity.executableSha256,
+					expectedVersion: mdsIdentity.version,
+					id: adapter.id,
+					ownership: "external",
+					state: "ready",
+				};
+			}
+		} catch {
+			// The composition runtime must still match the MDS-provided digest.
+		}
+	}
   if (external !== null) {
     try {
       if (sha256File(external) === artifact.executable.sha256) {
@@ -141,6 +161,39 @@ export function inspectCompositionAgent(
     ownership: "none",
     state: "drift",
   };
+}
+
+interface MdsRuntimeIdentity {
+  readonly id: AgentId;
+  readonly version: string;
+  readonly executableSha256: string;
+}
+
+function mdsRuntimeIdentity(
+  env: NodeJS.ProcessEnv,
+  id: AgentId,
+): MdsRuntimeIdentity | null {
+  const identities = (env.MDS_RUNTIME_IDENTITIES ?? "").split(",");
+  let identity: MdsRuntimeIdentity | null = null;
+  for (const value of identities) {
+    const match = /^(claude-code|codex|opencode)@([^:]+):[a-f0-9]{64}:([a-f0-9]{64})$/.exec(value);
+    const receiptId = match?.[1];
+    const version = match?.[2];
+    const executableSha256 = match?.[3];
+    if (
+      receiptId !== id ||
+      version === undefined ||
+      version.length > 128 ||
+      executableSha256 === undefined
+    ) continue;
+    if (identity !== null) return null;
+    identity = {
+      executableSha256,
+      id,
+      version,
+    };
+  }
+  return identity;
 }
 
 export function plannedAgentOperation(

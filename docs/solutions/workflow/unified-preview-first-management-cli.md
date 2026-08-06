@@ -32,7 +32,7 @@ Expose one package executable, `omh`, as the canonical human interface while ret
 Do not merge the underlying scopes:
 
 - In an ordinary Environment Profile, agent selection installs an exact runtime and registers the harness plugin for that runtime.
-- In the `mds-host` Composition Profile, agent selection exact-digest-verifies the MDS-owned executable, then composes pinned workflows, plugins, and add-ons without acquiring the executable, CLI packages, or authentication.
+- In the `mds-host` Composition Profile, agent selection validates the executable against the exact MDS runtime identity bound into the parent plan, then composes pinned workflows, plugins, and add-ons without acquiring the executable, CLI packages, or authentication.
 - Tool selection installs an external executable once and shares it through machine `PATH`.
 - Project configuration decides whether a runtime extension uses those tools; it does not reinstall the executable.
 
