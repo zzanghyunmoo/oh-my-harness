@@ -304,7 +304,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
     const source = currentSourceIdentity();
     const built = await buildReleaseArtifact(REPO_ROOT, root, source);
     const archive = built.archivePath;
-    assert.equal(basename(archive), "oh-my-harness-v0.3.0.tgz");
+    assert.equal(basename(archive), "oh-my-harness-v0.3.1.tgz");
     const manifestPaths = built.sidecar.archive.files.map(({ path }) => path);
     assert.deepEqual(manifestPaths, [...manifestPaths].sort((left, right) => left.localeCompare(right)));
     assert.equal(new Set(manifestPaths).size, manifestPaths.length);
@@ -394,7 +394,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       windowsHide: true,
     });
     assert.equal(version.status, 0, version.stderr);
-    assert.equal(version.stdout.trim(), "omh 0.3.0");
+    assert.equal(version.stdout.trim(), "omh 0.3.1");
 
     const portableLauncher = spawnSync(process.execPath, [join(packageRoot, "omh"), "--version"], {
       cwd: arbitraryCwd,
@@ -403,7 +403,7 @@ test("packed artifact installs and runs help plus a read-only preview from arbit
       windowsHide: true,
     });
     assert.equal(portableLauncher.status, 0, portableLauncher.stderr);
-    assert.equal(portableLauncher.stdout.trim(), "omh 0.3.0");
+    assert.equal(portableLauncher.stdout.trim(), "omh 0.3.1");
 
     const hostPreview = spawnSync(
       process.execPath,
