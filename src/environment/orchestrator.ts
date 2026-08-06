@@ -1597,7 +1597,7 @@ function planActions(
         operation: plannedAgentOperation(model.profile, agent),
         ownershipKind: "executable",
         ownershipScope: agent.ownership === "external" ? "external" : "managed",
-        sourceDigest: artifact.executable.sha256,
+        sourceDigest: agent.executableDigest ?? artifact.executable.sha256,
       },
       preimage: observeRegularFile(target),
       required: true,

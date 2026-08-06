@@ -127,3 +127,37 @@ test("composition executable inspection binds actual bytes to the reviewed adapt
     rmSync(root, { force: true, recursive: true });
   }
 });
+
+test("MDS-managed composition accepts the caller runtime without an OMH runtime pin match", () => {
+  const root = mkdtempSync(join(tmpdir(), "omh-mds-managed-agent-"));
+  const command = "fixture-agent";
+  const executable = join(root, process.platform === "win32" ? `${command}.exe` : command);
+  const platformId = `${process.platform}-${process.arch === "arm64" ? "arm64" : "x64"}` as const;
+  const adapter = {
+    command,
+    id: "codex" as const,
+    platforms: [{
+      archive: { format: "zip" as const, sha256: "a".repeat(64), url: "https://example.invalid/codex.zip" },
+      executable: { memberPath: command, sha256: "b".repeat(64) },
+      platformId,
+    }],
+    version: "0.144.4",
+  };
+  try {
+    writeFileSync(executable, "MDS-managed runtime fixture\n");
+    if (process.platform !== "win32") chmodSync(executable, 0o755);
+    const digest = createHash("sha256")
+      .update("MDS-managed runtime fixture\n")
+      .digest("hex");
+    const status = inspectCompositionAgent(adapter, platformId, {
+      MDS_RUNTIME_IDENTITIES: `codex@0.146.1:${"a".repeat(64)}:${digest}`,
+      PATH: root,
+      ...(process.platform === "win32" ? { PATHEXT: ".EXE" } : {}),
+    }, process.cwd());
+    assert.equal(status.state, "ready");
+    assert.equal(status.ownership, "external");
+    assert.equal(status.executableDigest, digest);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
