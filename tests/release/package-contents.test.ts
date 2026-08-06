@@ -116,6 +116,7 @@ test("release workflow publishes one verified draft atomically", () => {
     new URL("../../.github/workflows/release.yml", import.meta.url),
     "utf8",
   );
+  assert.match(workflow, /^\s+workflow_dispatch:\s*$/mu);
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(
     workflow,
