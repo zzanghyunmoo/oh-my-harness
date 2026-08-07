@@ -103,6 +103,7 @@ import type {
   ApplyRecoveryRecord,
   ManagedStateReceipt,
 } from "../ports/state.js";
+import { HARNESS_VERSION } from "../package-version.js";
 import {
   applyExactPlan,
   recoverPendingApply,
@@ -139,6 +140,7 @@ import {
 } from "./filesystem.js";
 import {
   claudeOfficialMarketplaceReady,
+  claudeManagedPluginVersion,
   claudeRegistrationReady,
   codexMarketplaceAddonReady,
   codexRegistrationReady,
@@ -165,6 +167,7 @@ import {
   registerOpenCodeSkills,
   registerOpenCodeRuntime,
   type ManagedRuntimeRegistrationDisposition,
+  type ClaudeManagedNativeRegistration,
   type OpenCodeManagedRuntimeRegistrationState,
   type OpenCodeSkillRegistration,
   type CodexMarketplaceAddonRegistration,
@@ -1211,6 +1214,27 @@ function previousManagedPayloadRoot(
   return ownership.target;
 }
 
+function claudeNativeRegistration(
+  activeRoot: string,
+  receiptPath: string,
+  expectedVersion: string,
+  previousActiveRoot?: string,
+): ClaudeManagedNativeRegistration {
+  return {
+    activeRoot,
+    expectedVersion,
+    ...(previousActiveRoot === undefined
+      ? {}
+      : {
+          previousActiveRoot,
+          previousExpectedVersion: claudeManagedPluginVersion(
+            previousActiveRoot,
+          ),
+        }),
+    receiptPath,
+  };
+}
+
 function capabilityMarkerPath(
   stateRoot: string,
   runtimeId: AgentId,
@@ -1339,17 +1363,31 @@ function nativeRuntimePreflights(
     const executable = agent.executablePath;
     const nativeRun = (command: string, args: readonly string[]) =>
       runCommand(command, args, options);
-    const inspect = runtimeId === "claude-code"
-      ? inspectClaudeManagedRuntimeRegistration
-      : inspectCodexManagedRuntimeRegistration;
-    const observation = inspect(
-      executable,
-      {
-        activeRoot: previousActiveRoot ?? model.managedPayload.activeRoot,
-        receiptPath: model.receiptPath,
-      },
-      nativeRun,
-    );
+    let observation;
+    try {
+      observation = runtimeId === "claude-code"
+        ? inspectClaudeManagedRuntimeRegistration(
+            executable,
+            claudeNativeRegistration(
+              previousActiveRoot ?? model.managedPayload.activeRoot,
+              model.receiptPath,
+              previousActiveRoot === null
+                ? HARNESS_VERSION
+                : claudeManagedPluginVersion(previousActiveRoot),
+            ),
+            nativeRun,
+          )
+        : inspectCodexManagedRuntimeRegistration(
+            executable,
+            {
+              activeRoot: previousActiveRoot ?? model.managedPayload.activeRoot,
+              receiptPath: model.receiptPath,
+            },
+            nativeRun,
+          );
+    } catch {
+      observation = { marketplace: "collision", plugin: "collision" } as const;
+    }
     const disposition = managedRuntimeRegistrationDisposition(observation);
     const accepted = previousActiveRoot === null
       ? disposition !== "collision"
@@ -2616,7 +2654,16 @@ async function executeAction(
       runCommand(command, args, options);
     assertManagedPayloadExact(model.managedPayload);
     if (rawId === "claude-code") {
-      registerClaudeRuntime(executable, registration, nativeRun);
+      registerClaudeRuntime(
+        executable,
+        claudeNativeRegistration(
+          model.managedPayload.activeRoot,
+          model.receiptPath,
+          HARNESS_VERSION,
+          registration.previousActiveRoot,
+        ),
+        nativeRun,
+      );
     }
     else if (rawId === "codex") {
       registerCodexRuntime(executable, registration, nativeRun);
@@ -3354,10 +3401,11 @@ function rollbackNativeRegistration(
     if (
       claudeRegistrationReady(
         executable,
-        {
-          activeRoot: native.previousActiveRoot,
-          receiptPath: native.receiptPath,
-        },
+        claudeNativeRegistration(
+          native.previousActiveRoot,
+          native.receiptPath,
+          claudeManagedPluginVersion(native.previousActiveRoot),
+        ),
         [],
         nativeRun,
       )
@@ -3367,9 +3415,12 @@ function rollbackNativeRegistration(
     registerClaudeRuntime(
       executable,
       {
-        activeRoot: native.previousActiveRoot,
-        previousActiveRoot: native.activeRoot,
-        receiptPath: native.receiptPath,
+        ...claudeNativeRegistration(
+          native.previousActiveRoot,
+          native.receiptPath,
+          claudeManagedPluginVersion(native.previousActiveRoot),
+          native.activeRoot,
+        ),
       },
       nativeRun,
     );
@@ -3377,10 +3428,11 @@ function rollbackNativeRegistration(
   }
   const state = inspectClaudeManagedRuntimeRegistration(
     executable,
-    {
-      activeRoot: native.activeRoot,
-      receiptPath: native.receiptPath,
-    },
+    claudeNativeRegistration(
+      native.activeRoot,
+      native.receiptPath,
+      HARNESS_VERSION,
+    ),
     nativeRun,
   );
   if (state.plugin === "collision" || state.marketplace === "collision") {
@@ -3583,10 +3635,11 @@ function prepareActionRollback(
         runCommand(command, args, options);
       const state = inspectClaudeManagedRuntimeRegistration(
         executable,
-        {
-          activeRoot: previousActiveRoot,
-          receiptPath: model.receiptPath,
-        },
+        claudeNativeRegistration(
+          previousActiveRoot,
+          model.receiptPath,
+          claudeManagedPluginVersion(previousActiveRoot),
+        ),
         nativeRun,
       );
       if (
@@ -3608,10 +3661,11 @@ function prepareActionRollback(
         runCommand(command, args, options);
       const state = inspectClaudeManagedRuntimeRegistration(
         executable,
-        {
-          activeRoot: model.managedPayload.activeRoot,
-          receiptPath: model.receiptPath,
-        },
+        claudeNativeRegistration(
+          model.managedPayload.activeRoot,
+          model.receiptPath,
+          HARNESS_VERSION,
+        ),
         nativeRun,
       );
       const disposition = managedRuntimeRegistrationDisposition(state);
@@ -4407,13 +4461,14 @@ function nativeDoctorIssues(
         continue;
       }
       const executable = runtimeExecutable(runtimeId, model, options);
-      const registration = {
-        activeRoot: model.managedPayload.activeRoot,
-        receiptPath: model.receiptPath,
-      };
       const nativeRun = (command: string, args: readonly string[]) =>
         runCommand(command, args, options);
       if (runtimeId === "claude-code") {
+        const registration = claudeNativeRegistration(
+          model.managedPayload.activeRoot,
+          model.receiptPath,
+          HARNESS_VERSION,
+        );
         const expectedOfficialPlugins =
           model.officialMarketplace.state === "ready"
             ? model.officialMarketplace.plugins.filter(({ capabilityId }) =>
@@ -4450,6 +4505,10 @@ function nativeDoctorIssues(
         }
         continue;
       }
+      const registration = {
+        activeRoot: model.managedPayload.activeRoot,
+        receiptPath: model.receiptPath,
+      };
       if (!codexRegistrationReady(executable, registration, nativeRun)) {
         issues.push("native:codex:registration-drift");
       }

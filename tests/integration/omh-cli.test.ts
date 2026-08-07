@@ -25,6 +25,7 @@ import { inspectCodexManagedRuntimeRegistration } from "../../dist/environment/n
 import {
   hashManagedDirectory,
   inspectManagedRuntimePayload,
+  materializeManagedRuntimePayload,
 } from "../../dist/install/managed-payload.js";
 import { gitTreeSha1 } from "../../dist/install/official-marketplace.js";
 import { StalePreviewError } from "../../dist/planning/apply.js";
@@ -464,6 +465,19 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           const selector = args[2];
           if (selector === "oh-my-harness@oh-my-harness") {
             pluginInstalled = true;
+            assert.ok(managedMarketplaceRoot);
+            managedPluginVersion = JSON.parse(
+              readFileSync(
+                join(
+                  managedMarketplaceRoot,
+                  "plugins",
+                  "oh-my-harness",
+                  ".claude-plugin",
+                  "plugin.json",
+                ),
+                "utf8",
+              ),
+            ).version as string;
           } else if (selector !== undefined) {
             officialInstalled.add(selector);
           }
@@ -929,6 +943,18 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         join(payloadRoot, "plugins", "oh-my-harness"),
         { recursive: true },
       );
+      if (agentId === "claude-code") {
+        const manifestPath = join(
+          payloadRoot,
+          "plugins",
+          "oh-my-harness",
+          ".claude-plugin",
+          "plugin.json",
+        );
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.version = "0.3.1";
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      }
       const receiptPath = writePreviousManagedReceipt(
         stateRoot,
         payloadRoot,
@@ -1079,11 +1105,103 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
         managedMarketplaceRoot = payloadRoot;
         marketplaces.set("oh-my-harness", payloadRoot);
         pluginInstalled = true;
+        managedPluginVersion = "0.3.1";
       },
       () => {
         pluginInstalled = false;
         managedMarketplaceRoot = null;
+        managedPluginVersion = "0.3.2";
         marketplaces.delete("oh-my-harness");
+      },
+    );
+
+    await t.test(
+      "clean Claude apply upgrades a receipt-owned v0.3.1 registration to v0.3.2",
+      async () => {
+        const stateRoot = join(
+          realpathSync(root),
+          "claude-v0.3.1-upgrade-state",
+        );
+        const currentPayload = inspectManagedRuntimePayload(
+          repositoryRoot,
+          stateRoot,
+        );
+        materializeManagedRuntimePayload(currentPayload);
+        const previousRoot = join(
+          stateRoot,
+          "payloads",
+          "generations",
+          "previous",
+        );
+        cpSync(
+          currentPayload.activeRoot,
+          previousRoot,
+          { recursive: true },
+        );
+        const previousManifestPath = join(
+          previousRoot,
+          "plugins",
+          "oh-my-harness",
+          ".claude-plugin",
+          "plugin.json",
+        );
+        const previousManifest = JSON.parse(
+          readFileSync(previousManifestPath, "utf8"),
+        );
+        previousManifest.version = "0.3.1";
+        writeFileSync(
+          previousManifestPath,
+          `${JSON.stringify(previousManifest, null, 2)}\n`,
+        );
+        writePreviousManagedReceipt(
+          stateRoot,
+          previousRoot,
+          "claude-code",
+          hostCatalogRevision,
+        );
+        managedMarketplaceRoot = previousRoot;
+        marketplaces.set("oh-my-harness", previousRoot);
+        pluginInstalled = true;
+        managedPluginVersion = "0.3.1";
+
+        const selection = {
+          clean: true,
+          profileId: "mds-host",
+          selectedAgents: ["claude-code"],
+          selectedPackages: [],
+          stateRoot,
+        } as const;
+        try {
+          const preview = previewEnvironment(selection, commonOptions);
+          assert.equal(
+            preview.readiness,
+            "preview",
+            JSON.stringify(preview, null, 2),
+          );
+          assert.ok(preview.digest);
+          const applied = await applyEnvironment(
+            selection,
+            preview.digest,
+            commonOptions,
+          );
+          assert.equal(
+            applied.result.status,
+            "ready",
+            applied.result.failure,
+          );
+          assert.equal(managedPluginVersion, "0.3.2");
+          assert.equal(
+            managedMarketplaceRoot,
+            inspectManagedRuntimePayload(repositoryRoot, stateRoot).activeRoot,
+          );
+        } finally {
+          pluginInstalled = false;
+          managedMarketplaceRoot = null;
+          managedPluginVersion = "0.3.2";
+          marketplaces.clear();
+          officialInstalled.clear();
+          calls.splice(0);
+        }
       },
     );
 
