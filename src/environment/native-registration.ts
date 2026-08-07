@@ -49,11 +49,24 @@ export interface ManagedNativeRegistration {
   readonly receiptPath: string;
 }
 
-export interface ClaudeManagedNativeRegistration
-  extends ManagedNativeRegistration {
+interface ClaudeManagedNativeRegistrationBase {
+  readonly activeRoot: string;
   readonly expectedVersion: string;
-  readonly previousExpectedVersion?: string;
+  readonly receiptPath: string;
 }
+
+export type ClaudeManagedNativeRegistration =
+  & ClaudeManagedNativeRegistrationBase
+  & (
+    | {
+        readonly previousActiveRoot?: never;
+        readonly previousExpectedVersion?: never;
+      }
+    | {
+        readonly previousActiveRoot: string;
+        readonly previousExpectedVersion: string;
+      }
+  );
 
 export interface ClaudeOfficialMarketplaceRegistration {
   readonly name: string;
