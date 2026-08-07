@@ -130,7 +130,12 @@ test("clean preview carries the prior payload root only for previously managed r
     );
 
     assert.equal(openCodeAction?.payload?.previousActiveRoot, previousActiveRoot);
+    assert.equal(
+      openCodeAction?.payload?.previousPayloadDigest,
+      hashManagedDirectory(previousActiveRoot),
+    );
     assert.equal(codexAction?.payload?.previousActiveRoot, undefined);
+    assert.equal(codexAction?.payload?.previousPayloadDigest, undefined);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
@@ -249,6 +254,7 @@ test("clean preview accepts an exact receipt-owned current payload", () => {
       ({ id }) => id === "runtime:opencode:native",
     );
     assert.equal(openCodeAction?.payload?.previousActiveRoot, undefined);
+    assert.equal(openCodeAction?.payload?.previousPayloadDigest, undefined);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

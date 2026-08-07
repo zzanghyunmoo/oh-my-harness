@@ -1220,6 +1220,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           "claude-code",
           hostCatalogRevision,
         );
+        const previousPayloadDigest = hashManagedDirectory(previousRoot);
         const previousReceiptBytes = readFileSync(previousReceiptPath, "utf8");
         managedMarketplaceRoot = previousRoot;
         marketplaces.set("oh-my-harness", previousRoot);
@@ -1306,11 +1307,47 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           const driftedJournal = JSON.parse(readFileSync(
             join(stateRoot, "journal", "apply.json"),
             "utf8",
-          )) as { pendingRecoveries: unknown[] };
+          )) as {
+            pendingRecoveries: Array<{
+              payload: {
+                native: { previousPayloadDigest?: string };
+              };
+            }>;
+          };
           assert.equal(driftedJournal.pendingRecoveries.length > 0, true);
+          assert.equal(
+            driftedJournal.pendingRecoveries[0]?.payload.native
+              .previousPayloadDigest,
+            previousPayloadDigest,
+          );
 
           managedUpgradeDrift = undefined;
+          const driftedReceipt = JSON.parse(
+            readFileSync(previousReceiptPath, "utf8"),
+          ) as {
+            ownership: Array<{ digest: string; id: string }>;
+          };
+          const driftedPayloadOwnership = driftedReceipt.ownership.find(
+            ({ id }) => id === "plugin:runtime-package",
+          );
+          assert.ok(driftedPayloadOwnership);
+          driftedPayloadOwnership.digest = hashManagedDirectory(previousRoot);
+          writeFileSync(
+            previousReceiptPath,
+            `${JSON.stringify(driftedReceipt, null, 2)}\n`,
+          );
+          await assert.rejects(
+            applyEnvironment(
+              selection,
+              "0".repeat(64),
+              commonOptions,
+            ),
+            /interrupted apply recovery failed for runtime:claude-code:native: Claude prior runtime recovery digest changed/u,
+          );
+          assert.equal(managedPluginVersion, "0.3.2");
+
           rmSync(join(previousRoot, "post-capture-drift.txt"));
+          writeFileSync(previousReceiptPath, previousReceiptBytes);
           await assert.rejects(
             applyEnvironment(
               selection,
