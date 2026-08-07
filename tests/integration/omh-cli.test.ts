@@ -242,6 +242,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   let managedMarketplaceRoot: string | null = null;
   let codexManagedMarketplaceRoot: string | null = null;
   let codexPluginInstalled = false;
+  let managedUpgradeDrift: (() => void) | undefined;
   const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
 
@@ -478,6 +479,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
                 "utf8",
               ),
             ).version as string;
+            managedUpgradeDrift?.();
           } else if (selector !== undefined) {
             officialInstalled.add(selector);
           }
@@ -1099,6 +1101,65 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     managedMarketplaceRoot = null;
     marketplaces.delete("oh-my-harness");
 
+    await t.test(
+      "clean Claude preview rejects an exact receipt payload outside its state root without mutation",
+      () => {
+        const stateRoot = join(realpathSync(root), "outside-predecessor-state");
+        const outsideRoot = join(realpathSync(root), "outside-predecessor-payload");
+        const currentPayload = inspectManagedRuntimePayload(
+          repositoryRoot,
+          stateRoot,
+        );
+        materializeManagedRuntimePayload(currentPayload);
+        cpSync(currentPayload.activeRoot, outsideRoot, { recursive: true });
+        const manifestPath = join(
+          outsideRoot,
+          "plugins",
+          "oh-my-harness",
+          ".claude-plugin",
+          "plugin.json",
+        );
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.version = "0.3.1";
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        writePreviousManagedReceipt(
+          stateRoot,
+          outsideRoot,
+          "claude-code",
+          hostCatalogRevision,
+        );
+        managedMarketplaceRoot = outsideRoot;
+        marketplaces.set("oh-my-harness", outsideRoot);
+        pluginInstalled = true;
+        managedPluginVersion = "0.3.1";
+        const mutationsBefore = mutationCount();
+        try {
+          const preview = previewEnvironment(
+            {
+              clean: true,
+              profileId: "mds-host",
+              selectedAgents: ["claude-code"],
+              selectedPackages: [],
+              stateRoot,
+            },
+            commonOptions,
+          );
+          assert.equal(preview.readiness, "blocked");
+          assert.equal(preview.plan, null);
+          assert.equal(
+            preview.blockers.includes("native-registration:claude-code"),
+            true,
+          );
+          assert.equal(mutationCount(), mutationsBefore);
+        } finally {
+          pluginInstalled = false;
+          managedMarketplaceRoot = null;
+          managedPluginVersion = "0.3.2";
+          marketplaces.delete("oh-my-harness");
+        }
+      },
+    );
+
     verifyPreviousNativePreview(
       "claude-code",
       (payloadRoot) => {
@@ -1220,6 +1281,52 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           )) as { pendingRecoveries: unknown[] };
           assert.deepEqual(failedJournal.pendingRecoveries, []);
 
+          managedUpgradeDrift = () => {
+            writeFileSync(
+              join(previousRoot, "post-capture-drift.txt"),
+              "drift\n",
+            );
+          };
+          const driftPreview = previewEnvironment(
+            failureSelection,
+            commonOptions,
+          );
+          assert.ok(driftPreview.digest);
+          const drifted = await applyEnvironment(
+            failureSelection,
+            driftPreview.digest,
+            commonOptions,
+          );
+          assert.equal(drifted.result.status, "partial-unready");
+          assert.match(
+            drifted.result.failure ?? "",
+            /rollback failed: runtime:claude-code:native: Claude prior runtime recovery identity changed/u,
+          );
+          assert.equal(managedPluginVersion, "0.3.2");
+          const driftedJournal = JSON.parse(readFileSync(
+            join(stateRoot, "journal", "apply.json"),
+            "utf8",
+          )) as { pendingRecoveries: unknown[] };
+          assert.equal(driftedJournal.pendingRecoveries.length > 0, true);
+
+          managedUpgradeDrift = undefined;
+          rmSync(join(previousRoot, "post-capture-drift.txt"));
+          await assert.rejects(
+            applyEnvironment(
+              selection,
+              "0".repeat(64),
+              commonOptions,
+            ),
+            StalePreviewError,
+          );
+          assert.equal(managedMarketplaceRoot, previousRoot);
+          assert.equal(managedPluginVersion, "0.3.1");
+          const recoveredJournal = JSON.parse(readFileSync(
+            join(stateRoot, "journal", "apply.json"),
+            "utf8",
+          )) as { pendingRecoveries: unknown[] };
+          assert.deepEqual(recoveredJournal.pendingRecoveries, []);
+
           const preview = previewEnvironment(selection, commonOptions);
           assert.equal(
             preview.readiness,
@@ -1246,6 +1353,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           pluginInstalled = false;
           managedMarketplaceRoot = null;
           managedPluginVersion = "0.3.2";
+          managedUpgradeDrift = undefined;
           marketplaces.clear();
           officialInstalled.clear();
           calls.splice(0);

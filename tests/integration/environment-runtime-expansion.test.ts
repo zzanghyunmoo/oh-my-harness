@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadCatalogBundle } from "../../dist/catalog/load.js";
 import { previewEnvironment } from "../../dist/environment/orchestrator.js";
+import { hashManagedDirectory } from "../../dist/install/managed-payload.js";
 import { createTrustedWindowsToolPath } from "../support/trusted-windows-tools.js";
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -27,6 +28,7 @@ test("clean preview carries the prior payload root only for previously managed r
   try {
     const trustedTools = createTrustedWindowsToolPath(root);
     mkdirSync(receiptRoot, { recursive: true });
+    mkdirSync(previousActiveRoot, { recursive: true });
     const catalog = loadCatalogBundle(REPOSITORY_ROOT);
     writeFileSync(
       join(receiptRoot, "environment.json"),
@@ -53,7 +55,7 @@ test("clean preview carries the prior payload root only for previously managed r
         },
         ownership: [
           {
-            digest: "a".repeat(64),
+            digest: hashManagedDirectory(previousActiveRoot),
             id: "plugin:runtime-package",
             kind: "directory",
             scope: "managed",

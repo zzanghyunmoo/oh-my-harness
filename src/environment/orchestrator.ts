@@ -1192,26 +1192,45 @@ function previousManagedPayloadRoot(
   runtimeId: AgentId,
 ): string | null {
   if (!model.clean || model.currentReceipt === null) return null;
-  const runtimeOwnership = model.currentReceipt.ownership.find(
+  const runtimeOwnership = model.currentReceipt.ownership.filter(
     ({ id, kind, scope }) =>
       id === `runtime:${runtimeId}:native`
       && kind === "registration"
       && scope === "managed",
   );
-  if (runtimeOwnership === undefined) return null;
-  const ownership = model.currentReceipt.ownership.find(
+  if (runtimeOwnership.length !== 1) return null;
+  const payloadOwnership = model.currentReceipt.ownership.filter(
     ({ id, kind, scope }) =>
       id === "plugin:runtime-package"
       && kind === "directory"
       && scope === "managed",
   );
+  const ownership = payloadOwnership[0];
   if (
-    ownership === undefined
+    payloadOwnership.length !== 1
+    || ownership === undefined
     || resolve(ownership.target) === resolve(model.managedPayload.activeRoot)
+    || !existsSync(ownership.target)
+    || !ownedTargetStaysWithinStateRoot(model.stateRoot, ownership.target)
+    || !ownedContentMatches(ownership)
   ) {
     return null;
   }
   return ownership.target;
+}
+
+function hasManagedNativeRuntimeOwnership(
+  model: EnvironmentModel,
+  runtimeId: AgentId,
+): boolean {
+  return model.clean
+    && model.currentReceipt !== null
+    && model.currentReceipt.ownership.filter(
+      ({ id, kind, scope }) =>
+        id === `runtime:${runtimeId}:native`
+        && kind === "registration"
+        && scope === "managed",
+    ).length === 1;
 }
 
 function claudeNativeRegistration(
@@ -1335,6 +1354,22 @@ function nativeRuntimePreflights(
 ): PlanPreflight[] {
   return model.selectedAgents.flatMap((runtimeId): PlanPreflight[] => {
     const previousActiveRoot = previousManagedPayloadRoot(model, runtimeId);
+    if (
+      previousActiveRoot === null
+      && hasManagedNativeRuntimeOwnership(model, runtimeId)
+    ) {
+      const runtimeName = runtimeId === "claude-code"
+        ? "Claude"
+        : runtimeId === "codex"
+          ? "Codex"
+          : "OpenCode";
+      return [{
+        detail: `${runtimeName} registration no longer has an exact receipt-owned prior payload`,
+        id: `native-registration:${runtimeId}`,
+        required: true,
+        status: "unverifiable",
+      }];
+    }
     if (runtimeId === "opencode") {
       const state = inspectOpenCodeManagedRuntimeRegistration(
         {
@@ -2654,6 +2689,22 @@ async function executeAction(
       runCommand(command, args, options);
     assertManagedPayloadExact(model.managedPayload);
     if (rawId === "claude-code") {
+      const expectedPrevious = previousManagedPayloadRoot(
+        model,
+        "claude-code",
+      );
+      if (
+        (registration.previousActiveRoot === undefined)
+          !== (expectedPrevious === null)
+        || (
+          registration.previousActiveRoot !== undefined
+          && expectedPrevious !== null
+          && resolve(registration.previousActiveRoot)
+            !== resolve(expectedPrevious)
+        )
+      ) {
+        throw new Error("Claude prior managed payload identity changed");
+      }
       registerClaudeRuntime(
         executable,
         claudeNativeRegistration(
