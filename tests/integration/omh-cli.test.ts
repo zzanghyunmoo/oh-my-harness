@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { formatOmhResult, runOmh } from "../../dist/cli/main.js";
 import {
@@ -176,7 +177,7 @@ function createOfficialMarketplaceFixture(
 function writePreviousManagedReceipt(
   stateRoot: string,
   payloadRoot: string,
-  agentId: "claude-code" | "codex",
+  agentId: "claude-code" | "codex" | "opencode",
   catalogRevision: string,
 ): string {
   const receiptPath = join(stateRoot, "receipts", "environment.json");
@@ -242,6 +243,8 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   let managedMarketplaceRoot: string | null = null;
   let codexManagedMarketplaceRoot: string | null = null;
   let codexPluginInstalled = false;
+  let codexFailureHook: (() => void) | undefined;
+  let managedUpgradeInspectionHook: (() => void) | undefined;
   let managedUpgradeDrift: (() => void) | undefined;
   const marketplaces = new Map<string, string>();
   const officialInstalled = new Set<string>();
@@ -412,6 +415,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
             codexManagedMarketplaceRoot = null;
             return "{}";
           }
+          codexFailureHook?.();
           throw new Error(`unexpected Codex mutation: ${invocation}`);
         }
         if (invocation === "plugin marketplace list --json") {
@@ -441,7 +445,9 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
               version: managedPluginVersion,
             });
           }
-          return JSON.stringify(plugins);
+          const result = JSON.stringify(plugins);
+          managedUpgradeInspectionHook?.();
+          return result;
         }
         if (invocation.startsWith("plugin marketplace add ")) {
           const marketplaceRoot = args[3];
@@ -1282,6 +1288,48 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           )) as { pendingRecoveries: unknown[] };
           assert.deepEqual(failedJournal.pendingRecoveries, []);
 
+          const executeGuardPreview = previewEnvironment(
+            failureSelection,
+            commonOptions,
+          );
+          assert.ok(executeGuardPreview.digest);
+          let inspectionCount = 0;
+          const executeDriftPath = join(
+            previousRoot,
+            "pre-execute-drift.txt",
+          );
+          managedUpgradeInspectionHook = () => {
+            inspectionCount += 1;
+            if (inspectionCount === 2) {
+              queueMicrotask(() => {
+                writeFileSync(executeDriftPath, "drift\n");
+              });
+            }
+          };
+          const executeDrifted = await applyEnvironment(
+            failureSelection,
+            executeGuardPreview.digest,
+            commonOptions,
+          );
+          assert.equal(executeDrifted.result.status, "partial-unready");
+          assert.match(
+            executeDrifted.result.failure ?? "",
+            /claude-code prior managed payload identity changed/u,
+          );
+          assert.equal(managedMarketplaceRoot, previousRoot);
+          assert.equal(pluginInstalled, true);
+          assert.equal(managedPluginVersion, "0.3.1");
+          managedUpgradeInspectionHook = undefined;
+          rmSync(executeDriftPath);
+          await assert.rejects(
+            applyEnvironment(
+              selection,
+              "0".repeat(64),
+              commonOptions,
+            ),
+            StalePreviewError,
+          );
+
           managedUpgradeDrift = () => {
             writeFileSync(
               join(previousRoot, "post-capture-drift.txt"),
@@ -1304,10 +1352,9 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
             /rollback failed: runtime:claude-code:native: Claude prior runtime recovery identity changed/u,
           );
           assert.equal(managedPluginVersion, "0.3.2");
-          const driftedJournal = JSON.parse(readFileSync(
-            join(stateRoot, "journal", "apply.json"),
-            "utf8",
-          )) as {
+          const driftedJournalPath = join(stateRoot, "journal", "apply.json");
+          const driftedJournalBytes = readFileSync(driftedJournalPath, "utf8");
+          const driftedJournal = JSON.parse(driftedJournalBytes) as {
             pendingRecoveries: Array<{
               payload: {
                 native: { previousPayloadDigest?: string };
@@ -1322,6 +1369,23 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           );
 
           managedUpgradeDrift = undefined;
+          delete driftedJournal.pendingRecoveries[0]?.payload.native
+            .previousPayloadDigest;
+          writeFileSync(
+            driftedJournalPath,
+            `${JSON.stringify(driftedJournal, null, 2)}\n`,
+          );
+          await assert.rejects(
+            applyEnvironment(
+              selection,
+              "0".repeat(64),
+              commonOptions,
+            ),
+            /invalid native recovery record: runtime:claude-code:native/u,
+          );
+          assert.equal(managedPluginVersion, "0.3.2");
+          writeFileSync(driftedJournalPath, driftedJournalBytes);
+
           const driftedReceipt = JSON.parse(
             readFileSync(previousReceiptPath, "utf8"),
           ) as {
@@ -1390,10 +1454,122 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           pluginInstalled = false;
           managedMarketplaceRoot = null;
           managedPluginVersion = "0.3.2";
+          managedUpgradeInspectionHook = undefined;
           managedUpgradeDrift = undefined;
           marketplaces.clear();
           officialInstalled.clear();
           calls.splice(0);
+        }
+      },
+    );
+
+    await t.test(
+      "clean OpenCode rollback rejects a drifted receipt-owned predecessor",
+      async () => {
+        const stateRoot = join(
+          realpathSync(root),
+          "opencode-predecessor-rollback-state",
+        );
+        const currentPayload = inspectManagedRuntimePayload(
+          repositoryRoot,
+          stateRoot,
+        );
+        materializeManagedRuntimePayload(currentPayload);
+        const previousRoot = join(
+          stateRoot,
+          "payloads",
+          "generations",
+          "previous",
+        );
+        cpSync(currentPayload.activeRoot, previousRoot, { recursive: true });
+        writePreviousManagedReceipt(
+          stateRoot,
+          previousRoot,
+          "opencode",
+          hostCatalogRevision,
+        );
+        const upgradeOpenCodeConfigPath = join(
+          env.XDG_CONFIG_HOME,
+          "opencode",
+          "opencode.json",
+        );
+        const previousPluginUrl = pathToFileURL(join(
+          previousRoot,
+          ".opencode",
+          "plugins",
+          "oh-my-harness.js",
+        )).href;
+        const currentPluginUrl = pathToFileURL(join(
+          currentPayload.activeRoot,
+          ".opencode",
+          "plugins",
+          "oh-my-harness.js",
+        )).href;
+        mkdirSync(dirname(upgradeOpenCodeConfigPath), { recursive: true });
+        writeFileSync(
+          upgradeOpenCodeConfigPath,
+          `${JSON.stringify({ plugin: [previousPluginUrl] }, null, 2)}\n`,
+        );
+        const selection = {
+          clean: true,
+          profileId: "mds-host",
+          selectedAgents: ["opencode"],
+          selectedPackages: [],
+          stateRoot,
+        } as const;
+        const failureSelection = {
+          ...selection,
+          selectedAgents: ["opencode", "codex"],
+        } as const;
+        const preview = previewEnvironment(failureSelection, commonOptions);
+        assert.ok(preview.plan, preview.blockers.join(", "));
+        assert.ok(preview.digest);
+        const openCodeActionIndex = preview.plan.actions.findIndex(
+          ({ id }) => id === "runtime:opencode:native",
+        );
+        const codexActionIndex = preview.plan.actions.findIndex(
+          ({ id }) => id === "runtime:codex:native",
+        );
+        assert.equal(openCodeActionIndex >= 0, true);
+        assert.equal(codexActionIndex > openCodeActionIndex, true);
+        const driftPath = join(previousRoot, "post-capture-drift.txt");
+        codexFailureHook = () => writeFileSync(driftPath, "drift\n");
+        try {
+          const failed = await applyEnvironment(
+            failureSelection,
+            preview.digest,
+            commonOptions,
+          );
+          assert.equal(failed.result.status, "partial-unready");
+          assert.match(
+            failed.result.failure ?? "",
+            /rollback failed: runtime:opencode:native: OpenCode prior runtime recovery identity changed/u,
+          );
+          const failedConfig = JSON.parse(
+            readFileSync(upgradeOpenCodeConfigPath, "utf8"),
+          ) as { plugin: string[] };
+          assert.deepEqual(failedConfig.plugin, [currentPluginUrl]);
+
+          codexFailureHook = undefined;
+          rmSync(driftPath);
+          await assert.rejects(
+            applyEnvironment(
+              selection,
+              "0".repeat(64),
+              commonOptions,
+            ),
+            StalePreviewError,
+          );
+          const recoveredConfig = JSON.parse(
+            readFileSync(upgradeOpenCodeConfigPath, "utf8"),
+          ) as { plugin: string[] };
+          assert.deepEqual(recoveredConfig.plugin, [previousPluginUrl]);
+        } finally {
+          codexFailureHook = undefined;
+          codexManagedMarketplaceRoot = null;
+          codexPluginInstalled = false;
+          calls.splice(0);
+          rmSync(upgradeOpenCodeConfigPath, { force: true });
         }
       },
     );

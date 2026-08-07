@@ -2802,7 +2802,7 @@ type EnvironmentNativeRecovery =
       readonly executablePath: string;
       readonly kind: "claude-runtime-previous";
       readonly previousActiveRoot: string;
-      readonly previousPayloadDigest?: string;
+      readonly previousPayloadDigest: string;
       readonly receiptPath: string;
     }
   | {
@@ -2822,7 +2822,14 @@ type EnvironmentNativeRecovery =
       readonly executablePath: string;
       readonly kind: "codex-runtime-previous";
       readonly previousActiveRoot: string;
-      readonly previousPayloadDigest?: string;
+      readonly previousPayloadDigest: string;
+      readonly receiptPath: string;
+    }
+  | {
+      readonly activeRoot: string;
+      readonly kind: "opencode-runtime-previous";
+      readonly previousActiveRoot: string;
+      readonly previousPayloadDigest: string;
       readonly receiptPath: string;
     }
   | {
@@ -2989,6 +2996,7 @@ function validatedNativeRecovery(
       "executablePath",
       "kind",
       "previousActiveRoot",
+      "previousPayloadDigest",
       "receiptPath",
     ],
     "codex-runtime-absent": [
@@ -3002,6 +3010,14 @@ function validatedNativeRecovery(
       "executablePath",
       "kind",
       "previousActiveRoot",
+      "previousPayloadDigest",
+      "receiptPath",
+    ],
+    "opencode-runtime-previous": [
+      "activeRoot",
+      "kind",
+      "previousActiveRoot",
+      "previousPayloadDigest",
       "receiptPath",
     ],
     "codex-addon-both-absent": [
@@ -3017,17 +3033,7 @@ function validatedNativeRecovery(
       "selector",
     ],
   };
-  const baseExpectedKeys = keySets[String(kind)];
-  const expectedKeys = baseExpectedKeys === undefined
-    ? undefined
-    : (
-        ["claude-runtime-previous", "codex-runtime-previous"].includes(
-          String(kind),
-        )
-        && native.previousPayloadDigest !== undefined
-      )
-      ? [...baseExpectedKeys, "previousPayloadDigest"]
-      : baseExpectedKeys;
+  const expectedKeys = keySets[String(kind)];
   if (
     expectedKeys === undefined
     || !recoveryKeysMatch(native, expectedKeys)
@@ -3292,6 +3298,25 @@ function rollbackNativeRegistration(
   options: ReturnType<typeof normalizedOptions>,
 ): void {
   if (native === null) return;
+  if (native.kind === "opencode-runtime-previous") {
+    if (
+      resolve(native.activeRoot) !== resolve(model.managedPayload.activeRoot)
+      || resolve(native.receiptPath) !== resolve(model.receiptPath)
+    ) {
+      throw new Error("OpenCode runtime recovery identity changed");
+    }
+    const expectedPrevious = previousManagedPayloadIdentity(model, "opencode");
+    if (
+      expectedPrevious === null
+      || resolve(expectedPrevious.root) !== resolve(native.previousActiveRoot)
+    ) {
+      throw new Error("OpenCode prior runtime recovery identity changed");
+    }
+    if (native.previousPayloadDigest !== expectedPrevious.digest) {
+      throw new Error("OpenCode prior runtime recovery digest changed");
+    }
+    return;
+  }
   if (
     native.kind === "codex-addon-both-absent"
     || native.kind === "codex-addon-plugin-absent"
@@ -3387,10 +3412,7 @@ function rollbackNativeRegistration(
       ) {
         throw new Error("Codex prior runtime recovery identity changed");
       }
-      if (
-        native.previousPayloadDigest !== undefined
-        && native.previousPayloadDigest !== expectedPrevious.digest
-      ) {
+      if (native.previousPayloadDigest !== expectedPrevious.digest) {
         throw new Error("Codex prior runtime recovery digest changed");
       }
       registerCodexRuntime(
@@ -3514,10 +3536,7 @@ function rollbackNativeRegistration(
     ) {
       throw new Error("Claude prior runtime recovery identity changed");
     }
-    if (
-      native.previousPayloadDigest !== undefined
-      && native.previousPayloadDigest !== expectedPrevious.digest
-    ) {
+    if (native.previousPayloadDigest !== expectedPrevious.digest) {
       throw new Error("Claude prior runtime recovery digest changed");
     }
     if (
@@ -3590,9 +3609,14 @@ function recoverEnvironmentAction(
     assertRecoveryAlreadyRestored(payload);
     return;
   }
+  if (payload.native?.kind === "opencode-runtime-previous") {
+    rollbackNativeRegistration(payload.native, model, options);
+  }
   const failures: unknown[] = [];
   try {
-    rollbackNativeRegistration(payload.native, model, options);
+    if (payload.native?.kind !== "opencode-runtime-previous") {
+      rollbackNativeRegistration(payload.native, model, options);
+    }
   } catch (error) {
     failures.push(error);
   }
@@ -3889,6 +3913,39 @@ function prepareActionRollback(
           receiptPath: model.receiptPath,
         };
       }
+    }
+  } else if (
+    operation === "register-runtime"
+    && action.payload?.runtimeId === "opencode"
+  ) {
+    const previousActiveRoot = typeof action.payload.previousActiveRoot === "string"
+      ? payloadString(action, "previousActiveRoot")
+      : null;
+    if (previousActiveRoot !== null) {
+      const previousPayloadDigest = payloadString(
+        action,
+        "previousPayloadDigest",
+      );
+      const state = inspectOpenCodeManagedRuntimeRegistration(
+        {
+          activeRoot: model.managedPayload.activeRoot,
+          previousActiveRoot,
+        },
+        options.env,
+        options.os,
+      );
+      if (state !== "previous") {
+        throw new Error(
+          "OpenCode managed registration no longer matches the prior receipt",
+        );
+      }
+      native = {
+        activeRoot: model.managedPayload.activeRoot,
+        kind: "opencode-runtime-previous",
+        previousActiveRoot,
+        previousPayloadDigest,
+        receiptPath: model.receiptPath,
+      };
     }
   } else if (operation === "register-claude-official") {
     const plugin = model.officialMarketplace.state === "ready"
