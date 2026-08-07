@@ -255,6 +255,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
       "plugins",
       "oh-my-harness",
     );
+    let installedVersion: string | undefined = "0.3.1";
     const calls: string[] = [];
     const run = (_command: string, args: readonly string[]) => {
       const invocation = args.join(" ");
@@ -275,7 +276,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
                 id: "oh-my-harness@oh-my-harness",
                 installPath: installedRoot,
                 scope: "user",
-                version: "0.3.2",
+                version: installedVersion,
               }],
         );
       }
@@ -284,6 +285,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
         === "plugin uninstall oh-my-harness@oh-my-harness --scope user"
       ) {
         installedRoot = undefined;
+        installedVersion = undefined;
         return "";
       }
       if (invocation === "plugin marketplace remove oh-my-harness") {
@@ -298,6 +300,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
         "plugin install oh-my-harness@oh-my-harness --scope user",
       )) {
         installedRoot = join(activeRoot, "plugins", "oh-my-harness");
+        installedVersion = "0.3.2";
         return "";
       }
       throw new Error(`unexpected command: ${invocation}`);
@@ -317,6 +320,7 @@ test("clean runtime registration replaces only the exact prior managed roots", (
       installedRoot,
       join(activeRoot, "plugins", "oh-my-harness"),
     );
+    assert.equal(installedVersion, "0.3.2");
     assert.equal(
       calls.includes("plugin marketplace remove oh-my-harness"),
       true,

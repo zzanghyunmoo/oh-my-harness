@@ -524,9 +524,13 @@ export function registerClaudeRuntime(
   }
   const plugin = selectorMatches.find((entry) => entry.scope === "user");
 
-  const pluginMatchesRoot = (root: string): boolean => {
+  const pluginMatchesRoot = (
+    root: string,
+    expectedVersion?: string,
+  ): boolean => {
     if (
-      plugin?.version !== HARNESS_VERSION
+      plugin === undefined
+      || (expectedVersion !== undefined && plugin.version !== expectedVersion)
       || plugin.enabled !== true
       || typeof plugin.installPath !== "string"
       || !isAbsolute(plugin.installPath)
@@ -574,7 +578,7 @@ export function registerClaudeRuntime(
   } else if (
     marketplaceSource !== null
     && plugin !== undefined
-    && !pluginMatchesRoot(registration.activeRoot)
+    && !pluginMatchesRoot(registration.activeRoot, HARNESS_VERSION)
   ) {
     throw new Error(`${selector} collides with an existing user-owned Claude plugin`);
   }
