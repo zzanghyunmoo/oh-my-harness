@@ -1187,18 +1187,10 @@ function compositionNodeTarget(stateRoot: string): string {
   return join(stateRoot, "external", "runtime", "node");
 }
 
-function previousManagedPayloadRoot(
+function exactReceiptManagedPayloadRoot(
   model: EnvironmentModel,
-  runtimeId: AgentId,
 ): string | null {
   if (!model.clean || model.currentReceipt === null) return null;
-  const runtimeOwnership = model.currentReceipt.ownership.filter(
-    ({ id, kind, scope }) =>
-      id === `runtime:${runtimeId}:native`
-      && kind === "registration"
-      && scope === "managed",
-  );
-  if (runtimeOwnership.length !== 1) return null;
   const payloadOwnership = model.currentReceipt.ownership.filter(
     ({ id, kind, scope }) =>
       id === "plugin:runtime-package"
@@ -1209,7 +1201,6 @@ function previousManagedPayloadRoot(
   if (
     payloadOwnership.length !== 1
     || ownership === undefined
-    || resolve(ownership.target) === resolve(model.managedPayload.activeRoot)
     || !existsSync(ownership.target)
     || !ownedTargetStaysWithinStateRoot(model.stateRoot, ownership.target)
     || !ownedContentMatches(ownership)
@@ -1217,6 +1208,18 @@ function previousManagedPayloadRoot(
     return null;
   }
   return ownership.target;
+}
+
+function previousManagedPayloadRoot(
+  model: EnvironmentModel,
+  runtimeId: AgentId,
+): string | null {
+  if (!hasManagedNativeRuntimeOwnership(model, runtimeId)) return null;
+  const payloadRoot = exactReceiptManagedPayloadRoot(model);
+  return payloadRoot === null
+      || resolve(payloadRoot) === resolve(model.managedPayload.activeRoot)
+    ? null
+    : payloadRoot;
 }
 
 function hasManagedNativeRuntimeOwnership(
@@ -1357,6 +1360,7 @@ function nativeRuntimePreflights(
     if (
       previousActiveRoot === null
       && hasManagedNativeRuntimeOwnership(model, runtimeId)
+      && exactReceiptManagedPayloadRoot(model) === null
     ) {
       const runtimeName = runtimeId === "claude-code"
         ? "Claude"
