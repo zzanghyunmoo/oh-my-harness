@@ -237,7 +237,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
   const stateRoot = join(root, "state");
   const calls: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
   let pluginInstalled = false;
-  let managedPluginVersion = "0.3.1";
+  let managedPluginVersion = "0.3.2";
   let managedMarketplaceRoot: string | null = null;
   let codexManagedMarketplaceRoot: string | null = null;
   let codexPluginInstalled = false;
@@ -1273,7 +1273,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     const collisionPreview = await runOmh(previewArgs, commonOptions);
     assertCliNativeRegistrationBlocked(collisionPreview, "claude-code");
     assert.equal(mutationCount(), mutationsAfterApply);
-    managedPluginVersion = "0.3.1";
+    managedPluginVersion = "0.3.2";
 
     const receiptPath = join(stateRoot, "receipts", "environment.json");
     assert.equal(existsSync(receiptPath), true);
