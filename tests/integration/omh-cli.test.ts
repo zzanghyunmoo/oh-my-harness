@@ -1116,7 +1116,7 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
     );
 
     await t.test(
-      "clean Claude apply upgrades a receipt-owned v0.3.1 registration to v0.3.2",
+      "clean Claude upgrade rolls back to v0.3.1 on a later failure and then converges to v0.3.2",
       async () => {
         const stateRoot = join(
           realpathSync(root),
@@ -1153,12 +1153,13 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           previousManifestPath,
           `${JSON.stringify(previousManifest, null, 2)}\n`,
         );
-        writePreviousManagedReceipt(
+        const previousReceiptPath = writePreviousManagedReceipt(
           stateRoot,
           previousRoot,
           "claude-code",
           hostCatalogRevision,
         );
+        const previousReceiptBytes = readFileSync(previousReceiptPath, "utf8");
         managedMarketplaceRoot = previousRoot;
         marketplaces.set("oh-my-harness", previousRoot);
         pluginInstalled = true;
@@ -1172,6 +1173,53 @@ test("U13 CLI closes preview, exact apply, receipt, status, and startup context 
           stateRoot,
         } as const;
         try {
+          const failureSelection = {
+            ...selection,
+            selectedAgents: ["claude-code", "codex"],
+          } as const;
+          const failurePreview = previewEnvironment(
+            failureSelection,
+            commonOptions,
+          );
+          assert.equal(
+            failurePreview.readiness,
+            "preview",
+            JSON.stringify(failurePreview, null, 2),
+          );
+          assert.ok(failurePreview.plan);
+          assert.ok(failurePreview.digest);
+          const claudeActionIndex = failurePreview.plan.actions.findIndex(
+            ({ id }) => id === "runtime:claude-code:native",
+          );
+          const codexActionIndex = failurePreview.plan.actions.findIndex(
+            ({ id }) => id === "runtime:codex:native",
+          );
+          assert.equal(claudeActionIndex >= 0, true);
+          assert.equal(codexActionIndex > claudeActionIndex, true);
+
+          const failed = await applyEnvironment(
+            failureSelection,
+            failurePreview.digest,
+            commonOptions,
+          );
+          assert.equal(failed.result.status, "partial-unready");
+          assert.match(
+            failed.result.failure ?? "",
+            /unexpected Codex mutation/u,
+          );
+          assert.equal(managedMarketplaceRoot, previousRoot);
+          assert.equal(managedPluginVersion, "0.3.1");
+          assert.equal(pluginInstalled, true);
+          assert.equal(
+            readFileSync(previousReceiptPath, "utf8"),
+            previousReceiptBytes,
+          );
+          const failedJournal = JSON.parse(readFileSync(
+            join(stateRoot, "journal", "apply.json"),
+            "utf8",
+          )) as { pendingRecoveries: unknown[] };
+          assert.deepEqual(failedJournal.pendingRecoveries, []);
+
           const preview = previewEnvironment(selection, commonOptions);
           assert.equal(
             preview.readiness,
